@@ -1,0 +1,393 @@
+#!/usr/bin/env node
+/**
+ * experience.cjs — 经验沉淀飞轮模块
+ *
+ * v2.0: 增强采集能力
+ *   - 去重键从 phase+failureType 改为 phase+failureType+rootCauseKey(前50字符)
+ *   - unknown 类型自动沉淀 + 标记需人工补录
+ *   - getLessonsForPhase 输出时区分 unknown 类型提醒
+ *
+ * 记录失败模式 + 注入历史教训到 Agent prompt
+ * 实现"执行→观测→评估→提纯→知识→门控"闭环
+ *
+ * @module experience
+ */
+
+const fs = require('fs')
+const path = require('path')
+const { getStoryDir } = require('../lib/state')
+
+/**
+ * 经验库根目录 — 全局跨项目共享
+ * 位于 ~/.codebuddy/experience/（与 scripts/ 同级）
+ * 理由: 失败模式（如 "task-dag 应用 title 而非 name"）是 Harness 流程本身的规范，
+ *       与具体项目无关，应在所有项目间共享。
+ */
+const EXPERIENCE_DIR = path.join(__dirname, '..', 'experience')
+
+/** 失败模式库文件 */
+const FAILURE_PATTERNS_FILE = path.join(EXPERIENCE_DIR, 'failure-patterns.json')
+
+/** 失败案例归档目录 */
+const FAILURES_ARCHIVE_DIR = path.join(EXPERIENCE_DIR, 'failures')
+
+/** 度量洞察库文件（跨项目共享） */
+const METRICS_INSIGHTS_FILE = path.join(EXPERIENCE_DIR, 'metrics-insights.json')
+
+/** rootCause 去重摘要长度 */
+const ROOT_CAUSE_KEY_LENGTH = 50
+
+/**
+ * 确保经验库目录结构存在
+ */
+function ensureExperienceDir () {
+  if (!fs.existsSync(EXPERIENCE_DIR)) {
+    fs.mkdirSync(EXPERIENCE_DIR, { recursive: true })
+  }
+  if (!fs.existsSync(FAILURES_ARCHIVE_DIR)) {
+    fs.mkdirSync(FAILURES_ARCHIVE_DIR, { recursive: true })
+  }
+}
+
+/**
+ * 读取失败模式库
+ * @returns {{ patterns: Array, version: string, lastUpdated: string }}
+ */
+function readFailurePatterns () {
+  ensureExperienceDir()
+  if (!fs.existsSync(FAILURE_PATTERNS_FILE)) {
+    return { patterns: [], version: '2.0', lastUpdated: new Date().toISOString() }
+  }
+  try {
+    return JSON.parse(fs.readFileSync(FAILURE_PATTERNS_FILE, 'utf-8'))
+  } catch (e) {
+    return { patterns: [], version: '2.0', lastUpdated: new Date().toISOString() }
+  }
+}
+
+/**
+ * 生成 rootCause 的去重摘要键（前 N 字符，忽略大小写和微小的文本差异）
+ * @param {string} rootCause - 原始根因文本
+ * @returns {string} 去重摘要键
+ */
+function rootCauseKey (rootCause) {
+  if (!rootCause) return ''
+  return rootCause.slice(0, ROOT_CAUSE_KEY_LENGTH).toLowerCase().trim()
+}
+
+/**
+ * 记录一条失败模式
+ * v2: 去重键从 phase+failureType 改为 phase+failureType+rootCauseKey，
+ *     同一类型不同根因不再被合并。unknown 类型标记 needsManualReview。
+ * @param {Object} pattern - 失败模式
+ * @param {number} pattern.phase - Phase 编号
+ * @param {string} pattern.failureType - 失败类型标识（如 'task_missing_title', 'unknown'）
+ * @param {string} pattern.rootCause - 根因描述
+ * @param {string} pattern.resolution - 解决方案
+ * @param {string} pattern.storyId - Story ID
+ * @param {string[]} [pattern.blockers] - 门控阻塞项
+ */
+function recordFailurePattern (pattern) {
+  ensureExperienceDir()
+  const data = readFailurePatterns()
+
+  // 去重: phase + failureType + rootCauseKey 三维去重
+  const rck = rootCauseKey(pattern.rootCause)
+  const existingIdx = data.patterns.findIndex(
+    p => p.phase === pattern.phase
+      && p.failureType === pattern.failureType
+      && rootCauseKey(p.rootCause) === rck
+  )
+
+  if (existingIdx >= 0) {
+    // 已存在 → 累计次数 + 更新方案
+    data.patterns[existingIdx].occurrences = (data.patterns[existingIdx].occurrences || 1) + 1
+    data.patterns[existingIdx].lastSeen = new Date().toISOString()
+    data.patterns[existingIdx].resolution = pattern.resolution // 更新为最新解决方案
+  } else {
+    // 新模式 → 首次记录
+    const isUnknown = pattern.failureType === 'unknown'
+    data.patterns.push({
+      ...pattern,
+      occurrences: 1,
+      firstSeen: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+      // unknown 类型标记需人工补录
+      needsManualReview: isUnknown || false,
+      reviewStatus: isUnknown ? 'pending' : 'confirmed'
+    })
+  }
+
+  data.lastUpdated = new Date().toISOString()
+  fs.writeFileSync(FAILURE_PATTERNS_FILE, JSON.stringify(data, null, 2), 'utf-8')
+}
+
+/**
+ * 获取针对指定 Phase 的历史教训（用于注入 Agent prompt）
+ * v2: 区分 unknown 类型，提醒需人工补录到 RECOVERY_SUGGESTIONS
+ * @param {number} phase - Phase 编号
+ * @returns {string} 注入到 prompt 的教训文本，无则返回空字符串
+ */
+function getLessonsForPhase (phase) {
+  const data = readFailurePatterns()
+  const relevant = data.patterns.filter(p => p.phase === phase)
+
+  if (relevant.length === 0) return ''
+
+  // 分为已确认和待审查两组
+  const confirmed = relevant.filter(p => !p.needsManualReview || p.reviewStatus === 'confirmed')
+  const pending = relevant.filter(p => p.needsManualReview && p.reviewStatus === 'pending')
+
+  const lines = confirmed.map(p => {
+    return `  ⚠️ 历史教训 (${p.occurrences}次): ${p.failureType}\n     根因: ${p.rootCause}\n     对策: ${p.resolution}`
+  })
+
+  // unknown 类型提醒人工补录
+  if (pending.length > 0) {
+    lines.push('')
+    lines.push(`  📋 待人工补录 (${pending.length} 条 unknown 模式):`)
+    for (const p of pending) {
+      lines.push(`     - failureType: unknown | 根因: ${p.rootCause.slice(0, 80)} | 出现 ${p.occurrences} 次`)
+    }
+    lines.push(`     → 请分析后补充到 policy.cjs RECOVERY_SUGGESTIONS 并设置 reviewStatus=confirmed`)
+  }
+
+  return `\n\n## 📚 历史经验教训 (Phase ${phase})\n以下问题曾在历史 Story 中出现，请注意避免:\n${lines.join('\n')}\n`
+}
+
+/**
+ * 归档失败案例（工作流失败时调用）
+ * @param {string} storyId - Story ID
+ * @param {Object} state - 最终状态快照
+ * @param {string} failureAnalysis - 根因分析文本
+ */
+function archiveFailureCase (storyId, state, failureAnalysis) {
+  ensureExperienceDir()
+  const archiveDir = path.join(FAILURES_ARCHIVE_DIR, storyId)
+  fs.mkdirSync(archiveDir, { recursive: true })
+
+  // 归档状态快照
+  fs.writeFileSync(
+    path.join(archiveDir, 'e2e-state.snapshot.json'),
+    JSON.stringify(state, null, 2),
+    'utf-8'
+  )
+
+  // 归档失败分析
+  fs.writeFileSync(
+    path.join(archiveDir, 'failure-analysis.md'),
+    failureAnalysis,
+    'utf-8'
+  )
+
+  // 归档 trace（如果存在）
+  const traceFile = path.join(getStoryDir(storyId), 'trace.jsonl')
+  if (fs.existsSync(traceFile)) {
+    fs.copyFileSync(traceFile, path.join(archiveDir, 'trace.jsonl'))
+  }
+
+  // 归档时间戳
+  fs.writeFileSync(
+    path.join(archiveDir, 'archived-at.txt'),
+    new Date().toISOString(),
+    'utf-8'
+  )
+}
+
+/**
+ * 获取失败模式统计摘要
+ * v2: 增加 unknown 类型的统计
+ * @returns {{ total: number, byPhase: Object, topFailures: Array, unknownCount: number }}
+ */
+function getFailureStats () {
+  const data = readFailurePatterns()
+  const byPhase = {}
+  for (const p of data.patterns) {
+    byPhase[p.phase] = (byPhase[p.phase] || 0) + p.occurrences
+  }
+  const topFailures = [...data.patterns]
+    .sort((a, b) => (b.occurrences || 1) - (a.occurrences || 1))
+    .slice(0, 5)
+    .map(p => ({ phase: p.phase, type: p.failureType, occurrences: p.occurrences, needsManualReview: p.needsManualReview || false }))
+
+  const unknownCount = data.patterns.filter(p => p.failureType === 'unknown').length
+
+  return { total: data.patterns.length, byPhase, topFailures, unknownCount }
+}
+
+/**
+ * 标记 unknown 类型为已确认（人工补录后调用）
+ * @param {number} phase - Phase 编号
+ * @param {string} rootCauseKeyStr - 去重摘要键（前50字符）
+ * @param {string} confirmedType - 确认后的 failureType
+ * @param {string} resolution - 确认后的解决方案
+ * @returns {boolean} 是否成功标记
+ */
+function confirmUnknownPattern (phase, rootCauseKeyStr, confirmedType, resolution) {
+  ensureExperienceDir()
+  const data = readFailurePatterns()
+  const rck = rootCauseKeyStr.toLowerCase().trim()
+
+  const idx = data.patterns.findIndex(
+    p => p.phase === phase
+      && p.failureType === 'unknown'
+      && rootCauseKey(p.rootCause) === rck
+  )
+
+  if (idx < 0) return false
+
+  data.patterns[idx].failureType = confirmedType
+  data.patterns[idx].resolution = resolution
+  data.patterns[idx].needsManualReview = false
+  data.patterns[idx].reviewStatus = 'confirmed'
+  data.patterns[idx].lastReviewed = new Date().toISOString()
+  data.lastUpdated = new Date().toISOString()
+
+  fs.writeFileSync(FAILURE_PATTERNS_FILE, JSON.stringify(data, null, 2), 'utf-8')
+  return true
+}
+
+/**
+ * 从 Hook 拒绝事件中记录失败模式（供 session-stop.cjs 或主 Agent 调用）
+ * @param {Object} recordFailure - Hook 输出的 recordFailure 字段
+ * @param {string} recordFailure.failureType - 失败类型
+ * @param {string} recordFailure.rootCause - 根因
+ * @param {string} recordFailure.resolution - 解决方案
+ * @param {number} phase - Phase 编号（Hook 场景中可能未知，用 -1 表示）
+ * @param {string} [storyId] - Story ID
+ */
+function recordHookFailure (recordFailure, phase = -1, storyId = '') {
+  if (!recordFailure || !recordFailure.failureType) return
+  recordFailurePattern({
+    phase: phase,
+    failureType: recordFailure.failureType,
+    rootCause: recordFailure.rootCause || '',
+    resolution: recordFailure.resolution || '',
+    storyId: storyId,
+    blockers: []
+  })
+}
+
+// ─── 度量洞察（跨项目通用经验） ──────────────────────────────
+
+/**
+ * 读取全局度量洞察库
+ * @returns {{ version: string, totalProjects: number, totalStories: number, insights: Array, lastUpdated: string, _knownProjects?: string[] }}
+ */
+function readMetricsInsights () {
+  ensureExperienceDir()
+  if (!fs.existsSync(METRICS_INSIGHTS_FILE)) {
+    return { version: '1.0', totalProjects: 0, totalStories: 0, insights: [], lastUpdated: new Date().toISOString() }
+  }
+  try {
+    return JSON.parse(fs.readFileSync(METRICS_INSIGHTS_FILE, 'utf-8'))
+  } catch (e) {
+    return { version: '1.0', totalProjects: 0, totalStories: 0, insights: [], lastUpdated: new Date().toISOString() }
+  }
+}
+
+/**
+ * 将当前项目的度量洞察合并到全局经验库
+ * 去重键: targetPhase + type（同一 Phase 同一类型视为同一洞察）
+ * 合并策略: 累加 occurrences、合并 sourceProjects、更新 evidence
+ * @param {Array<Object>} projectInsights - 当前项目新生成的洞察列表
+ * @param {string} projectName - 当前项目名
+ */
+function mergeInsightsToGlobal (projectInsights, projectName) {
+  ensureExperienceDir()
+  const globalData = readMetricsInsights()
+
+  if (!Array.isArray(globalData.insights)) {
+    globalData.insights = []
+  }
+  if (!Array.isArray(globalData._knownProjects)) {
+    globalData._knownProjects = []
+  }
+
+  for (const insight of projectInsights) {
+    // 查找是否已有同类洞察（targetPhase + type 匹配）
+    const existingIdx = globalData.insights.findIndex(
+      i => i.targetPhase === insight.targetPhase && i.type === insight.type
+    )
+
+    if (existingIdx >= 0) {
+      // 已存在 → 合并
+      const existing = globalData.insights[existingIdx]
+      existing.occurrences = (existing.occurrences || 1) + 1
+      existing.lastSeen = new Date().toISOString()
+      // 合并来源项目（去重）
+      if (!Array.isArray(existing.sourceProjects)) {
+        existing.sourceProjects = []
+      }
+      if (!existing.sourceProjects.includes(projectName)) {
+        existing.sourceProjects.push(projectName)
+      }
+      // 更新证据和建议为最新数据
+      existing.evidence = insight.evidence
+      existing.recommendation = insight.recommendation
+      existing.title = insight.title
+      existing.description = insight.description
+    } else {
+      // 新洞察 → 首次记录
+      globalData.insights.push({
+        ...insight,
+        sourceProjects: [projectName],
+        occurrences: 1,
+        firstSeen: new Date().toISOString(),
+        lastSeen: new Date().toISOString()
+      })
+    }
+  }
+
+  // 更新全局统计
+  globalData.totalStories = (globalData.totalStories || 0) + 1
+  if (!globalData._knownProjects.includes(projectName)) {
+    globalData._knownProjects.push(projectName)
+  }
+  globalData.totalProjects = globalData._knownProjects.length
+  globalData.lastUpdated = new Date().toISOString()
+
+  fs.writeFileSync(METRICS_INSIGHTS_FILE, JSON.stringify(globalData, null, 2), 'utf-8')
+}
+
+/**
+ * 获取指定 Phase 的度量洞察（用于注入到 Agent prompt）
+ * 从全局 metrics-insights.json 读取，按 targetPhase 过滤
+ * @param {number} targetPhase - 目标 Phase（即将开始的 Phase）
+ * @returns {string} 注入到 prompt 的洞察文本，无则返回空字符串
+ */
+function getMetricsInsights (targetPhase) {
+  const data = readMetricsInsights()
+  if (!data.insights || data.insights.length === 0) return ''
+
+  // 过滤目标 Phase 的洞察
+  const relevant = data.insights.filter(i => i.targetPhase === targetPhase)
+  if (relevant.length === 0) return ''
+
+  const lines = relevant.map(i => {
+    const icon = i.severity === 'warning' ? '⚠️' : '📊'
+    const projects = Array.isArray(i.sourceProjects) ? i.sourceProjects.join(', ') : '未知'
+    return `${icon} ${i.title}\n   分析: ${i.description}\n   建议: ${i.recommendation}\n   依据: ${i.evidence} (来源: ${projects}, ${i.occurrences || 1}次)`
+  })
+
+  return `\n## 📊 度量洞察 (跨 ${data.totalProjects} 个项目 ${data.totalStories} 个 Story)\n以下洞察来自跨项目历史度量聚合，请在当前 Phase 参考:\n${lines.join('\n')}\n`
+}
+
+module.exports = {
+  EXPERIENCE_DIR,
+  FAILURE_PATTERNS_FILE,
+  METRICS_INSIGHTS_FILE,
+  ROOT_CAUSE_KEY_LENGTH,
+  readFailurePatterns,
+  recordFailurePattern,
+  getLessonsForPhase,
+  archiveFailureCase,
+  getFailureStats,
+  confirmUnknownPattern,
+  recordHookFailure,
+  rootCauseKey,
+  // 度量洞察
+  readMetricsInsights,
+  mergeInsightsToGlobal,
+  getMetricsInsights
+}

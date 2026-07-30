@@ -1,0 +1,107 @@
+{
+  "patterns": [
+    {
+      "phase": 0,
+      "failureType": "artifact_missing",
+      "rootCause": "1 个 artifact_missing 问题 (示例: Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md))",
+      "resolution": "请先完成 Phase 0 的产出物 acceptance-criteria.json",
+      "storyId": "TEST-001",
+      "blockers": [
+        "Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md)"
+      ],
+      "occurrences": 19,
+      "firstSeen": "2026-07-29T15:08:26.631Z",
+      "lastSeen": "2026-07-29T15:14:43.389Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "ac_format_error",
+      "rootCause": "1 个 ac_format_error 问题 (示例: 缺少 criteria 数组)",
+      "resolution": "检查 acceptance-criteria.json 格式",
+      "storyId": "TEST-002",
+      "blockers": [
+        "缺少 criteria 数组"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-29T15:09:16.425Z",
+      "lastSeen": "2026-07-29T15:09:16.425Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "artifact_missing",
+      "rootCause": "1 个 artifact_missing 问题 (示例: Phase 1(任务规划) 产出物缺失: 任务 DAG 文档 (task-dag.md))",
+      "resolution": "请先完成 Phase 1 的产出物 task-dag.md",
+      "storyId": "TEST-002",
+      "blockers": [
+        "Phase 1(任务规划) 产出物缺失: 任务 DAG 文档 (task-dag.md)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-29T15:09:39.256Z",
+      "lastSeen": "2026-07-29T15:09:39.256Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "unknown",
+      "rootCause": "1 个 unknown 问题 (示例: Task[bugfix-1]: 跨项目 task 必须有 description 字段)",
+      "resolution": "需人工分析此错误模式",
+      "storyId": "TEST-BUG-001",
+      "blockers": [
+        "Task[bugfix-1]: 跨项目 task 必须有 description 字段"
+      ],
+      "occurrences": 7,
+      "firstSeen": "2026-07-29T15:10:44.752Z",
+      "lastSeen": "2026-07-29T15:10:45.335Z",
+      "needsManualReview": true,
+      "reviewStatus": "pending"
+    },
+    {
+      "phase": 1,
+      "failureType": "unknown",
+      "rootCause": "1 个 unknown 问题 (示例: Task[bugfix-1]: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）)",
+      "resolution": "需人工分析此错误模式",
+      "storyId": "TEST-BUG-001",
+      "blockers": [
+        "Task[bugfix-1]: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）"
+      ],
+      "occurrences": 7,
+      "firstSeen": "2026-07-29T15:11:07.223Z",
+      "lastSeen": "2026-07-29T15:11:07.659Z",
+      "needsManualReview": true,
+      "reviewStatus": "pending"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:/workfile/CustomerServiceSystem/src/views/pc/ChatComponents/TransferCustomerDialog.vue",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "1v1客服支持分组和接待指定门店用户",
+      "blockers": [],
+      "occurrences": 57,
+      "firstSeen": "2026-07-30T05:21:15.732Z",
+      "lastSeen": "2026-07-30T06:11:23.274Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:\\workfile\\CustomerServiceSystem\\src\\api\\imasstapi.request.js",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "1v1客服支持分组和接待指定门店用户",
+      "blockers": [],
+      "occurrences": 18,
+      "firstSeen": "2026-07-30T05:21:15.740Z",
+      "lastSeen": "2026-07-30T06:11:23.294Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    }
+  ],
+  "version": "2.0",
+  "lastUpdated": "2026-07-30T06:11:23.294Z"
+}
