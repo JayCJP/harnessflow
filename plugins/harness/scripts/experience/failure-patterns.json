@@ -142,9 +142,9 @@
       "blockers": [
         "code-review.md 中有 4 个未修复的 BLOCKER"
       ],
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-07-30T07:16:33.449Z",
-      "lastSeen": "2026-07-30T07:16:33.449Z",
+      "lastSeen": "2026-07-30T08:27:08.415Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -165,5 +165,5 @@
     }
   ],
   "version": "2.0",
-  "lastUpdated": "2026-07-30T07:20:14.120Z"
+  "lastUpdated": "2026-07-30T08:27:08.415Z"
 }
