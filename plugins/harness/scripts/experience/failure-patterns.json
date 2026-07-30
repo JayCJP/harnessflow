@@ -82,9 +82,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "1v1客服支持分组和接待指定门店用户",
       "blockers": [],
-      "occurrences": 57,
+      "occurrences": 107,
       "firstSeen": "2026-07-30T05:21:15.732Z",
-      "lastSeen": "2026-07-30T06:11:23.274Z",
+      "lastSeen": "2026-07-30T06:21:26.541Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -95,13 +95,13 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "1v1客服支持分组和接待指定门店用户",
       "blockers": [],
-      "occurrences": 18,
+      "occurrences": 33,
       "firstSeen": "2026-07-30T05:21:15.740Z",
-      "lastSeen": "2026-07-30T06:11:23.294Z",
+      "lastSeen": "2026-07-30T06:21:26.567Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     }
   ],
   "version": "2.0",
-  "lastUpdated": "2026-07-30T06:11:23.294Z"
+  "lastUpdated": "2026-07-30T06:21:26.567Z"
 }
