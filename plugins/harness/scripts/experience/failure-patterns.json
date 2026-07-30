@@ -4,14 +4,14 @@
       "phase": 0,
       "failureType": "artifact_missing",
       "rootCause": "1 个 artifact_missing 问题 (示例: Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md))",
-      "resolution": "请先完成 Phase 0 的产出物 acceptance-criteria.json",
+      "resolution": "请先完成 Phase 0 的产出物 requirement-analysis.md",
       "storyId": "TEST-001",
       "blockers": [
         "Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md)"
       ],
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-07-29T15:08:26.631Z",
-      "lastSeen": "2026-07-29T15:14:43.389Z",
+      "lastSeen": "2026-07-30T07:02:52.762Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -100,8 +100,70 @@
       "lastSeen": "2026-07-30T06:21:26.567Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "task_missing_title",
+      "rootCause": "1 个 task_missing_title 问题 (示例: Task[T1]: 缺少 title)",
+      "resolution": "为每个 task 添加 title 字段（使用 title 而非 name）",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "Task[T1]: 缺少 title",
+        "Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T07:05:19.428Z",
+      "lastSeen": "2026-07-30T07:05:19.428Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "empty_ac_ref",
+      "rootCause": "1 个 empty_ac_ref 问题 (示例: Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）)",
+      "resolution": "每个 task 的 acceptanceCriteria 至少引用 1 条 AC",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "Task[T1]: 缺少 title",
+        "Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T07:05:19.437Z",
+      "lastSeen": "2026-07-30T07:05:19.437Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 3,
+      "failureType": "code_review_blocker",
+      "rootCause": "1 个 code_review_blocker 问题 (示例: code-review.md 中有 4 个未修复的 BLOCKER)",
+      "resolution": "执行修复回路: advance-phase.js STORY-20260710-01 2 --fix-loop",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "code-review.md 中有 4 个未修复的 BLOCKER"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T07:16:33.449Z",
+      "lastSeen": "2026-07-30T07:16:33.449Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "code_review_blocker",
+      "rootCause": "1 个 code_review_blocker 问题 (示例: code-review.md 中有 3 个未修复的 BLOCKER)",
+      "resolution": "执行修复回路: advance-phase.js STORY-20260710-01 2 --fix-loop",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "code-review.md 中有 3 个未修复的 BLOCKER"
+      ],
+      "occurrences": 6,
+      "firstSeen": "2026-07-30T07:18:11.468Z",
+      "lastSeen": "2026-07-30T07:20:14.120Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.0",
-  "lastUpdated": "2026-07-30T06:21:26.567Z"
+  "lastUpdated": "2026-07-30T07:20:14.120Z"
 }

@@ -7,8 +7,8 @@
   "defaultEnabled": true,
 
   "commands": "commands",
-  "agents": "agents",
-  "skills": "skills",
+  "agents": "./agents",
+  "skills": "./skills",
   "hooks": "hooks/hooks.json",
   "outputStyles": "output-styles",
 
