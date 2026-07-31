@@ -3,7 +3,7 @@ const { PROJECT_ROOT, PLANS_DIR, getStoryDir, readStateFile, checkAcceptanceCrit
 const args = process.argv.slice(2)
 const storyId = args[0]
 const targetPhase = parseInt(args[1])
-if (!storyId || isNaN(targetPhase)) { console.error("Usage: node validate-contracts.cjs <storyId> <targetPhase>"); process.exit(1) }
+if (!storyId || isNaN(targetPhase)) { console.error("Usage: node validate-contracts.js <storyId> <targetPhase>"); process.exit(1) }
 
 const blockers = [], warnings = [], details = {}
 const state = readStateFile(storyId)

@@ -240,6 +240,71 @@ const PHASE_ARTIFACTS = {
   7: { artifacts: [{ fileName: null, description: '部署 URL + 构建号', contract: false }] }
 }
 
+// ─── Phase → Agent 映射 ──────────────────────────────────────────
+
+/**
+ * 每个 Phase 应由哪个 Agent 承担 + 该 Agent 的任务指令。
+ *
+ * 设计说明:
+ *   - `agent` 是 Agent 的**注册名**（agent 文件 frontmatter 的 `name` 字段，英文）。
+ *     Agent 文件名和正文标题是中文，但注册键是英文 name——传中文名无法解析到 Agent。
+ *   - `label` 仅供人类阅读（日志/文档），禁止用于 Spawn。
+ *   - Phase→Agent 是确定性查表，不需要 LLM 推理。
+ *     此表取代了原 agents/dispatcher.md 中的映射表。
+ *   - Phase 8 为终态，无 Agent。
+ */
+const PHASE_AGENTS = {
+  0: {
+    agent: 'requirement-analyst',
+    label: '需求分析师',
+    instruction: '读取需求输入（PRD / bug 分析报告 / 用户补充说明），产出需求分析文档、可测试的验收标准和待确认问题'
+  },
+  1: {
+    agent: 'task-planner',
+    label: '任务规划师',
+    instruction: '基于 Phase 0 产出物，将需求拆解为可并行的任务 DAG，并在 task-dag.json 的 files[] 中列全所有待修改文件（该字段决定 Phase 2 的写入范围）'
+  },
+  2: {
+    agent: 'frontend-developer',
+    label: '前端开发工程师',
+    instruction: '按 task-dag.json 的批次执行开发任务。同一 batch 内的任务可并行 Spawn 多个开发者 Agent，batch 之间串行'
+  },
+  3: {
+    agent: 'code-reviewer',
+    label: '代码审查师',
+    instruction: '审查本 Story 的代码变更（git diff），产出 code-review.json。若存在 fix-request.json 说明是修复回路复查，需做增量审查'
+  },
+  4: {
+    agent: 'test-engineer',
+    label: '测试工程师',
+    instruction: '逐条验证 acceptance-criteria.json 中的 AC 是否通过，产出 test-report.md + acceptance-verification.json'
+  },
+  5: {
+    agent: 'release-assistant',
+    label: '发布助手',
+    instruction: '执行 git add + commit + push，并创建 MR。禁止使用 --no-verify'
+  },
+  6: {
+    agent: 'release-assistant',
+    label: '发布助手',
+    instruction: '调用 kb-update Skill 增量更新知识库文档'
+  },
+  7: {
+    agent: 'release-assistant',
+    label: '发布助手',
+    instruction: '通过 devops MCP 触发云端构建和部署，回报部署 URL + 构建号'
+  }
+}
+
+/**
+ * 获取指定 Phase 的 Agent 信息
+ * @param {number} phase - Phase 编号
+ * @returns {{ agent: string, label: string, instruction: string }|null} 终态(8)或越界返回 null
+ */
+function getPhaseAgent (phase) {
+  return PHASE_AGENTS[phase] || null
+}
+
 // ─── 契约文件常量 ─────────────────────────────────────────────────
 
 /** 契约 JSON 文件名 */
@@ -1111,7 +1176,7 @@ const DEFAULT_MAX_FIX_ROUNDS = 2
 
 /**
  * 获取修复回路最大轮次配置
- * 统一从 e2e-state.json 读取 maxFixRounds（在 create-workflow.cjs 创建 state 时写入）。
+ * 统一从 e2e-state.json 读取 maxFixRounds（在 create-workflow.js 创建 state 时写入）。
  * 如需调整，直接修改 e2e-state.json 的 maxFixRounds 字段即可，单一信源无歧义。
  * @param {string} storyId - Story ID
  * @returns {number} 最大修复轮次
@@ -1194,6 +1259,8 @@ module.exports = {
   PHASE_SLUGS,
   PHASE_NAMES,
   PHASE_ARTIFACTS,
+  PHASE_AGENTS,
+  getPhaseAgent,
 
   // 仓库注册表（repos.json，story 级独立）
   getDefaultRepoName,

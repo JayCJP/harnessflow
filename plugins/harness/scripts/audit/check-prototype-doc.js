@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * check-prototype-doc.cjs — 原型文档完整性检查
+ * check-prototype-doc.js — 原型文档完整性检查
  *
  * 检查原型分析文档是否存在且包含必要章节。
  * 在创建工作流前由主 Agent 调用，确保原型已充分分析。
  *
  * 用法:
- *   node .codebuddy/scripts/check-prototype-doc.cjs <storyId>
+ *   node .codebuddy/scripts/check-prototype-doc.js <storyId>
  *
  * 检查项:
  *   1. 文件 .codebuddy/plans/<storyId>/prototype-analysis.md 存在
@@ -44,8 +44,8 @@ const args = process.argv.slice(2)
 const storyId = args[0]
 
 if (!storyId) {
-  console.error('用法: node check-prototype-doc.cjs <storyId>')
-  console.error('示例: node check-prototype-doc.cjs STORY-001')
+  console.error('用法: node check-prototype-doc.js <storyId>')
+  console.error('示例: node check-prototype-doc.js STORY-001')
   process.exit(1)
 }
 

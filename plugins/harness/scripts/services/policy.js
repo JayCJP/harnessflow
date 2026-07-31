@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * policy.cjs — 风险门控层 (Policy Runtime)
+ * policy.js — 风险门控层 (Policy Runtime)
  *
  * 三层解耦中的"门控层"——独立于编排逻辑，是推理链条之外不受污染的检查点。
  * 职责: 产出物校验 + 契约一致性 + 权限边界 + 错误恢复建议
@@ -178,7 +178,7 @@ const RECOVERY_SUGGESTIONS = {
   // Phase 3→4: code-review.json 不存在
   code_review_missing: {
     level: 4,
-    action: '需先 spawn 代码审查师产出 code-review.json',
+    action: '需先 spawn 代码审查师 (code-reviewer) 产出 code-review.json',
     autoFixable: false
   },
   // Phase 4→5: evidence 字符串→数组
@@ -256,6 +256,19 @@ const RECOVERY_SUGGESTIONS = {
     level: 4,
     action: '已达最大修复轮次 (2)，需人工介入：1)人工评审剩余BLOCKER 2)联系需求分析师确认AC 3)联系任务规划师重新拆解',
     autoFixable: false
+  },
+  // JSON 产出物解析失败（语法错误）
+  json_parse_error: {
+    level: 2,
+    action: 'JSON 产出物语法错误，请检查括号/逗号/引号是否闭合，可用 node -e "JSON.parse(require(\'fs\').readFileSync(\'<file>\',\'utf-8\'))" 定位',
+    autoFixable: false
+  },
+  // 兜底：未归类的失败模式
+  // 注意：命中此项说明有 failureType 未登记，应分析后补充为独立条目
+  unknown: {
+    level: 3,
+    action: '未归类的门控失败：请阅读 blocker message 手工处理，并将此错误模式补充到 policy.js 的 RECOVERY_SUGGESTIONS 中',
+    autoFixable: false
   }
 }
 
@@ -263,7 +276,7 @@ const RECOVERY_SUGGESTIONS = {
  * 根据 blocker 的 failureType 匹配恢复建议
  * v2: 优先用结构化 blocker 的 type 字段精确匹配，兼容旧的纯字符串关键词匹配
  * @param {{ type: string, message: string }|string} blocker - 结构化 blocker 或纯字符串
- * @returns {{ level: number, action: string, autoFixable: boolean, autoFix?: Function } | null}
+ * @returns {{ level: number, action: string, autoFixable: boolean, autoFix?: Function }} 永不为 null，最差返回 RECOVERY_SUGGESTIONS.unknown
  */
 function matchRecoverySuggestion (blocker) {
   // 结构化 blocker: 直接用 type 字段精确匹配
@@ -280,7 +293,10 @@ function matchRecoverySuggestion (blocker) {
   if (lower.includes('evidence')) return RECOVERY_SUGGESTIONS.evidence_not_array
   if (lower.includes('blocker')) return RECOVERY_SUGGESTIONS.code_review_blocker
   if (lower.includes('acceptancecriteria') && lower.includes('空')) return RECOVERY_SUGGESTIONS.empty_ac_ref
-  return null
+
+  // 类型未登记且关键词未命中 → 返回显式 unknown 条目（而非 null），
+  // 保证每个 blocker 都带 level-3 恢复建议，并提示将该模式补录为独立条目
+  return RECOVERY_SUGGESTIONS.unknown
 }
 
 // ─── 门控校验主函数 ─────────────────────────────────────────────
@@ -352,19 +368,12 @@ function runGateCheck (storyId, phaseNum, state) {
       (typeof r.blocker === 'string' && r.blocker === errorToString(blocker))
     )
     if (!existingRecovery) {
+      // matchRecoverySuggestion 永不返回 null（未登记类型 → RECOVERY_SUGGESTIONS.unknown，level 3）
       const suggestion = matchRecoverySuggestion(blocker)
-      if (suggestion) {
-        result.recoveries.push({ blocker, suggestion })
-      } else {
-        // 兜底: unknown 类型也有 recovery 记录，标记需人工补录
-        result.recoveries.push({
-          blocker,
-          suggestion: {
-            level: 3,
-            action: `需人工分析此错误模式并补充到 RECOVERY_SUGGESTIONS (failureType: ${errorToType(blocker)})`,
-            autoFixable: false
-          }
-        })
+      result.recoveries.push({ blocker, suggestion })
+      if (suggestion === RECOVERY_SUGGESTIONS.unknown) {
+        // 显式告警：出现未登记的 failureType，应补录为独立条目
+        result.warnings.push(`未归类的失败模式 (failureType: ${errorToType(blocker)})，建议补充到 policy.js 的 RECOVERY_SUGGESTIONS`)
       }
     }
   }
@@ -488,11 +497,11 @@ function checkPhase1Gate (storyId, result) {
         type = 'task_duplicate_id'
         resolution = 'Task ID 必须唯一'
       } else if (lower.includes('不存在')) {
-        type = 'unknown'
+        type = 'artifact_missing'
         level = 4
         resolution = 'task-dag.json 文件不存在，请先产出此文件'
       } else if (lower.includes('解析失败')) {
-        type = 'unknown'
+        type = 'json_parse_error'
         resolution = 'JSON 格式错误，请检查 task-dag.json'
       } else if (lower.includes('为空') && lower.includes('tasks')) {
         type = 'empty_ac_ref'

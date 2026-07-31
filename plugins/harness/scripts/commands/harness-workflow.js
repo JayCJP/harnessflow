@@ -5,29 +5,24 @@
  * 控制 harness engineering 流程的激活/关闭，通过 .harness-active 标记文件实现。
  *
  * 用法:
- *   node harness-workflow.cjs start <storyId> "<标题>"   ← 激活 harness 模式
- *   node harness-workflow.cjs end                          ← 关闭 harness 模式
- *   node harness-workflow.cjs status                       ← 查看当前状态
+ *   node harness-workflow.js start <storyId> "<标题>"   ← 激活 harness 模式
+ *   node harness-workflow.js end                          ← 关闭 harness 模式
+ *   node harness-workflow.js status                       ← 查看当前状态
  *
  * 设计思路:
  *   - 用户输入 /harness 时，AI 调用 `start` 创建标记文件
- *   - enforce-no-direct-code-edit.cjs 检查标记文件：有 → 需 dev-pass，无 → 直接放行
+ *   - enforce-dev-pass.js 检查标记文件：有 → 需 dev-pass，无 → 直接放行
  *   - 工作流完成后，AI 调用 `end` 删除标记文件
  *   - 标记文件内容记录当前 activated story，方便 status 查询
  */
 
 const fs = require('fs')
 const path = require('path')
-const { ensureReposJson, readStateFile, loadRepos } = require('../lib/state')
+const { ensureReposJson, readStateFile, loadRepos, PROJECT_ROOT, PLANS_DIR } = require('../lib/state')
 const { createWorkflow } = require('./create-workflow')
 
 // ─── 路径常量 ──────────────────────────────────────────────────
-
-/** 项目根目录 */
-const PROJECT_ROOT = process.env.CODEBUDDY_PROJECT_DIR || process.cwd()
-
-/** plans 目录 */
-const PLANS_DIR = path.join(PROJECT_ROOT, '.codebuddy', 'plans')
+// PROJECT_ROOT / PLANS_DIR 单一信源: lib/state.js（含 CLAUDE_PROJECT_DIR 跨宿主回退）
 
 /** harness 激活标记文件 */
 const HARNESS_FLAG = path.join(PLANS_DIR, '.harness-active')
@@ -170,7 +165,7 @@ function cmdStart(storyId, title) {
 
   writeFlag(data)
 
-  // 内部调用 create-workflow.cjs 创建 e2e-state.json（断链修复）
+  // 内部调用 create-workflow.js 创建 e2e-state.json（断链修复）
   let workflowResult = null
   try {
     workflowResult = createWorkflow(id, name, false)
@@ -187,7 +182,7 @@ function cmdStart(storyId, title) {
   console.log(JSON.stringify({
     ok: true,
     message: `✅ Harness 模式已激活\n   Story: ${id} "${name}"\n   Phase: 0 (需求分析)\n   标记文件: .codebuddy/plans/.harness-active` +
-      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ~/.codebuddy/scripts/create-workflow.cjs ' + id + ' "' + name + '"'),
+      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '"'),
     data
   }))
 }
@@ -270,9 +265,9 @@ switch (command) {
       '/harness 工作流管理脚本',
       '',
       '用法:',
-      '  node harness-workflow.cjs start <storyId> "<标题>"   激活 harness 模式',
-      '  node harness-workflow.cjs end                          关闭 harness 模式',
-      '  node harness-workflow.cjs status                       查看当前状态',
+      '  node harness-workflow.js start <storyId> "<标题>"   激活 harness 模式',
+      '  node harness-workflow.js end                          关闭 harness 模式',
+      '  node harness-workflow.js status                       查看当前状态',
       '',
       '详细文档见: CODEBUDDY.md § /harness 工作流'
     ].join('\n'))

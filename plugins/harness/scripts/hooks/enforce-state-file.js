@@ -48,6 +48,76 @@ const toolInput = inputData.tool_input || {}
 // CodeBuddy 工具中文件路径的字段名可能是 file_path 或 filePath
 const filePath = toolInput.file_path || toolInput.filePath || ''
 
+// 受保护的状态文件列表
+const PROTECTED_FILES = [
+  'e2e-state.json',
+  'dev-pass.json'
+]
+
+// 唯一被授权改写状态文件的脚本（相位跃迁 / 创建 / 归档）
+const AUTHORIZED_SCRIPTS = [
+  'advance-phase.js',
+  'create-workflow.js',
+  'archive-story.js',
+  'harness-workflow.js' // 内部 require create-workflow.js
+]
+
+// ─── Bash / execute_command 通道 ─────────────────────────────
+// 文件工具之外，shell 也能写状态文件（node -e fs.writeFileSync / 重定向 / sed -i 等）。
+// 若不拦截，"状态文件单写者" 只在文件工具这一条通道上成立，等于形同虚设。
+const bashTools = ['Bash', 'execute_command']
+if (bashTools.includes(toolName)) {
+  const command = toolInput.command || ''
+
+  // 命令未提及受保护文件 → 放行
+  const mentioned = PROTECTED_FILES.find(pf => command.includes(pf))
+  if (!mentioned) {
+    console.log(JSON.stringify({ continue: true }))
+    process.exit(0)
+  }
+
+  // 命令是在调用授权脚本 → 放行（这是推进 Phase 的正常路径）
+  if (AUTHORIZED_SCRIPTS.some(s => command.includes(s))) {
+    console.log(JSON.stringify({ continue: true }))
+    process.exit(0)
+  }
+
+  // 只读命令 → 放行（cat / type / node -e JSON.parse 读取等）
+  // 说明: 采用白名单判定写意图的反面——命中任一写模式即拒绝，
+  //       其余（读取、grep、jq 查询）放行，避免误伤正常的状态查看。
+  const WRITE_PATTERNS = [
+    />\s*[^|]*(?:e2e-state|dev-pass)/i,        // 重定向: echo x > e2e-state.json
+    /writeFileSync|appendFileSync|createWriteStream/i, // node fs 写入
+    /\bsed\b[^|]*-i/i,                          // sed -i 原地编辑
+    /\b(?:rm|mv|cp|del|move|copy)\b/i,          // 删除/移动/覆盖
+    /\btee\b/i,                                 // tee 写入
+    /Set-Content|Add-Content|Out-File/i         // PowerShell 写入
+  ]
+
+  const hitPattern = WRITE_PATTERNS.find(p => p.test(command))
+  if (!hitPattern) {
+    console.log(JSON.stringify({ continue: true }))
+    process.exit(0)
+  }
+
+  console.log(JSON.stringify({
+    continue: false,
+    stopReason: `BLOCKED: 禁止通过 shell 命令写入 ${mentioned}。状态文件的相位跃迁只能通过 advance-phase.js 完成。`,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: `State file protection (shell channel): ${mentioned} can only be mutated by ${AUTHORIZED_SCRIPTS.join(' / ')}`,
+      recordFailure: {
+        failureType: 'state_file_violation',
+        rootCause: `Agent 试图通过 shell 命令写入 ${mentioned}: ${command}`,
+        resolution: `${mentioned} 只能通过 advance-phase.js 脚本更新。请汇报产出物路径，由主 Agent 执行 advance-phase.js 推进 Phase。`
+      }
+    }
+  }, null, 0))
+  process.exit(2)
+}
+
+// ─── 文件工具通道 ────────────────────────────────────────────
 // 只拦截写入类工具
 const writeTools = ['Write', 'Edit', 'write_to_file', 'replace_in_file']
 if (!writeTools.includes(toolName)) {
@@ -63,12 +133,6 @@ if (!filePath) {
 
 // 规范化路径用于匹配
 const normalizedPath = filePath.replace(/\\/g, '/')
-
-// 受保护的状态文件列表
-const PROTECTED_FILES = [
-  'e2e-state.json',
-  'dev-pass.json'
-]
 
 /**
  * 检查目标文件是否为受保护的状态文件

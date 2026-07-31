@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * experience.cjs — 经验沉淀飞轮模块
+ * experience.js — 经验沉淀飞轮模块
  *
  * v2.0: 增强采集能力
  *   - 去重键从 phase+failureType 改为 phase+failureType+rootCauseKey(前50字符)
@@ -149,7 +149,7 @@ function getLessonsForPhase (phase) {
     for (const p of pending) {
       lines.push(`     - failureType: unknown | 根因: ${p.rootCause.slice(0, 80)} | 出现 ${p.occurrences} 次`)
     }
-    lines.push(`     → 请分析后补充到 policy.cjs RECOVERY_SUGGESTIONS 并设置 reviewStatus=confirmed`)
+    lines.push(`     → 请分析后补充到 policy.js RECOVERY_SUGGESTIONS 并设置 reviewStatus=confirmed`)
   }
 
   return `\n\n## 📚 历史经验教训 (Phase ${phase})\n以下问题曾在历史 Story 中出现，请注意避免:\n${lines.join('\n')}\n`
@@ -248,7 +248,7 @@ function confirmUnknownPattern (phase, rootCauseKeyStr, confirmedType, resolutio
 }
 
 /**
- * 从 Hook 拒绝事件中记录失败模式（供 session-stop.cjs 或主 Agent 调用）
+ * 从 Hook 拒绝事件中记录失败模式（供 session-stop.js 或主 Agent 调用）
  * @param {Object} recordFailure - Hook 输出的 recordFailure 字段
  * @param {string} recordFailure.failureType - 失败类型
  * @param {string} recordFailure.rootCause - 根因

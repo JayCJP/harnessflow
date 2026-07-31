@@ -10,7 +10,7 @@
  *     - valid + precise     → check file against allowedPaths
  *
  * 拒绝事件通过 hookSpecificOutput.recordFailure 字段携带结构化失败信息，
- * 供 session-stop.cjs 读取并沉淀到经验库。
+ * 供 session-stop.js 读取并沉淀到经验库。
  */
 const fs = require('fs')
 const path = require('path')
@@ -55,7 +55,7 @@ if (!devPass.valid) {
     recordFailure: {
       failureType: 'dev_pass_missing',
       rootCause: 'Agent 试图在无 dev-pass 时编辑 src/ 文件: ' + filePath,
-      resolution: '必须在 Phase 2 通过 advance-phase.cjs 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）'
+      resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）'
     }
   })
 
@@ -69,7 +69,7 @@ if (!devPass.valid) {
       recordFailure: {
         failureType: 'dev_pass_missing',
         rootCause: 'Agent 试图在无 dev-pass 时编辑 src/ 文件: ' + filePath,
-        resolution: '必须在 Phase 2 通过 advance-phase.cjs 签发 dev-pass 后才能编辑 src/'
+        resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/'
       }
     }
   }, null, 0))

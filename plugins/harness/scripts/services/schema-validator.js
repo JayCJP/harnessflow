@@ -13,6 +13,7 @@
 const fs = require('fs')
 const path = require('path')
 const Ajv = require('ajv')
+const { PLANS_DIR } = require('../lib/state')
 
 /** Schema 文件目录 */
 const SCHEMAS_DIR = path.join(__dirname, '..', 'schemas')
@@ -41,8 +42,28 @@ function createAjv () {
     allErrors: true,     // 收集所有错误
     strict: false,       // 允许 unknown keywords
     coerceTypes: false,  // 不自动类型转换
-    removeAdditional: false // 不自动移除额外字段
+    removeAdditional: false, // 不自动移除额外字段
+    // schema 中使用了 format: date-time 等，但未引入 ajv-formats。
+    // 不静默会向 stderr 打印 "unknown format ... ignored"，污染
+    // dispatch.js / advance-phase.js 的输出，干扰调用方解析。
+    logger: false
   })
+
+  // 自注册常用 format，避免依赖 ajv-formats 包。
+  // 未注册时 AJV 会「忽略」该 format（等于不校验），这里补上实际校验。
+  ajv.addFormat('date-time', {
+    type: 'string',
+    validate: (s) => !isNaN(Date.parse(s))
+  })
+  ajv.addFormat('date', {
+    type: 'string',
+    validate: (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s))
+  })
+  ajv.addFormat('uri', {
+    type: 'string',
+    validate: (s) => /^[a-z][a-z0-9+.-]*:/i.test(s)
+  })
+
   return ajv
 }
 
@@ -92,8 +113,7 @@ function validateArtifact (storyId, artifactFileName, storyDir) {
     return { valid: false, errors: [`Schema 加载失败: ${schemaResult.error}`] }
   }
 
-  // 读取产出物文件
-  const PLANS_DIR = path.resolve(process.env.CODEBUDDY_PROJECT_DIR || process.cwd(), '.codebuddy', 'plans')
+  // 读取产出物文件（PLANS_DIR 单一信源: lib/state.js）
   const dir = storyDir || path.join(PLANS_DIR, storyId)
   const filePath = path.join(dir, artifactFileName)
 

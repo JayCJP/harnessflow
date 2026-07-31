@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * trace.cjs — 全链路 Trace 记录模块
+ * trace.js — 全链路 Trace 记录模块
  *
  * 记录 Agent 间消息、工具调用、门控决策、协调事件到 trace.jsonl
  * 供调试、审计、经验沉淀使用。
@@ -198,9 +198,9 @@ if (require.main === module) {
   } else {
     console.log(JSON.stringify({
       usage: {
-        'agent-spawn': 'node trace.cjs agent-spawn <storyId> <agentName> [taskId] [phase]',
-        'agent-result': 'node trace.cjs agent-result <storyId> <agentName> <completed|failed> [detailsJSON]',
-        'git': 'node trace.cjs git <storyId> <init|add|commit|push|mr> [success|failed] [detailsJSON]'
+        'agent-spawn': 'node trace.js agent-spawn <storyId> <agentName> [taskId] [phase]',
+        'agent-result': 'node trace.js agent-result <storyId> <agentName> <completed|failed> [detailsJSON]',
+        'git': 'node trace.js git <storyId> <init|add|commit|push|mr> [success|failed] [detailsJSON]'
       }
     }, null, 2))
   }

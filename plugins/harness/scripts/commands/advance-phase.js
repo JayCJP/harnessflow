@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
- * advance-phase.cjs — Harness Phase 推进 (Workflow 控制层)
+ * advance-phase.js — Harness Phase 推进 (Workflow 控制层)
  *
  * 三层解耦后的职责:
  *   本文件 = Stateful Workflow (确定性状态控制，不应被自主化接管)
- *   policy.cjs = Policy Runtime (门控校验，独立于编排)
- *   trace.cjs = Trace 记录 (全链路可观测性)
- *   experience.cjs = 经验沉淀 (失败模式记录)
- *   context-refresh.cjs = 上下文刷新 (Phase summary)
+ *   policy.js = Policy Runtime (门控校验，独立于编排)
+ *   trace.js = Trace 记录 (全链路可观测性)
+ *   experience.js = 经验沉淀 (失败模式记录)
+ *   context-refresh.js = 上下文刷新 (Phase summary)
  *
  * 用法:
- *   node advance-phase.cjs <storyId> <phase>              # 推进到指定 Phase
- *   node advance-phase.cjs <storyId> 2 --renew-pass       # Phase 2 续签 dev-pass
- *   node advance-phase.cjs <storyId> 3 --lint-fix         # Phase 2→3 自动 eslint
- *   node advance-phase.cjs <storyId> 2 --fix-loop          # 修复回路：提取BLOCKER→回退Phase2→签发dev-pass→输出修复指令
- *   node advance-phase.cjs <storyId> <phase> --auto-fix   # 门控失败时自动修复
+ *   node advance-phase.js <storyId> <phase>              # 推进到指定 Phase
+ *   node advance-phase.js <storyId> 2 --renew-pass       # Phase 2 续签 dev-pass
+ *   node advance-phase.js <storyId> 3 --lint-fix         # Phase 2→3 自动 eslint
+ *   node advance-phase.js <storyId> 2 --fix-loop          # 修复回路：提取BLOCKER→回退Phase2→签发dev-pass→输出修复指令
+ *   node advance-phase.js <storyId> <phase> --auto-fix   # 门控失败时自动修复
  *
  * @module advance-phase
  */
@@ -47,6 +47,7 @@ const policy = require('../services/policy')
 const trace = require('../lib/trace')
 const experience = require('../services/experience')
 const contextRefresh = require('../services/context-refresh')
+const promptBuilder = require('../services/prompt-builder')
 
 // ========================
 // CLI 参数解析
@@ -74,8 +75,8 @@ for (let i = 0; i < args.length; i++) {
 
 if (!storyId || targetPhase === null) {
   console.log(JSON.stringify({
-    error: '用法: node advance-phase.cjs <storyId> <phase> [--renew-pass] [--lint-fix] [--auto-fix] [--rollback] [--fix-loop]',
-    example: '  node advance-phase.cjs STORY-002 2\n  node advance-phase.cjs STORY-002 1 --rollback\n  node advance-phase.cjs STORY-002 2 --fix-loop'
+    error: '用法: node advance-phase.js <storyId> <phase> [--renew-pass] [--lint-fix] [--auto-fix] [--rollback] [--fix-loop]',
+    example: '  node advance-phase.js STORY-002 2\n  node advance-phase.js STORY-002 1 --rollback\n  node advance-phase.js STORY-002 2 --fix-loop'
   }, null, 2))
   process.exit(1)
 }
@@ -114,6 +115,26 @@ if (renewFlag && targetPhase === 2) {
 
 const currentPhase = (state.phase !== undefined && state.phase !== null) ? state.phase : -1
 const currentPhaseName = getPhaseName(currentPhase)
+
+// ========================
+// 🛡️ targetPhase 入参独立校验
+// 原则: 不信任调用方传入的 targetPhase。主 Agent / dispatch.js 只有"触发权"，
+//       没有"决定权"——命令可以由任何人敲，但是否合法由本脚本独立裁定。
+// 校验 1: 范围。越界会导致 PHASE_SLUGS[targetPhase] 为 undefined，
+//         写出 phase: 99 / phases["99_undefined"] 这类污染状态。
+// ========================
+
+const MAX_PHASE = PHASE_SLUGS.length - 1
+
+if (targetPhase < 0 || targetPhase > MAX_PHASE) {
+  console.log(JSON.stringify({
+    error: `targetPhase 越界: ${targetPhase}，合法范围 0~${MAX_PHASE}`,
+    storyId,
+    currentPhase,
+    hint: `Phase 定义: ${PHASE_SLUGS.map((s, i) => `${i}=${getPhaseName(i)}`).join(', ')}`
+  }, null, 2))
+  process.exit(1)
+}
 
 // ========================
 // 🛡️ e2e-state 完整性校验: 检测 Agent 是否绕过脚本直接修改了 phase
@@ -198,7 +219,7 @@ if (rollbackFlag) {
   if (state.status === 'archived') {
     console.log(JSON.stringify({
       error: `Story 已归档 (round ${state.archiveRound || '?'})，禁止 --rollback`,
-      hint: '归档后的 Story 不支持回退操作。如需恢复，请先执行: node archive-story.cjs ' + storyId + ' restore'
+      hint: '归档后的 Story 不支持回退操作。如需恢复，请先执行: node archive-story.js ' + storyId + ' restore'
     }, null, 2))
     process.exit(1)
   }
@@ -339,7 +360,7 @@ if (fixLoopFlag) {
   if (state.status === 'archived') {
     console.log(JSON.stringify({
       error: `Story 已归档 (round ${state.archiveRound || '?'})，禁止 --fix-loop`,
-      hint: '归档后的 Story 不支持修复回路。如需恢复，请先执行: node archive-story.cjs ' + storyId + ' restore'
+      hint: '归档后的 Story 不支持修复回路。如需恢复，请先执行: node archive-story.js ' + storyId + ' restore'
     }, null, 2))
     process.exit(1)
   }
@@ -352,14 +373,12 @@ if (fixLoopFlag) {
   let sourcePhase = null
   let sourceFile = null
 
-  // 从 code-review.json / code-review.md 提取 BLOCKER
+  // 从 code-review.json 提取未修复 BLOCKER（唯一信源）
   const extracted = extractFixIssuesFromReview(storyDir)
   if (extracted.length > 0) {
     issues = extracted
     sourcePhase = 3
-    // 优先标记 JSON 信源
-    const crJsonPath = path.join(storyDir, 'code-review.json')
-    sourceFile = fs.existsSync(crJsonPath) ? 'code-review.json' : 'code-review.md'
+    sourceFile = 'code-review.json'
   }
 
   // 如果审查报告没有 BLOCKER，尝试从 acceptance-verification.json 提取 failed
@@ -401,7 +420,7 @@ if (fixLoopFlag) {
   if (issues.length === 0) {
     console.log(JSON.stringify({
       status: 'no_issues_found',
-      message: '未在 code-review.md 或 acceptance-verification.json 中找到可修复问题',
+      message: '未在 code-review.json / acceptance-verification.json / test-report.md 中找到可修复问题',
       hint: '如果确实需要修复，请手动创建 fix-request.json'
     }, null, 2))
     process.exit(1)
@@ -599,7 +618,7 @@ if (fixLoopFlag) {
     `### 修复完成后`,
     `- 产出 \`fix-verification.json\`（逐项核对修复结果），格式:`,
     `  \`{"round": ${nextRound}, "source": "${sourcePhase === 3 ? 'code-review' : 'acceptance-test'}", "fixes": [{"id":"FIX-01","status":"fixed|partially|skipped","actualChange":"改动说明","filesModified":["src/xxx"]}], "summary":{"total":N,"fixed":N,"partially":N,"skipped":N}}\``,
-    `- 通知主 Agent 执行: \`advance-phase.cjs ${storyId} 3\`（会自动注入修复上下文给审查师）`,
+    `- 通知主 Agent 执行: \`advance-phase.js ${storyId} 3\`（会自动注入修复上下文给审查师）`,
     ''
   ].join('\n')
 
@@ -618,9 +637,9 @@ if (fixLoopFlag) {
     devPassScope: affectedFiles.length > 0 ? `${affectedFiles.length} files` : 'src/**',
     spawnPrompt,
     nextSteps: [
-      `1. 主 Agent 将上述 spawnPrompt 作为 Prompt Spawn 前端开发工程师 (task tool)`,
-      `2. 开发者修复完成后 → 主 Agent 执行: advance-phase.cjs ${storyId} 3`,
-      `3. 如果 Phase 3/4 仍失败 → 再次执行: advance-phase.cjs ${storyId} 2 --fix-loop`,
+      `1. 主 Agent 将上述 spawnPrompt 作为 Prompt Spawn 前端开发工程师 (agent 注册名: frontend-developer)`,
+      `2. 开发者修复完成后 → 主 Agent 执行: advance-phase.js ${storyId} 3`,
+      `3. 如果 Phase 3/4 仍失败 → 再次执行: advance-phase.js ${storyId} 2 --fix-loop`,
       `4. 达到 ${MAX_FIX_ROUNDS} 轮上限 → 人工介入处理`
     ]
   }, null, 2))
@@ -651,7 +670,49 @@ if (targetPhase === currentPhase) {
 }
 
 // ========================
-// 门控校验 (委托给 policy.cjs)
+// 🛡️ targetPhase 入参独立校验 — 校验 2: 步长
+// 到此处说明是正常推进路径（--rollback / --fix-loop 已在上方 exit）。
+// 相位跃迁必须严格 +1：既不允许倒退（那是 --rollback 的职责），
+// 也不允许跨越（跨 Phase 会跳过中间 Phase 的产出物门控与 dev-pass 签发/撤销）。
+// ========================
+
+if (targetPhase !== currentPhase + 1) {
+  const isBackward = targetPhase < currentPhase
+  console.log(JSON.stringify({
+    error: isBackward
+      ? `禁止倒退推进: 当前 Phase ${currentPhase}(${currentPhaseName}) → 目标 Phase ${targetPhase}(${getPhaseName(targetPhase)})`
+      : `禁止跨 Phase 推进: 当前 Phase ${currentPhase}(${currentPhaseName}) → 目标 Phase ${targetPhase}(${getPhaseName(targetPhase)})，一次只能推进一个 Phase`,
+    storyId,
+    currentPhase,
+    targetPhase,
+    whyBlocked: isBackward
+      ? ['倒退会使已完成 Phase 的产出物与状态不一致', '回退请使用 --rollback，它会归档中间产出物']
+      : [
+          `跳过了 Phase ${currentPhase + 1}~${targetPhase - 1} 的门控校验（产出物完整性、AC 格式、open-questions）`,
+          '跳过了 dev-pass 的签发/撤销时机（Phase 1→2 签发、Phase 2→3 撤销）',
+          '跳过了中间 Phase 的 phase-N-summary.md 生成，上下文链断裂'
+        ],
+    fixCommand: isBackward
+      ? `node advance-phase.js ${storyId} ${targetPhase} --rollback`
+      : `node advance-phase.js ${storyId} ${currentPhase + 1}`,
+    hint: isBackward
+      ? '如需回退，请加 --rollback'
+      : `请逐 Phase 推进：先执行到 Phase ${currentPhase + 1}，完成产出物后再推进下一个`
+  }, null, 2))
+
+  trace.appendTrace(storyId, {
+    type: 'phase_transition',
+    phase: String(currentPhase),
+    to: String(targetPhase),
+    result: 'blocked',
+    reason: isBackward ? 'backward_transition_without_rollback' : 'phase_skip_attempt'
+  })
+
+  process.exit(1)
+}
+
+// ========================
+// 门控校验 (委托给 policy.js)
 // ========================
 
 /** @type {{ passed: boolean, blockers: Array<{type:string,message:string,level:number,resolution:string}>, warnings: string[], recoveries: Array, _meta: Object }} */
@@ -793,7 +854,7 @@ if (!combinedResult.passed) {
       ? { action: 'run_fix_loop', command: combinedResult._meta.fixLoopHint, description: '执行修复回路: 提取问题 → 回退 Phase 2 → 签发限域 dev-pass → Spawn 开发者修复' }
       : (autoFixFlag
         ? { action: 'manual_fix', command: null, description: '自动修复未能解决所有 blockers，需人工分析处理' }
-        : { action: 'retry_with_auto_fix', command: `node advance-phase.cjs ${storyId} ${targetPhase} --auto-fix`, description: '可尝试 --auto-fix 自动修复格式类问题' })
+        : { action: 'retry_with_auto_fix', command: `node advance-phase.js ${storyId} ${targetPhase} --auto-fix`, description: '可尝试 --auto-fix 自动修复格式类问题' })
 
     console.log(JSON.stringify({
       success: false,
@@ -946,12 +1007,12 @@ if (targetPhase === 5) {
     trace.appendTrace(storyId, { type: 'dev_pass', phase: String(targetPhase), result: 'revoked', reason: 'phase_4_to_5_safety_net' })
     if (state.devPass) delete state.devPass
   }
-  // 标记 Git 提交阶段开始（后续 git 操作应通过 trace.cjs CLI 逐条记录）
+  // 标记 Git 提交阶段开始（后续 git 操作应通过 trace.js CLI 逐条记录）
   trace.appendTrace(storyId, {
     type: 'git',
     action: 'phase_start',
     result: 'pending',
-    details: { note: 'Phase 5 Git 提交阶段开始，使用 node trace.cjs git <storyId> <action> success <details> 逐条记录' }
+    details: { note: 'Phase 5 Git 提交阶段开始，使用 node trace.js git <storyId> <action> success <details> 逐条记录' }
   })
 }
 
@@ -1014,106 +1075,43 @@ if (summaryInfo) {
   result.phaseSummaryPhase = summaryInfo.phase
 }
 
-// 注入下个 Phase 需加载的契约文件清单（供主 Agent 指引子 Agent 优先读取）
-result.contractFilesToLoad = contextRefresh.getContractFiles(storyId, currentPhase)
+// 🆕 Agent Prompt 构造统一委托给 prompt-builder（单一信源）
+// 说明: prompt 的组装逻辑（摘要 + 教训 + 度量 + 契约内容 + 修复回路 + 约束）
+//       原先内联在此处，现抽到 services/prompt-builder.js，与 dispatch.js 共用，
+//       避免出现两份自称权威的 prompt 来源迫使主 Agent 自行拼接。
+const promptResult = promptBuilder.buildAgentPrompt({
+  storyId,
+  targetPhase,
+  summaryPhase: currentPhase,
+  summaryInfo
+})
 
-// 修复回路上下文注入：推进到 Phase 3 时，如果存在 fix-request.json，
-// 注入 fixLoopContext 供主 Agent 传递给代码审查师（增量审查锚点）
-if (targetPhase === 3) {
-  const fixRequestPath = path.join(PLANS_DIR, storyId, 'fix-request.json')
-  if (fs.existsSync(fixRequestPath)) {
-    try {
-      const fixRequest = JSON.parse(fs.readFileSync(fixRequestPath, 'utf-8'))
-      const fixVerificationPath = path.join(PLANS_DIR, storyId, 'fix-verification.json')
-      const hasFixVerification = fs.existsSync(fixVerificationPath)
-      result.fixLoopContext = {
-        active: true,
-        round: fixRequest.round,
-        maxRounds: fixRequest.maxRounds,
-        sourcePhase: fixRequest.sourcePhase,
-        issueCount: fixRequest.issues ? fixRequest.issues.length : 0,
-        affectedFiles: fixRequest.affectedFiles || [],
-        fixVerificationExists: hasFixVerification,
-        fixContextFile: '.codebuddy/plans/' + storyId + '/fix-context.md',
-        instruction: '本次审查为修复回路后的复查。请加载 fix-context.md + fix-request.json' +
-          (hasFixVerification ? ' + fix-verification.json' : '') +
-          '，逐项核对每个 FIX-XX 是否真正修复，聚焦复查 affectedFiles 的改动，确认未引入新问题。'
-      }
-    } catch (e) { /* fix-request.json 解析失败，跳过上下文注入 */ }
-  }
-}
+result.nextAgent = promptResult.agent
+result.nextAgentLabel = promptResult.agentLabel
+result.contractFilesToLoad = promptResult.contractFilesToLoad
+result.agentConstraints = promptResult.agentConstraints
+result.expectedOutputs = promptResult.expectedOutputs
+if (promptResult.lessonsFromHistory) result.lessonsFromHistory = promptResult.lessonsFromHistory
+if (promptResult.metricsInsights) result.metricsInsights = promptResult.metricsInsights
+if (promptResult.fixLoopContext) result.fixLoopContext = promptResult.fixLoopContext
 
-// 注入历史教训提示（如果下个 Phase 有已知失败模式）
-const lessons = experience.getLessonsForPhase(targetPhase)
-if (lessons) {
-  result.lessonsFromHistory = lessons.trim()
-}
-
-// 注入度量洞察（跨项目通用经验，供下个 Agent 参考优化方向）
-const metricsInsights = experience.getMetricsInsights(targetPhase)
-if (metricsInsights) {
-  result.metricsInsights = metricsInsights.trim()
-}
-
-// 🆕 注入 Agent 约束（主 Agent 在 Spawn 时必须包含在 prompt 中）
-// 解决: Agent prompt 缺少上下文和约束的问题
-result.agentConstraints = [
-  '禁止修改 e2e-state.json 和 dev-pass.json，状态机由 advance-phase.js 维护',
-  '只产出本 Phase 的产出物，完成后汇报产出物路径',
-  '由主 Agent 调用 advance-phase.js 推进 Phase，禁止自行修改 phase'
-]
-
-// 🆕 生成 suggestedAgentPrompt: 主 Agent 可直接使用的完整 prompt
-// 包含: 上下文摘要 + 历史教训 + 约束 + 契约文件内容(已读取)
-const contractContents = []
-for (const cf of result.contractFilesToLoad) {
-  const cfPath = path.join(PLANS_DIR, storyId, cf.replace(/^\.codebuddy\/plans\/[^/]+\//, ''))
-  if (fs.existsSync(cfPath)) {
-    try {
-      const content = fs.readFileSync(cfPath, 'utf-8')
-      // 截断过长的契约文件（保留前3000字符，避免 prompt 过长）
-      const truncated = content.length > 3000
-        ? content.slice(0, 3000) + '\n... (内容已截断，完整内容请读取源文件)'
-        : content
-      contractContents.push(`### ${cf}\n\`\`\`\n${truncated}\n\`\`\``)
-    } catch (e) {
-      contractContents.push(`### ${cf}\n(读取失败: ${e.message})`)
-    }
-  }
-}
-
-result.suggestedAgentPrompt = [
-  `## Story: ${storyId} | Phase: ${targetPhase} (${getPhaseName(targetPhase)})`,
-  '',
-  '## 上一 Phase 摘要',
-  summaryInfo ? summaryInfo.content : '(无摘要)',
-  '',
-  lessons ? `## 历史教训\n${lessons.trim()}\n` : '',
-  metricsInsights ? `## 度量洞察\n${metricsInsights.trim()}\n` : '',
-  '',
-  '## 契约文件内容',
-  contractContents.length > 0 ? contractContents.join('\n\n') : '(无契约文件)',
-  '',
-  '## 约束',
-  ...result.agentConstraints.map(c => `- 🚫 ${c}`),
-  '',
-  '## 你的任务',
-  '{主Agent在此填写具体任务描述}',
-  '',
-  '## 产出要求',
-  '{主Agent在此填写本Phase需要产出的文件清单}'
-].filter(Boolean).join('\n')
+// 完整可直接注入的 Agent prompt（无占位符，主 Agent 原样使用）
+result.agentPrompt = promptResult.agentPrompt
 
 // Phase 7 完成时自动触发度量聚合 + 标记工作流为 completed（终态）
 if (currentPhase === 7 && targetPhase > 7) {
   // 度量聚合
   try {
     const { execSync } = require('child_process')
-    const aggregatorPath = path.join(__dirname, 'metrics-aggregator.cjs')
+    const aggregatorPath = path.join(__dirname, '..', 'audit', 'metrics-aggregator.js')
     if (fs.existsSync(aggregatorPath)) {
       execSync(`node "${aggregatorPath}"`, { timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'], cwd: PROJECT_ROOT })
       console.log('  ✓ 度量聚合已完成，洞察已合并到全局经验库')
       trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: '7', result: 'success' })
+    } else {
+      // 路径不存在时显式告警，避免 existsSync 静默跳过导致度量永不聚合
+      console.log('  ⚠ 度量聚合脚本不存在（非阻塞）: ' + aggregatorPath)
+      trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: '7', result: 'skipped', reason: 'aggregator_not_found: ' + aggregatorPath })
     }
   } catch (e) {
     console.log('  ⚠ 度量聚合失败（非阻塞）: ' + (e.message || '').slice(0, 100))

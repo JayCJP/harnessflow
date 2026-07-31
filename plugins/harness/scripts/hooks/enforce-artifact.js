@@ -151,7 +151,7 @@ if (blockers.length > 0) {
     recordFailure: {
       failureType: 'phase_skip_attempt',
       rootCause: `Agent 试图跳 Phase 将状态推进到 Phase ${targetPhase}，但前置产出物缺失: ${blockers.join('; ')}`,
-      resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.cjs ${storyId} ${targetPhase} 统一推进`
+      resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.js ${storyId} ${targetPhase} 统一推进`
     }
   })
 
@@ -163,8 +163,8 @@ if (blockers.length > 0) {
       '以下前置产出物缺失:',
       ...blockers.map((b, i) => `  ${i + 1}. ${b}`),
       '',
-      '请先完成对应 Phase 的产出物，或使用 advance-phase.cjs 统一推进:',
-      `  node .codebuddy/scripts/advance-phase.cjs ${storyId} ${targetPhase}`
+      '请先完成对应 Phase 的产出物，或使用 advance-phase.js 统一推进:',
+      `  node .codebuddy/scripts/advance-phase.js ${storyId} ${targetPhase}`
     ].join('\n'),
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -173,7 +173,7 @@ if (blockers.length > 0) {
       recordFailure: {
         failureType: 'phase_skip_attempt',
         rootCause: `Agent 试图跳 Phase 将状态推进到 Phase ${targetPhase}，但前置产出物缺失: ${blockers.join('; ')}`,
-        resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.cjs ${storyId} ${targetPhase} 统一推进`
+        resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.js ${storyId} ${targetPhase} 统一推进`
       }
     }
   }

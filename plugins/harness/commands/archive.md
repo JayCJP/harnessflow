@@ -8,7 +8,7 @@ allowed-tools: Bash
 
 > 将 story 根目录**全部文件**归档到 `archive/round-{N}/`，root 目录清空。
 > 复档（restore）将归档文件全量恢复到 root，完全复原。
-> 归档后 `advance-phase.cjs` 的 `--rollback` / `--fix-loop` 被守卫拦截。
+> 归档后 `advance-phase.js` 的 `--rollback` / `--fix-loop` 被守卫拦截。
 
 ## 脚本
 
@@ -104,11 +104,11 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 ├── repos.json                        ├── archive/
 ├── requirement-analysis.md           │   ├── round-1/
 ├── task-dag.json                     │   │   ├── e2e-state.json
-├── code-review.md                    │   │   ├── trace.jsonl
+├── code-review.json                   │   │   ├── trace.jsonl
 ├── test-report.md                    │   │   ├── repos.json
 ├── ... (所有产物)                     │   │   ├── requirement-analysis.md
 └── archive/                          │   │   ├── task-dag.json
-    └── (旧的 .archived 散落文件)       │   │   ├── code-review.md
+    └── (旧的 .archived 散落文件)       │   │   ├── code-review.json
                                       │   │   ├── ... (全部文件)
                                       │   └── round-2/
                                       │       └── ...（下一轮）
@@ -119,7 +119,7 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 
 ## 守卫机制
 
-归档后 `advance-phase.cjs` 的 `--rollback` 和 `--fix-loop` 被守卫拦截：
+归档后 `advance-phase.js` 的 `--rollback` 和 `--fix-loop` 被守卫拦截：
 
 | 场景 | 归档前 | 归档后 |
 |------|--------|--------|

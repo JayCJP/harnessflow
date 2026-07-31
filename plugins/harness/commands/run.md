@@ -32,103 +32,63 @@ HARNESS=${CODEBUDDY_PLUGIN_ROOT}/scripts/commands
 
 以下所有脚本路径均基于此目录。**始终使用完整路径** `node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/<脚本名>`。
 
-### 每 Phase 执行循环（0→8 统一模式）
+### 执行流程（dispatch.js 单信源）
+
+每轮只做三步，主 Agent 不读状态、不做判断、不拼 prompt：
 
 ```
-┌──────────────────────────────────────────────┐
-│  1. Spawn 对应当前 Phase 的 Agent             │
-│  2. 等待 Agent 产出对应 Phase 的产出物          │
-│  3. 运行 advance-phase.js 推进到下一 Phase    │
-│     ├── success: true → 进入下一 Phase（回到1）│
-│     └── success: false → 进入错误恢复流程       │
-└──────────────────────────────────────────────┘
+Step 1: 执行 node $HARNESS/dispatch.js <storyId>
+Step 2: 按 status 分支（四态互斥且穷尽）
+  ┌ ready     → 若 readyToAdvance=true: 先执行 advanceCommand，再回 Step 1
+  │             否则: Spawn nextAgent，prompt = agentPrompt（原样注入）
+  ├ fix_loop  → 执行 recovery.command，再回 Step 1
+  ├ blocked   → 按 recovery.description 处理，无 command 则转人工
+  └ terminal  → 流程结束，按 recovery 提示收尾
+Step 3: 子 Agent 汇报产出物路径 → 回 Step 1
 ```
 
-### Phase → Agent → 推进脚本 → 下一 Phase 对照表
+dispatch.js 输出纯 JSON，含 `status` / `nextAgent` / `agentPrompt` / `advanceCommand` / `recovery`。
+主 Agent 按 status 机械分支，**不自行判断当前 Phase 和下一步该调谁**。
 
-| 当前 | Spawn 的 Agent | Agent 产出物 | 推进命令 |
-|------|---------------|-------------|---------|
-| 0 | 需求分析师 | `requirement-analysis.md` `acceptance-criteria.json` `open-questions.json` | `node $HARNESS/advance-phase.js <storyId> 1` |
-| 1 | 任务规划师 | `task-dag.md` `task-dag.json` | `node $HARNESS/advance-phase.js <storyId> 2` |
-| 2 | 前端开发工程师 | 代码变更（git diff） | `node $HARNESS/advance-phase.js <storyId> 3 [--lint-fix]` |
-| 3 | 代码审查师 | `code-review.md` | `node $HARNESS/advance-phase.js <storyId> 4` |
-| 4 | 测试工程师 | `test-report.md` `acceptance-verification.json` | `node $HARNESS/advance-phase.js <storyId> 5` |
-| 5 | 发布助手 | git commit + push + MR | `node $HARNESS/advance-phase.js <storyId> 6` |
-| 6 | 发布助手 | 知识库文档更新 | `node $HARNESS/advance-phase.js <storyId> 7` |
-| 7 | 发布助手 | 部署 URL + 构建号 | `node $HARNESS/advance-phase.js <storyId> 8` |
+dispatch.js 输出的 `nextAgent` 已是注册名，原样传给 Spawn 的 `name` 参数。
+`agentPrompt` 已包含 Phase 上下文、契约文件内容、产出要求，原样传给 `prompt` 参数。
+主 Agent 不读 Phase 不拼 prompt，只按 status 四态机械执行。
 
-> Phase 2 入口时 advance-phase.js 会自动签发 dev-pass；Phase 2→3 时自动撤销。
+### Agent Prompt 单一信源
+
+`agentPrompt` 由 `prompt-builder.js` 统一生成，**只有一个出口**: `dispatch.js` 的 `agentPrompt` 字段。
+它已包含 Story ID、当前 Phase、上一 Phase 摘要、契约文件内容、历史教训、约束条款、产出物清单、
+以及修复回路上下文（如有），**无占位符，原样注入即可**。
+
+主 Agent **不得**自行读取 `contractFilesToLoad` / `phaseSummaryContent` / `lessonsFromHistory`
+再拼装 prompt。一旦主 Agent 参与拼接，注入哪些上下文就变成一次自由裁量，
+不同轮次内容不一致，Phase 2 的 `files[]` 写入范围也可能被漏掉——这是流程失控的直接来源。
+prompt 内容需要调整时改 `prompt-builder.js`，不改主 Agent 行为。
 
 ### advance-phase.js 输出解读
 
-脚本输出为 JSON，AI 必须根据 `success` 字段分叉处理：
-
-**success: true 时**：
-```json
-{
-  "success": true,
-  "storyId": "...",
-  "fromPhase": 2, "toPhase": 3,
-  "gateChecks": { "passed": true },
-  "phaseSummaryContent": "...",       // ← 注入给下一个 Agent
-  "contractFilesToLoad": ["..."],     // ← 告诉下一个 Agent 先读这些文件
-  "lessonsFromHistory": "...",        // ← 注入给下一个 Agent（如有）
-  "fixLoopContext": { "active": true, ... }  // ← 仅 Phase 2→3 修复回路复查时出现
-}
-```
-**AI 动作**：读取 `contractFilesToLoad` 中的文件，将其内容 + `phaseSummaryContent` + `lessonsFromHistory` 注入到下一个 Agent 的 prompt 中。如有 `fixLoopContext.active`，额外注入修复上下文。
-
-**success: false 时**：
-```json
-{
-  "success": false,
-  "gatePassed": false,
-  "nextAction": {
-    "action": "run_fix_loop",            // 或 "retry_with_auto_fix" / "manual_fix"
-    "command": "advance-phase.js ...",  // 可直接执行的命令
-    "description": "..."
-  },
-  "fixLoopAvailable": true,
-  "blockers": ["..."],
-  "structuredBlockers": [{ "type": "...", "message": "...", "level": 2 }]
-}
-```
-**AI 动作**：读取 `nextAction.action`，执行对应恢复流程（见下节）。
-
----
-
-## 错误恢复决策树
+只看 `success` 一个字段，两个分支：
 
 ```
-advance-phase 返回 success: false
-│
-├── nextAction.action === "run_fix_loop"
-│   → 执行 nextAction.command（即 advance-phase.js <storyId> 2 --fix-loop）
-│   → 该脚本输出 spawnPrompt → 将其注入给前端开发工程师 Agent
-│   → 开发者修复完成后 → 重新执行 advance-phase.js <storyId> 3
-│
-├── nextAction.action === "retry_with_auto_fix"
-│   → 执行 nextAction.command（即加 --auto-fix 重试）
-│   → 自动修复格式类问题后重新门控
-│
-└── nextAction.action === "manual_fix"
-    → 输出 structuredBlockers 给用户
-    → 等待用户手动处理后重新推进
+success: true   → 回 Step 1 重新 dispatch.js（新 Phase 的指令由它给出）
+success: false  → recovery.command 存在 → 原样执行 → 回 Step 1
+                  recovery.command 为 null → 转人工，转述 recovery.description
 ```
 
-**fix-loop 完整流程**（当审查/测试失败时由 advance-phase.js --fix-loop 自动编排）：
+输出中的 `phaseSummaryContent` / `contractFilesToLoad` / `lessonsFromHistory` 是
+**给 `prompt-builder.js` 用的中间数据**，主 Agent 不消费、不解析、不注入。
 
-```
-1. 脚本自动从 code-review.md / acceptance-verification.json 提取 BLOCKER
-2. 自动回退到 Phase 2，重新签发限域 dev-pass（仅 affectedFiles）
-3. 生成 fix-request.json + fix-context.md
-4. 输出 spawnPrompt（包含待修复问题清单 + 约束 + 产出要求）
-   → AI 将其注入前端开发工程师 Agent prompt
-5. 开发者修复完成 → AI 执行 advance-phase.js <storyId> 3
-   → 脚本自动注入 fixLoopContext 给代码审查师（增量审查）
-```
+### 错误恢复
 
-> 默认最大 2 轮 fix-loop，超出 → `nextAction.action === "human_intervention_required"`
+**不需要决策树。** 恢复策略（fix-loop / `--auto-fix` 重试 / 降级 / 转人工）由 `policy.js`
+按 `recovery level` 判定：1=自动修复、2=提示修复、3=降级、4=人工。主 Agent 不参与选择，
+只执行 `dispatch.js` 或 `advance-phase.js` 给出的 `recovery.command`。
+
+fix-loop 由 `advance-phase.js --fix-loop` 全程自动编排：提取 BLOCKER → 回退 Phase 2 →
+重签限域 dev-pass（仅 `affectedFiles`）→ 生成 `fix-request.json` + `fix-context.md`。
+执行完命令后回 Step 1，`dispatch.js` 会输出带 `fixLoopContext` 的 `agentPrompt`。
+
+> 默认最大 2 轮，超出后 `dispatch.js` 输出 `status: blocked` 且 `recovery.command` 为 null → 转人工。
 
 ---
 
@@ -175,7 +135,7 @@ Phase 2→3: 脚本自动撤销（主撤销点）
 Phase 4→5: 脚本自动兜底撤销（防止 fix-loop 残留，幂等操作）
 ```
 
-AI 只需要在 Phase 2 时 Spawn 前端开发工程师，脚本会确保 dev-pass 在正确的时间存在/消失。
+AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，脚本会确保 dev-pass 在正确的时间存在/消失。
 
 | 操作 | 命令 | 场景 |
 |------|------|------|
@@ -191,7 +151,7 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师，脚本会确保 dev-pa
 | 0 | 需求分析 | 需求分析师 | `requirement-analysis.md` `acceptance-criteria.json` `open-questions.json` | AC criteria 非空；open-questions 全 resolved。Agent 内部需调用 `use_skill("kb-query")` 检索项目知识库 |
 | 1 | 任务规划 | 任务规划师 | `task-dag.md` `task-dag.json` | AC↔Task 交叉引用完整；推进时自动签发 dev-pass |
 | 2 | 代码开发 | 前端开发工程师 | 代码变更 | ESLint 0 error；推进时撤销 dev-pass |
-| 3 | 代码审查 | 代码审查师 | `code-review.md` | 无未修复 BLOCKER |
+| 3 | 代码审查 | 代码审查师 | `code-review.json` | 无未修复 BLOCKER（`issues[].status === "open"` 且 `severity === "BLOCKER"`） |
 | 4 | 功能测试 | 测试工程师 | `test-report.md` `acceptance-verification.json` | failed=0；推进时兜底撤销 dev-pass |
 | 5 | Git 提交 | 发布助手 | commit + push + MR | 禁止 --no-verify |
 | 6 | 知识库更新 | 发布助手 | meta.yaml 刷新 | `use_skill("kb-update")` 调用成功（保留手工批注） |
@@ -223,6 +183,22 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师，脚本会确保 dev-pa
 }
 ```
 
+**code-review.json** (Phase 3，代码审查师产出 — 唯一产出物，已废弃 code-review.md):
+```json
+{
+  "issues": [{
+    "id": "B1",
+    "severity": "BLOCKER|MAJOR|MINOR",
+    "status": "open|fixed",        // MUST: 门控唯一信源，BLOCKER+open 阻断推进
+    "file": "src/views/xxx.vue",
+    "line": 42,
+    "title": "...",
+    "description": "...",
+    "suggestion": "..."
+  }]
+}
+```
+
 **acceptance-verification.json** (Phase 4，测试工程师产出):
 ```json
 {
@@ -235,9 +211,10 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师，脚本会确保 dev-pa
 
 | Hook | 触发时机 | 作用 |
 |------|---------|------|
-| `enforce-no-direct-code-edit.cjs` | 每次文件 write/replace | dev-pass 有效性 + 路径限域 + Phase 校验 |
-| `enforce-artifact-before-phase.cjs` | 同上 | Phase 0-1 产出物存在性确认 |
-| `session-start.cjs` | 对话启动 | 断点恢复 + 加载 summary + 注入经验 + 契约清单 |
+| `enforce-state-file.js` | 每次文件 write/replace | 拦截对 e2e-state.json / dev-pass.json 的写操作 |
+| `enforce-dev-pass.js` | 同上 | dev-pass 有效性 + 路径限域 + Phase 校验 |
+| `enforce-artifact.js` | 同上 | Phase 0-1 产出物存在性确认 |
+| `session-start.js` | 对话启动 | 断点恢复 + 加载 summary + 注入经验 + 契约清单 |
 
 ## 附录 D：文件目录结构（参考）
 

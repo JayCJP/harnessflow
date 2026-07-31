@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * metrics-aggregator.cjs — 度量聚合引擎
+ * metrics-aggregator.js — 度量聚合引擎
  *
  * 职责：
  * 1. 读取当前项目所有 Story 的 trace.jsonl + e2e-state.json
  * 2. 计算 8 项核心指标（Phase 耗时、门控通过率、Fix-loop 触发率等）
  * 3. 生成跨项目通用的流程级洞察（非项目特定逻辑）
  * 4. 合并到全局经验库 ~/.codebuddy/experience/metrics-insights.json
- * 5. 供 advance-phase.cjs 和 session-start.cjs 注入到 Agent prompt
+ * 5. 供 advance-phase.js 和 session-start.js 注入到 Agent prompt
  *
  * 用法：
- *   node metrics-aggregator.cjs                    # 聚合当前项目 + 合并到全局
- *   node metrics-aggregator.cjs --json             # JSON 输出（不写入全局）
- *   node metrics-aggregator.cjs --global-stats     # 查看全局统计
+ *   node metrics-aggregator.js                    # 聚合当前项目 + 合并到全局
+ *   node metrics-aggregator.js --json             # JSON 输出（不写入全局）
+ *   node metrics-aggregator.js --global-stats     # 查看全局统计
  *
  * 触发时机：
- *   - Phase 7 完成时由 advance-phase.cjs 自动触发
+ *   - Phase 7 完成时由 advance-phase.js 自动触发
  *   - 手动执行
  *
  * @module metrics-aggregator

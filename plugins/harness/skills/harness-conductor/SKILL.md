@@ -11,40 +11,45 @@ description: >
 ## 核心原则
 
 > **AI 不操作工作流状态，所有 Phase 推进必须通过脚本完成。**
->
-> **🆕 主 Agent 使用 dispatcher 模式: 不读状态、不做决策、只照 dispatcher 指令执行。**
 
-## dispatcher 模式执行流程（新）
-
-主 Agent 在每个 Phase 推进循环中执行以下步骤：
+三层职责边界，不可越界：
 
 ```
-Step 1: Spawn dispatcher Agent
-        → 输入: Story ID
-        → dispatcher 读取 e2e-state.json → 按 Phase→Agent 映射表输出调度指令
-
-Step 2: 读取 dispatcher 输出的 JSON 指令
-        → 提取: nextAgent / instruction / inputFiles / advanceCommand / warnings
-
-Step 3: 如有 warnings → 提醒用户确认
-
-Step 4: 如有 recovery → 按 recovery.command 执行（如 fix-loop）
-
-Step 5: Spawn nextAgent（注入 instruction + inputFiles 文件内容）
-        → 使用 advance-phase.js 输出的 suggestedAgentPrompt 作为 prompt 模板
-
-Step 6: Agent 完成 → 汇报产出物路径
-
-Step 7: 执行 advanceCommand（advance-phase.js 推进 Phase）
-
-Step 8: 回到 Step 1（dispatcher 根据新 phase 输出下一步）
+┌─ dispatch.js      = 读状态 + 说下一步   （只读，零写权限）      ─┐
+│  advance-phase.js = 判门控 + 写状态     （相位跃迁唯一执行者）   │
+└─ 主 Agent         = 触发                （无判断权，机械执行）  ─┘
 ```
+
+**触发权 ≠ 决定权**：命令由主 Agent 敲，但是否合法由 `advance-phase.js` 独立裁定。
+主 Agent 传错 targetPhase（越界／跨阶／倒退）会被脚本拒绝，不会写坏状态。
+
+## 执行流程
+
+每个循环只有三步。**主 Agent 不读状态、不做判断、不拼 prompt。**
+
+```
+Step 1: 执行 node ${HARNESS}/dispatch.js <storyId>
+        → 输出纯 JSON，含 status / nextAgent / agentPrompt / advanceCommand
+
+Step 2: 按 status 分支（四态互斥且穷尽，无「其他情况自行处理」）
+
+  ┌ ready     → 若 readyToAdvance=true: 先执行 advanceCommand，再回 Step 1
+  │             否则: Spawn nextAgent，prompt = agentPrompt（原样注入，不加工）
+  ├ fix_loop  → 执行 recovery.command
+  ├ blocked   → 按 recovery.description 处理，无 command 则转人工
+  └ terminal  → 流程结束（未创建／已完成／已归档），按 recovery 提示收尾
+
+Step 3: 子 Agent 汇报产出物路径 → 回到 Step 1
+```
+
+如有 `warnings` → 转述给用户确认，但不因此改变分支。
 
 **主 Agent 禁止的行为**:
-- 🚫 禁止直接读取 e2e-state.json（由 dispatcher 读取）
-- 🚫 禁止自行判断当前 Phase 和下一步该调谁（由 dispatcher 决策）
-- 🚫 禁止自行处理异常恢复（由 dispatcher 输出 recovery 指令）
-- ✅ 主 Agent 只做一件事: 按 dispatcher 指令执行
+- 🚫 禁止直接读取 e2e-state.json（由 dispatch.js 读取）
+- 🚫 禁止自行判断当前 Phase 和下一步该调谁（由 dispatch.js 查表）
+- 🚫 禁止自行处理异常恢复（由 dispatch.js 输出 recovery）
+- 🚫 禁止自行拼接或改写 `agentPrompt`（它已完整，无占位符）
+- ✅ 主 Agent 只做两件机械动作: Spawn 指定的 Agent、执行给定的命令
 
 ## 脚本路径约定
 
@@ -52,18 +57,28 @@ Step 8: 回到 Step 1（dispatcher 根据新 phase 输出下一步）
 HARNESS=${CODEBUDDY_PLUGIN_ROOT}/scripts/commands
 ```
 
-## Phase → Agent → 推进命令对照
+## Phase → Agent 对照（仅供阅读，不作为执行依据）
 
-| 当前 | Agent | 产出物 | 推进命令 |
-|------|-------|--------|---------|
-| 0 | 需求分析师 | `requirement-analysis.md` `acceptance-criteria.json` `open-questions.json` | `node ${HARNESS}/advance-phase.js <storyId> 1` |
-| 1 | 任务规划师 | `task-dag.md` `task-dag.json` | `node ${HARNESS}/advance-phase.js <storyId> 2` |
-| 2 | 前端开发工程师 | 代码变更（git diff） | `node ${HARNESS}/advance-phase.js <storyId> 3` |
-| 3 | 代码审查师 | `code-review.json` | `node ${HARNESS}/advance-phase.js <storyId> 4` |
-| 4 | 测试工程师 | `test-report.md` `acceptance-verification.json` | `node ${HARNESS}/advance-phase.js <storyId> 5` |
-| 5 | 发布助手 | git commit + push | `node ${HARNESS}/advance-phase.js <storyId> 6` |
-| 6 | 发布助手 | 知识库更新 | `node ${HARNESS}/advance-phase.js <storyId> 7` |
-| 7 | 发布助手 | 部署 URL + 构建号 | `node ${HARNESS}/advance-phase.js <storyId> 8` |
+> ⚠️ 这张表是**给人看的**。运行时的权威来源是 `scripts/lib/state.js` 的 `PHASE_AGENTS`，
+> 由 `dispatch.js` 查表后以 `nextAgent` 字段输出。主 Agent 用 `nextAgent`，不查这张表。
+
+| 当前 | Agent（注册名） | 产出物 |
+|------|-------|--------|
+| 0 | 需求分析师 `requirement-analyst` | `requirement-analysis.md` `acceptance-criteria.json` `open-questions.json` |
+| 1 | 任务规划师 `task-planner` | `task-dag.md` `task-dag.json` |
+| 2 | 前端开发工程师 `frontend-developer` | 代码变更（git diff） |
+| 3 | 代码审查师 `code-reviewer` | `code-review.json` |
+| 4 | 测试工程师 `test-engineer` | `test-report.md` `acceptance-verification.json` |
+| 5 | 发布助手 `release-assistant` | git commit + push |
+| 6 | 发布助手 `release-assistant` | 知识库更新 |
+| 7 | 发布助手 `release-assistant` | 部署 URL + 构建号 |
+| 8 | —（终态，无 Agent） | 流程结束 |
+
+**Spawn 时必须用注册名**（表中反引号内的英文，即 agent frontmatter 的 `name` 字段）。
+Agent 文件名和正文标题是中文，但注册键是英文 `name`——传中文名无法解析到 Agent。
+`dispatch.js` 的 `nextAgent` 已是注册名，直接使用即可。
+
+**推进命令不要手写**：从 `dispatch.js` 的 `advanceCommand` 字段取，它已算好 `targetPhase`。
 
 ## 工作流生命周期
 
@@ -83,53 +98,34 @@ node ${HARNESS}/archive-story.js <storyId> restore [--round N] [--force]
 
 ## 错误恢复
 
-```
-advance-phase 返回 success: false
-├── run_fix_loop → 执行提示的命令 → 开发者修复 → 重新推进
-├── retry_with_auto_fix → 加 --auto-fix 重试
-└── manual_fix → 提示用户手动处理
-```
-
-## Agent Prompt 编写规范
-
-1. 必须包含：Story ID、当前 Phase、上一个 Phase 的 summary
-2. 必须注入：`phaseSummaryContent` + `contractFilesToLoad`
-3. 必须注入：`lessonsFromHistory`（历史教训）
-4. Phase 2 Agent 必须包含：task-dag.json 中的 files[] 范围
-
-### 使用 suggestedAgentPrompt（推荐方式）
-
-advance-phase.js 推进后输出中已包含 `suggestedAgentPrompt` 字段，主 Agent 应直接使用：
+**不需要决策树。** `advance-phase.js` 返回 `success: false` 时，输出中已带 `recovery.command`，
+主 Agent 执行它，然后回到 Step 1 重新 `dispatch.js`。
 
 ```
-1. 执行 advance-phase.js <storyId> <targetPhase>
-2. 从 JSON 输出中提取 suggestedAgentPrompt
-3. 将 {主Agent在此填写具体任务描述} 和 {产出要求} 替换为实际内容
-4. 将完整 prompt 注入到 Spawn Agent 的 prompt 参数中
+advance-phase.js 失败
+  ├─ recovery.command 存在 → 原样执行 → 回 Step 1
+  └─ recovery.command 为 null → 转人工，转述 recovery.description 给用户
 ```
 
-**示例流程**:
+恢复策略（fix-loop / --auto-fix 重试 / 转人工）由 `policy.js` 按 `recovery level` 判定：
+1=自动修复、2=提示修复、3=降级、4=人工。主 Agent 不参与选择。
+
+## Agent Prompt 单一信源
+
+`agentPrompt` 由 `prompt-builder.js` 统一生成，**只有一个出口**: `dispatch.js` 输出的 `agentPrompt` 字段。
+它已包含 Story ID、当前 Phase、上一 Phase 摘要、契约文件内容、历史教训、约束条款、产出物清单，
+**无占位符，可直接原样注入**。
+
 ```
-advance-phase.js 输出:
-{
-  "success": true,
-  "suggestedAgentPrompt": "## Story: STORY-001 | Phase: 2 (代码开发)\n\n## 上一 Phase 摘要\n...\n\n## 契约文件内容\n### acceptance-criteria.json\n```json\n{...}\n```\n\n## 约束\n- 🚫 禁止修改 e2e-state.json...\n\n## 你的任务\n{主Agent在此填写具体任务描述}\n\n## 产出要求\n{主Agent在此填写本Phase需要产出的文件清单}"
-}
-
-主 Agent 操作:
-1. 读取 suggestedAgentPrompt
-2. 替换 {主Agent在此填写具体任务描述} → "修复 RoleManage.vue 的筛选下拉框缺少全部选项"
-3. 替换 {产出要求} → "修改 src/views/pc/manage/RoleManage.vue"
-4. Spawn frontend-developer Agent，prompt = 替换后的 suggestedAgentPrompt
+node ${HARNESS}/dispatch.js <storyId>
+  └─ agentPrompt      ← 原样传给 Spawn 的 prompt 参数
+     nextAgent        ← 传给 Spawn 的 Agent 注册名
+     expectedOutputs  ← 本 Phase 应产出的文件（用于校验子 Agent 汇报）
 ```
 
-### 手动构造 prompt（不推荐，容易遗漏上下文）
-
-如果必须手动构造，至少包含：
-- advance-phase.js 输出中的 phaseSummaryContent
-- advance-phase.js 输出中的 contractFilesToLoad 文件内容
-- advance-phase.js 输出中的 lessonsFromHistory
-- advance-phase.js 输出中的 agentConstraints
+**为什么不允许主 Agent 加工 prompt**: 一旦主 Agent 参与拼接，注入哪些上下文就变成一次自由裁量，
+不同轮次注入的内容会不一致，Phase 2 的 `files[]` 写入范围也可能被漏掉——这是流程不可控的直接来源。
+prompt 内容需要调整时，改 `prompt-builder.js`，不改主 Agent 行为。
 
 ## 铁律
 

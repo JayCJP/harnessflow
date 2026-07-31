@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * archive-story.cjs — Story 归档与复档
+ * archive-story.js — Story 归档与复档
  *
  * 将 story 根目录所有文件归档到 archive/round-{N}/，保持根目录整洁。
  * 支持复档（restore）将归档文件恢复到 story 根目录（最外层）。
@@ -8,10 +8,10 @@
  * 归档后 root 目录清空。
  *
  * 用法:
- *   node archive-story.cjs <storyId> archive [--dry-run] [--round <N>] [--force]
- *   node archive-story.cjs <storyId> restore [--round <N>] [--force] [--keep-archive]
- *   node archive-story.cjs <storyId> list
- *   node archive-story.cjs <storyId> status
+ *   node archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]
+ *   node archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]
+ *   node archive-story.js <storyId> list
+ *   node archive-story.js <storyId> status
  *
  * @module archive-story
  */
@@ -566,25 +566,25 @@ const command = args[1]
 
 if (!storyId || !command) {
   console.log([
-    'archive-story.cjs — Story 归档与复档',
+    'archive-story.js — Story 归档与复档',
     '',
     '用法:',
-    '  node archive-story.cjs <storyId> archive [--dry-run] [--round <N>] [--force]',
+    '  node archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]',
     '    归档: 将 root 目录全部文件移入 archive/round-{N}/（含 e2e-state / trace / repos）',
     '    --dry-run    预览归档清单，不实际移动',
     '    --round <N>  指定轮次编号（缺省自动检测）',
     '    --force      非终态 (phase<8) 强制归档',
     '',
-    '  node archive-story.cjs <storyId> restore [--round <N>] [--force] [--keep-archive]',
+    '  node archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]',
     '    复档: 将 archive/round-{N}/ 全部文件恢复到 root（完全复原）',
     '    --round <N>     指定轮次（缺省自动取最新 round）',
     '    --force         覆盖根目录同名文件',
     '    --keep-archive  保留归档副本（默认移动清空归档）',
     '',
-    '  node archive-story.cjs <storyId> list',
+    '  node archive-story.js <storyId> list',
     '    列出所有归档轮次',
     '',
-    '  node archive-story.cjs <storyId> status',
+    '  node archive-story.js <storyId> status',
     '    查看归档状态（root 目录是否已清空）',
     ''
   ].join('\n'))

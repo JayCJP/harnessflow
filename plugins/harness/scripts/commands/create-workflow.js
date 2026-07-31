@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * create-workflow.cjs — 创建工作流统一入口
+ * create-workflow.js — 创建工作流统一入口
  *
  * 在创建 e2e-state.json 之前，强制检查原型分析文档是否存在。
  * 如果缺少原型文档 → 拒绝创建状态文件。
  *
  * 用法:
- *   node .codebuddy/scripts/create-workflow.cjs <storyId> "<title>" [--bypass]
+ *   node create-workflow.js <storyId> "<title>" [--bypass]
  *
  * 参数:
  *   storyId  - Story 唯一标识
@@ -65,7 +65,7 @@ function createWorkflow (storyId, title, bypass, hasFigma) {
         '',
         'Greenfield 项目，无现有原型可抓取。无需 Playwright MCP 抓取。',
         '',
-        '> 此文件由 `create-workflow.cjs` 自动生成。如有原型链接，请替换为实际抓取内容。',
+        '> 此文件由 `create-workflow.js` 自动生成。如有原型链接，请替换为实际抓取内容。',
         ''
       ].join('\n')
       const protoDir = path.dirname(protoDoc.path)
@@ -160,7 +160,7 @@ function createWorkflow (storyId, title, bypass, hasFigma) {
     stateFile: stateFilePath,
     message: bypass
       ? `✅ 工作流已创建（bypass 模式），直接进入 Phase 2 (代码开发)，dev-pass 已签发`
-      : `✅ 工作流已创建，当前 Phase 0 (需求分析)，请 spawn 需求分析师`
+      : `✅ 工作流已创建，当前 Phase 0 (需求分析)，请 spawn 需求分析师 (agent 注册名: requirement-analyst)`
   }
 }
 
@@ -174,8 +174,8 @@ if (require.main === module) {
   const cliHasFigma = args.includes('--figma')
 
   if (!cliStoryId || !cliTitle) {
-    console.error('用法: node create-workflow.cjs <storyId> "<title>" [--bypass] [--figma]')
-    console.error('示例: node create-workflow.cjs STORY-001 "1v1客服等级分配模式"')
+    console.error('用法: node create-workflow.js <storyId> "<title>" [--bypass] [--figma]')
+    console.error('示例: node create-workflow.js STORY-001 "1v1客服等级分配模式"')
     console.error('  --bypass  跳过 Phase 0-1')
     console.error('  --figma   标注有 Figma 设计稿，强制要求 Phase 2 前生成 figma-component-map.md')
     process.exit(1)

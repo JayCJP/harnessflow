@@ -97,7 +97,7 @@ node $HARNESS/advance-phase.js <storyId> 1
 
 ### Phase 0 Agent：需求分析师
 
-Spawn `需求分析师` Agent，prompt 必须包含：
+Spawn `requirement-analyst`（需求分析师）Agent，prompt 必须包含：
 
 ```
 ## 上下文
@@ -137,11 +137,11 @@ Spawn `需求分析师` Agent，prompt 必须包含：
 
 ### Phase 1：任务规划
 
-Spawn `任务规划师`，prompt 中注入 Bug 分析报告的代码定位信息，确保 task-dag 中的 files[] 包含所有受影响文件。
+Spawn `task-planner`（任务规划师），prompt 中注入 Bug 分析报告的代码定位信息，确保 task-dag 中的 files[] 包含所有受影响文件。
 
 ### Phase 2：代码开发
 
-Spawn `前端开发工程师`（如有多项目，并行启动多个开发者 Agent）。
+Spawn `frontend-developer`（前端开发工程师，如有多项目，并行启动多个开发者 Agent）。
 
 每个 prompt 必须包含对应项目的 Bug 分析报告章节（问题复述 + 根因 + 修复建议）。
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * context-refresh.cjs — 上下文刷新模块
+ * context-refresh.js — 上下文刷新模块
  *
  * 每个 Phase 完成后生成 summary，供下个 Agent 加载时替代完整历史。
  * 实现 Claude Code Level 4 Autocompact 的简化版: 保存关键决策 + 契约路径 + 待办。
@@ -116,7 +116,7 @@ function getPhaseArtifacts (storyId, phase) {
     0: ['requirement-analysis.md', 'acceptance-criteria.json', 'open-questions.json', 'prototype-analysis.md', 'figma-frame-inventory.json'],
     1: ['task-dag.md', 'task-dag.json'],
     2: [], // 代码变更，无文件产出物
-    3: ['code-review.md'],
+    3: ['code-review.json'],
     4: ['test-report.md', 'acceptance-verification.json'],
     5: [], // git commit
     6: [], // 知识库更新
@@ -139,6 +139,9 @@ function getPhaseArtifacts (storyId, phase) {
             summary = `${data.questions.length} 项 (${resolved} 已解决)`
           } else if (f === 'task-dag.json' && data.tasks) {
             summary = `${data.tasks.length} 个任务`
+          } else if (f === 'code-review.json' && Array.isArray(data.issues)) {
+            const openBlockers = data.issues.filter(i => i.severity === 'BLOCKER' && i.status === 'open').length
+            summary = `${data.issues.length} 个问题 (${openBlockers} 个未修复 BLOCKER)`
           } else if (f === 'acceptance-verification.json' && data.results) {
             const passed = data.results.filter(r => r.status === 'passed').length
             summary = `${data.results.length} 条 (${passed} passed)`
@@ -162,38 +165,40 @@ function getPhaseArtifacts (storyId, phase) {
  */
 function getNextSteps (completedPhase, storyId) {
   const next = completedPhase + 1
+  // 注意: Spawn 时必须使用 agent 的注册名（frontmatter 的 name 字段，英文），
+  // 中文仅为可读性标注。传中文名无法解析到 agent。
   const steps = {
     0: [
-      `Spawn 任务规划师 → 拆解任务 DAG`,
+      `Spawn 任务规划师 (task-planner) → 拆解任务 DAG`,
       `生成 task-dag.md + task-dag.json (含 figmaLink)`,
-      `运行: node advance-phase.cjs ${storyId} 2`
+      `运行: node advance-phase.js ${storyId} 2`
     ],
     1: [
-      `⚡ dev-pass 已签发，可编辑 src/`,
-      `Fork → 并行 spawn 前端开发工程师 (注入 figmaLink + AC)`,
-      `Join → npm run lint → node advance-phase.cjs ${storyId} 3`
+      `dev-pass 已签发，可编辑 src/`,
+      `Fork → 并行 spawn 前端开发工程师 (frontend-developer) (注入 figmaLink + AC)`,
+      `Join → npm run lint → node advance-phase.js ${storyId} 3`
     ],
     2: [
       `dev-pass 已撤销，禁止直接编辑 src/`,
-      `Spawn 代码审查师 → git diff → code-review.md`,
-      `无 BLOCKER → node advance-phase.cjs ${storyId} 4`
+      `Spawn 代码审查师 (code-reviewer) → git diff → code-review.json`,
+      `无 BLOCKER → node advance-phase.js ${storyId} 4`
     ],
     3: [
-      `Spawn 测试工程师 → 用例设计 + 接口验证`,
+      `Spawn 测试工程师 (test-engineer) → 用例设计 + 接口验证`,
       `生成 test-report.md + acceptance-verification.json`,
-      `100% AC passed → node advance-phase.cjs ${storyId} 5`
+      `100% AC passed → node advance-phase.js ${storyId} 5`
     ],
     4: [
-      `Spawn 发布助手 → git add + commit + push`,
-      `禁止 --no-verify → node advance-phase.cjs ${storyId} 6`
+      `Spawn 发布助手 (release-assistant) → git add + commit + push`,
+      `禁止 --no-verify → node advance-phase.js ${storyId} 6`
     ],
     5: [
-      `Spawn 发布助手 → kb-update Skill`,
-      `保留手工批注 → node advance-phase.cjs ${storyId} 7`
+      `Spawn 发布助手 (release-assistant) → kb-update Skill`,
+      `保留手工批注 → node advance-phase.js ${storyId} 7`
     ],
     6: [
-      `Spawn 发布助手 → devops MCP`,
-      `构建 + 部署 → node advance-phase.cjs ${storyId} 8`
+      `Spawn 发布助手 (release-assistant) → devops MCP`,
+      `构建 + 部署 → node advance-phase.js ${storyId} 8`
     ],
     7: [`🎉 工作流完成！`]
   }
