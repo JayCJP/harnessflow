@@ -40,6 +40,8 @@ const {
   errorToType
 } = require('../lib/state')
 
+const schemaValidator = require('./schema-validator')
+
 // ─── 错误恢复建议表 ─────────────────────────────────────────────
 
 /**
@@ -173,10 +175,10 @@ const RECOVERY_SUGGESTIONS = {
     autoFixable: false,
     resolution: 'advance-phase.js <storyId> 2 --fix-loop'
   },
-  // Phase 3→4: code-review.md 不存在
+  // Phase 3→4: code-review.json 不存在
   code_review_missing: {
     level: 4,
-    action: '需先 spawn 代码审查师产出 code-review.md',
+    action: '需先 spawn 代码审查师产出 code-review.json',
     autoFixable: false
   },
   // Phase 4→5: evidence 字符串→数组
@@ -311,6 +313,25 @@ function runGateCheck (storyId, phaseNum, state) {
       if (suggestion) result.recoveries.push({ blocker, suggestion })
     }
     result.passed = false
+  }
+
+  // 1.5. 🆕 JSON Schema 校验（产出物存在时，校验格式是否符合 schema）
+  const jsonArtifacts = schemaValidator.getPhaseArtifacts(phaseNum)
+  if (jsonArtifacts.length > 0) {
+    for (const fileName of jsonArtifacts) {
+      const schemaResult = schemaValidator.validateArtifact(storyId, fileName)
+      if (!schemaResult.valid) {
+        for (const err of schemaResult.errors) {
+          result.blockers.push(structuredError(
+            'schema_validation_failed',
+            `Schema 校验失败: ${err}`,
+            2,
+            `请检查 ${fileName} 格式是否符合规范，参考 schemas/ 目录下的 schema 定义`
+          ))
+        }
+        result.passed = false
+      }
+    }
   }
 
   // 2. Phase 特定契约检查
@@ -516,84 +537,70 @@ function checkPhase1Gate (storyId, result) {
 }
 
 /**
- * Phase 3→4 门控: code-review.md + 无 BLOCKER + fixLoop 提示
- * 注意：code-review.md 的文件存在性已由 runGateCheck 中的 checkPhaseArtifact 覆盖，
+ * Phase 3→4 门控: code-review.json + 无 BLOCKER + fixLoop 提示
+ * 注意：code-review.json 的文件存在性已由 runGateCheck 中的 checkPhaseArtifact 覆盖，
  *       此函数只负责内容检查（BLOCKER 数量等），避免重复采集。
  *       当检测到 BLOCKER 时，附加 fixLoopAvailable 标记供主 Agent 触发修复回路。
  */
 function checkPhase3Gate (storyId, result) {
-  const crPath = path.join(PLANS_DIR, storyId, 'code-review.md')
-  // 文件不存在时由 checkPhaseArtifact 统一记录 artifact_missing，此处跳过避免重复
-  if (!fs.existsSync(crPath)) return
+  const crJsonPath = path.join(PLANS_DIR, storyId, 'code-review.json')
 
-  const crContent = fs.readFileSync(crPath, 'utf-8')
-  let hasBlocker = false
+  // 读取 code-review.json（唯一信源）
+  if (!fs.existsSync(crJsonPath)) return
 
-  // 检查是否有未修复的 BLOCKER
-  const blockerSection = crContent.match(/###\s*BLOCKER[^\n]*\n([\s\S]*?)(?=\n###|\n##[^#]|$)/i)
-  if (blockerSection) {
-    const rows = blockerSection[1].split('\n').filter(l =>
-      l.trim().startsWith('|') && !l.includes('---') && !l.toLowerCase().includes('id') && !l.toLowerCase().includes('已修复')
+  try {
+    const crData = JSON.parse(fs.readFileSync(crJsonPath, 'utf-8'))
+    const openBlockers = (crData.issues || []).filter(
+      i => i.severity === 'BLOCKER' && i.status === 'open'
     )
-    if (rows.length > 0) {
-      result.blockers.push(structuredError(
-        'code_review_blocker',
-        `code-review.md 中有 ${rows.length} 个未修复的 BLOCKER`,
-        2,
-        `执行修复回路: advance-phase.js ${storyId} 2 --fix-loop`
-      ))
+    if (openBlockers.length > 0) {
+      for (const b of openBlockers) {
+        result.blockers.push(structuredError(
+          'code_review_blocker',
+          `BLOCKER ${b.id}: ${b.title} (${b.file}${b.line ? ':' + b.line : ''})`,
+          2,
+          `执行修复回路: advance-phase.js ${storyId} 2 --fix-loop`
+        ))
+      }
       result.passed = false
-      hasBlocker = true
     }
-  }
 
-  // 兼容旧格式: 全文搜索 "N 个 BLOCKER" 或 "N BLOCKER" 模式
-  if (!hasBlocker) {
-    const blockerMatch = crContent.match(/(\d+)\s*(个|\s+)BLOCKER/i)
-    if (blockerMatch && parseInt(blockerMatch[1], 10) > 0) {
-      result.blockers.push(structuredError(
-        'code_review_blocker',
-        `code-review.md 中有 ${blockerMatch[1]} 个 BLOCKER 问题`,
-        2,
-        `执行修复回路: advance-phase.js ${storyId} 2 --fix-loop`
-      ))
-      result.passed = false
-      hasBlocker = true
-    }
-  }
-
-  // 附加 fixLoopAvailable 标记（供主 Agent 判断是否需要修复回路）
-  if (hasBlocker) {
-    result._meta = result._meta || {}
-    result._meta.fixLoopAvailable = true
-    result._meta.fixLoopSource = 'phase3'
-    result._meta.fixLoopHint = `advance-phase.js ${storyId} 2 --fix-loop`
-  }
-
-  // 修复回路上下文检查：如果存在 fix-request.json，说明是 fix-loop 后的复查
-  // fix-verification.json 是开发者产出的逐项核对报告，辅助审查师聚焦复查
-  const fixRequestPath = path.join(PLANS_DIR, storyId, 'fix-request.json')
-  if (fs.existsSync(fixRequestPath)) {
-    const fixVerificationPath = path.join(PLANS_DIR, storyId, 'fix-verification.json')
-    if (!fs.existsSync(fixVerificationPath)) {
-      result.warnings.push('修复回路复查: 缺少 fix-verification.json，开发者未产出修复核对报告，请审查师重点关注 affectedFiles 的修复完整性')
-    } else {
-      try {
-        const fv = JSON.parse(fs.readFileSync(fixVerificationPath, 'utf-8'))
-        if (Array.isArray(fv.fixes)) {
-          const skipped = fv.fixes.filter(f => f.status === 'skipped')
-          if (skipped.length > 0) {
-            result.warnings.push(`修复回路复查: ${skipped.length} 个问题被标记为 skipped (${skipped.map(s => s.id).join(', ')})，请审查师确认是否有合理理由`)
+    // 修复回路上下文检查
+    const fixRequestPath = path.join(PLANS_DIR, storyId, 'fix-request.json')
+    if (fs.existsSync(fixRequestPath)) {
+      const fixVerificationPath = path.join(PLANS_DIR, storyId, 'fix-verification.json')
+      if (!fs.existsSync(fixVerificationPath)) {
+        result.warnings.push('修复回路复查: 缺少 fix-verification.json，开发者未产出修复核对报告')
+      } else {
+        try {
+          const fv = JSON.parse(fs.readFileSync(fixVerificationPath, 'utf-8'))
+          if (Array.isArray(fv.fixes)) {
+            const skipped = fv.fixes.filter(f => f.status === 'skipped')
+            if (skipped.length > 0) {
+              result.warnings.push(`修复回路复查: ${skipped.length} 个问题被标记为 skipped，请审查师确认`)
+            }
           }
-          const partially = fv.fixes.filter(f => f.status === 'partially')
-          if (partially.length > 0) {
-            result.warnings.push(`修复回路复查: ${partially.length} 个问题被标记为 partially (${partially.map(s => s.id).join(', ')})，请审查师重点复查`)
-          }
+        } catch (e) {
+          result.warnings.push('修复回路复查: fix-verification.json 解析失败')
         }
-      } catch (e) {
-        result.warnings.push('修复回路复查: fix-verification.json 解析失败，请审查师手动核对修复情况')
       }
     }
+
+    // 附加 fixLoopAvailable 标记
+    if (!result.passed) {
+      result._meta = result._meta || {}
+      result._meta.fixLoopAvailable = true
+      result._meta.fixLoopSource = 'phase3'
+      result._meta.fixLoopHint = `advance-phase.js ${storyId} 2 --fix-loop`
+    }
+  } catch (e) {
+    result.blockers.push(structuredError(
+      'code_review_blocker',
+      `code-review.json 解析失败: ${e.message}`,
+      4,
+      '请检查 code-review.json 格式是否正确'
+    ))
+    result.passed = false
   }
 }
 
@@ -672,6 +679,16 @@ function checkPhase4Gate (storyId, result) {
     result._meta.fixLoopAvailable = true
     result._meta.fixLoopSource = 'phase4'
     result._meta.fixLoopHint = `advance-phase.js ${storyId} 2 --fix-loop`
+  }
+
+  // open-questions 检查: Phase 4→5 提交前提醒未 resolve 的问题
+  const oqCheck = checkOpenQuestions(storyId)
+  if (oqCheck.exists && oqCheck.unresolvedCount > 0) {
+    const unresolvedList = oqCheck.unresolved.map(q => `${q.id}: ${q.question}`).join('; ')
+    result.warnings.push(
+      `open-questions.json 中有 ${oqCheck.unresolvedCount} 个未 resolve 的问题: ${unresolvedList}。` +
+      '需后端配合的问题请标记 resolved:true + resolution:"前端已预留，待后端配合"；前端可确认的问题请在开发过程中确认并标记 resolved'
+    )
   }
 }
 

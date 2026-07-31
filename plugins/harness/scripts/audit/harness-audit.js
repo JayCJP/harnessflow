@@ -16,10 +16,12 @@ function auditSettings() {
 }
 
 function auditHooks() {
+  // 实际 hook 脚本位于 scripts/hooks/ (audit 的 __dirname 是 scripts/audit/，所以 ../hooks)
   const hd = path.join(__dirname, "..", "hooks")
-  if (!fs.existsSync(hd)) { issues.push({ cat: "hooks", severity: "BLOCKER", msg: "hooks/ 目录不存在" }); return }
-  const exp = ["session-start.cjs","session-stop.cjs","enforce-no-direct-code-edit.cjs","enforce-artifact-before-phase.cjs"]
-  const ex = fs.readdirSync(hd).filter(f => f.endsWith(".cjs"))
+  if (!fs.existsSync(hd)) { issues.push({ cat: "hooks", severity: "BLOCKER", msg: "hooks 脚本目录不存在: " + hd }); return }
+  // 当前实际 hook 文件 (v2: .js 后缀)
+  const exp = ["session-start.js","session-stop.js","enforce-dev-pass.js","enforce-artifact.js","enforce-state-file.js","trace-command.js"]
+  const ex = fs.readdirSync(hd).filter(f => f.endsWith(".js") || f.endsWith(".cjs"))
   for (const f of exp) { if (!ex.includes(f)) issues.push({ cat: "hooks", severity: "BLOCKER", msg: "缺失 hook: " + f }) }
   for (const f of ex) {
     try { execSync("node --check \"" + path.join(hd, f) + "\"", { timeout: 5000, stdio: "pipe" }) }

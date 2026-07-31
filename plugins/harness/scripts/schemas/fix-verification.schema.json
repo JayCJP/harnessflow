@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fix Verification Schema",
+  "description": "修复核对报告校验规则",
+  "type": "object",
+  "required": ["round", "source", "issues", "affectedFiles"],
+  "properties": {
+    "round": { "type": "integer", "minimum": 1 },
+    "source": { "type": "string", "enum": ["code-review", "acceptance-test"] },
+    "sourcePhase": { "type": "integer" },
+    "totalIssues": { "type": "integer", "minimum": 1 },
+    "fixedIssues": { "type": "integer", "minimum": 0 },
+    "unfixedIssues": { "type": "integer", "minimum": 0 },
+    "issues": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "file", "status"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^FIX-\\d+$" },
+          "severity": { "type": "string", "enum": ["BLOCKER", "WARNING"] },
+          "file": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["fixed", "partially", "skipped"] },
+          "description": { "type": "string" },
+          "fix": { "type": "string" },
+          "linesChanged": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "affectedFiles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "lintCheck": { "type": "string" }
+  },
+  "additionalProperties": true
+}

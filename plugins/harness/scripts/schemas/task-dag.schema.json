@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Task DAG Schema",
+  "description": "任务DAG契约校验规则",
+  "type": "object",
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "files", "acceptanceCriteria", "parallelizable"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^task-\\d+$" },
+          "title": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "acceptanceCriteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^AC-\\d+$" }
+          },
+          "figmaLink": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          },
+          "parallelizable": { "type": "boolean" },
+          "complexity": { "type": "string", "enum": ["low", "medium", "high"] },
+          "estimate": { "type": "integer", "minimum": 1 },
+          "project": { "type": ["string", "null"] },
+          "repoPath": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "batches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["batchId", "taskIds"],
+        "properties": {
+          "batchId": { "type": "integer", "minimum": 1 },
+          "taskIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^task-\\d+$" }
+          },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

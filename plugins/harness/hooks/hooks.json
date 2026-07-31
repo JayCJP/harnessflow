@@ -15,6 +15,14 @@
         "matcher": "write_to_file|replace_in_file",
         "hooks": [{
           "type": "command",
+          "command": "node ${CODEBUDDY_PLUGIN_ROOT}/scripts/hooks/enforce-state-file.js",
+          "timeout": 5
+        }]
+      },
+      {
+        "matcher": "write_to_file|replace_in_file",
+        "hooks": [{
+          "type": "command",
           "command": "node ${CODEBUDDY_PLUGIN_ROOT}/scripts/hooks/enforce-dev-pass.js",
           "timeout": 10
         }]

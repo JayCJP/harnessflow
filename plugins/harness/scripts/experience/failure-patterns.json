@@ -162,8 +162,109 @@
       "lastSeen": "2026-07-30T07:20:14.120Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "agent_direct_state_mutation",
+      "rootCause": "Agent在完成任务后自行修改了e2e-state.json（phase: 1→2），未通过advance-phase.js推进，导致门控被跳过",
+      "resolution": "① Spawn Agent的prompt中必须包含禁止修改e2e-state.json/dev-pass.json的约束 ② Agent只产出本Phase产出物，由主Agent调用advance-phase.js推进Phase ③ advance-phase.js 增加 e2e-state.json 完整性校验",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "advance-phase.js 门控被跳过"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T09:39:41.139Z",
+      "lastSeen": "2026-07-30T09:39:41.140Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 3,
+      "failureType": "code_review_stale_blocker_rows",
+      "rootCause": "增量审查Agent覆盖code-review.md时，旧的BLOCKER表格行(| B1 | ... |)未被清除，advance-phase.js门控脚本用正则检测到残留的| Bd+ |模式，误判为未修复的BLOCKER",
+      "resolution": "① 主Agent在Phase 3→4推进前检查code-review.md的BLOCKER表格行是否实际已修复 ② 如表格行残留但BLOCKER已修复，手动清理表格行 ③ advance-phase.js门控脚本改为解析FIX_DATA块而非正则匹配表格行",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "门控误判：code-review.md 中有 2 个未修复的 BLOCKER"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T09:39:41.152Z",
+      "lastSeen": "2026-07-30T09:39:41.152Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 5,
+      "failureType": "eslint_auto_import_config_missing",
+      "rootCause": ".eslintrc-auto-import.json由vite build时unplugin-auto-import生成，但eslintrc.enabled=false导致文件缺失，pre-commit hook中ESLint直接报错",
+      "resolution": "① .eslintrc.cjs改为条件引用(existsSync判断)，文件缺失时不阻断ESLint ② 临时设vite.config.js中eslintrc.enabled=true → npx vite build --mode dev → 恢复enabled=false ③ 将.eslintrc-auto-import.json加入.gitignore",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "pre-commit hook ESLint失败"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T09:39:41.159Z",
+      "lastSeen": "2026-07-30T09:39:41.159Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 5,
+      "failureType": "open_questions_never_resolved",
+      "rootCause": "2个待确认问题(Q-1 roleName需后端, Q-2 getSelfTakeStoreList参数)贯穿全流程未标记resolved，主Agent在Phase 5提交前未检查open-questions.json",
+      "resolution": "① advance-phase.js在Phase 4→5门控时检查open-questions.json中是否有unresolved项，有则输出warning ② 主Agent在Phase 5前必须提醒用户确认未resolved项 ③ 需后端配合的问题标记为resolved:true+resolution:\"前端已预留，待后端配合\"",
+      "storyId": "STORY-20260710-01",
+      "blockers": [],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T09:39:41.167Z",
+      "lastSeen": "2026-07-30T09:39:41.167Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "agent_prompt_missing_context",
+      "rootCause": "主Agent Spawn下游Agent时未将advance-phase.js输出的phaseSummaryContent和contractFilesToLoad注入prompt，Agent启动后缺少上一Phase的上下文信息",
+      "resolution": "① 主Agent每次Spawn前读取advance-phase.js输出的phaseSummaryContent+contractFilesToLoad文件内容 ② 将以上内容+lessonsFromHistory注入Agent prompt ③ advance-phase.js输出增加promptInjectionTemplate字段，供主Agent直接使用",
+      "storyId": "STORY-20260710-01",
+      "blockers": [],
+      "occurrences": 1,
+      "firstSeen": "2026-07-30T09:39:41.174Z",
+      "lastSeen": "2026-07-30T09:39:41.174Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 3,
+      "failureType": "event_listener_leak",
+      "rootCause": "前端组件中bus.on/addEventListener注册的事件监听器在组件销毁时未清理，导致内存泄漏。常见于弹窗/抽屉在打开状态下被路由切换销毁时，watch的else分支不执行",
+      "resolution": "① 组件中注册的事件监听器必须在onBeforeUnmount中清理(bus.off/removeEventListener) ② 弹窗打开状态下被销毁时清理逻辑必须兜底生效 ③ 前端开发工程师Agent prompt中已增加事件清理强制要求",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "FIX-01: watch中bus.on注册的监听器未清理"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-31T03:06:13.937Z",
+      "lastSeen": "2026-07-31T03:06:13.938Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 3,
+      "failureType": "v_loading_scroll_conflict",
+      "rootCause": "v-loading指令与@scroll事件绑定在同一元素上，Element Plus遮罩层可能拦截滚动事件导致无限滚动失效",
+      "resolution": "① 外层元素承载v-loading，内层实际滚动容器承载@scroll ② 内层设置height:100%+overflow-y:auto，外层设置overflow:hidden+position:relative ③ 前端开发工程师Agent prompt中已增加分离要求",
+      "storyId": "STORY-20260710-01",
+      "blockers": [
+        "FIX-02/FIX-03: v-loading与@scroll绑定同一元素"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-07-31T03:06:13.965Z",
+      "lastSeen": "2026-07-31T03:06:13.965Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.0",
-  "lastUpdated": "2026-07-30T08:27:08.415Z"
+  "lastUpdated": "2026-07-31T03:06:13.965Z"
 }

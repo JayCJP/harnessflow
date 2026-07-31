@@ -228,7 +228,7 @@ const PHASE_ARTIFACTS = {
     ]
   },
   2: { artifacts: [{ fileName: null, description: '代码变更（git diff）', contract: false }] },
-  3: { artifacts: [{ fileName: 'code-review.md', description: '代码审查报告', contract: false }] },
+  3: { artifacts: [{ fileName: 'code-review.json', description: '代码审查结构化数据(JSON格式，唯一产出物)', contract: true }] },
   4: {
     artifacts: [
       { fileName: 'test-report.md', description: '测试报告', contract: false },

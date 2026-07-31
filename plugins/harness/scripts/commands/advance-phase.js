@@ -116,6 +116,80 @@ const currentPhase = (state.phase !== undefined && state.phase !== null) ? state
 const currentPhaseName = getPhaseName(currentPhase)
 
 // ========================
+// 🛡️ e2e-state 完整性校验: 检测 Agent 是否绕过脚本直接修改了 phase
+// 历史教训: STORY-20260710-01 中 task-planner Agent 直接修改 phase 导致门控被跳过
+// 策略: 检测到篡改 → 拒绝推进 + 输出明确修复指引（不自动修复，要求人工确认）
+// ========================
+
+/**
+ * 校验 state.phases 中每个 phase 的状态与实际 phase 值是否一致
+ * 如果某个 phase 标记为 completed 但 state.phase 仍在该 phase 之前 → 发现篡改
+ * @param {Object} state - e2e-state.json 解析对象
+ * @returns {{ valid: boolean, actualPhase: number, declaredPhase: number }}
+ */
+function validatePhaseIntegrity (state) {
+  const declaredPhase = state.phase
+  let maxCompletedPhase = -1
+  if (state.phases) {
+    for (const [key, val] of Object.entries(state.phases)) {
+      if (val.status === 'completed') {
+        const phaseMatch = key.match(/^(\d+)_/)
+        if (phaseMatch) {
+          const p = parseInt(phaseMatch[1], 10)
+          if (p > maxCompletedPhase) maxCompletedPhase = p
+        }
+      }
+    }
+  }
+  if (maxCompletedPhase > declaredPhase) {
+    return { valid: false, actualPhase: maxCompletedPhase, declaredPhase }
+  }
+  return { valid: true, actualPhase: declaredPhase, declaredPhase }
+}
+
+const integrityCheck = validatePhaseIntegrity(state)
+if (!integrityCheck.valid) {
+  const errorOutput = {
+    error: 'e2e-state.json 完整性校验失败: 检测到 Agent 越权修改状态文件',
+    storyId,
+    details: {
+      declaredPhase: integrityCheck.declaredPhase,
+      actualPhase: integrityCheck.actualPhase,
+      rootCause: `Agent 在 Phase ${integrityCheck.declaredPhase} 完成后直接修改了 state.phase，将 phases.${integrityCheck.actualPhase}_* 标记为 completed，但未通过 advance-phase.js 推进`,
+      whyBlocked: [
+        '1. 跳过 advance-phase.js 的门控校验（产出物完整性、AC 格式、open-questions 等）',
+        '2. 跳过 dev-pass 的签发/撤销逻辑（Phase 1→2 签发、Phase 2→3 撤销）',
+        '3. 跳过上下文摘要（phase-N-summary.md）生成',
+        '4. trace.jsonl 缺失关键事件记录，审计链断裂'
+      ]
+    },
+    fixCommand: `node advance-phase.js ${storyId} ${integrityCheck.actualPhase}`,
+    fixSteps: [
+      `1. 确认 Phases ${integrityCheck.declaredPhase + 1}~${integrityCheck.actualPhase} 的产出物是否已由 Agent 生成`,
+      `2. 手动将 e2e-state.json 的 phase 改回 ${integrityCheck.declaredPhase}`,
+      `3. 逐 Phase 执行 advance-phase.js 推进（从 ${integrityCheck.declaredPhase} 到 ${integrityCheck.actualPhase}），让脚本重新执行门控`,
+      `4. 或者直接执行: node advance-phase.js ${storyId} ${integrityCheck.actualPhase}（跳过的 Phase 门控将无法追溯）`
+    ],
+    prevention: [
+      'Agent prompt 中必须包含: "禁止修改 e2e-state.json，Phase 推进由主 Agent 调用 advance-phase.js 完成"',
+      'Agent 完成任务后只汇报产出物路径，不操作状态文件'
+    ]
+  }
+
+  // 记录 trace（篡改事件）
+  trace.appendTrace(storyId, {
+    type: 'phase_integrity_violation',
+    phase: String(integrityCheck.declaredPhase),
+    actualPhase: String(integrityCheck.actualPhase),
+    result: 'blocked',
+    reason: 'agent_direct_state_mutation_detected'
+  })
+
+  console.log(JSON.stringify(errorOutput, null, 2))
+  process.exit(1)
+}
+
+// ========================
 // --rollback: 回退 Phase（归档当前阶段产出物，更新 phase）
 // ========================
 
@@ -214,69 +288,30 @@ if (rollbackFlag) {
 // ========================
 
 /**
- * 从 code-review.md 中提取 BLOCKER 级别问题
- * 支持两种格式：
- *   1. 表格格式: ### BLOCKER 下的 | file | line | description | suggestion |
- *   2. FIX_DATA 块: <!-- FIX_DATA_START --> YAML fixes 列表
- * @param {string} content - 审查报告 Markdown 内容
+ * 从 code-review.json 中提取 BLOCKER 级别问题
+ * @param {string} storyDir - Story 目录路径
  * @returns {Array<{id, severity, file, line, description, suggestion}>}
  */
-function extractFixIssuesFromReview(content) {
-  const blockers = []
+function extractFixIssuesFromReview(storyDir) {
+  const crJsonPath = path.join(storyDir, 'code-review.json')
+  if (!fs.existsSync(crJsonPath)) return []
 
-  // 方式 1: 尝试解析 FIX_DATA YAML 块（优先，精确度最高）
-  const fixDataMatch = content.match(/<!--\s*FIX_DATA_START\s*-->([\s\S]*?)<!--\s*FIX_DATA_END\s*-->/i)
-  if (fixDataMatch) {
-    const yamlLines = fixDataMatch[1].split('\n')
-    let currentFix = null
-    for (const line of yamlLines) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('- file:')) {
-        if (currentFix) blockers.push(currentFix)
-        currentFix = {
-          id: `FIX-${String(blockers.length + 1).padStart(2, '0')}`,
-          severity: 'BLOCKER',
-          file: trimmed.replace('- file:', '').trim()
-        }
-      } else if (currentFix) {
-        if (trimmed.startsWith('line:')) currentFix.line = trimmed.replace('line:', '').trim()
-        else if (trimmed.startsWith('severity:')) currentFix.severity = trimmed.replace('severity:', '').trim()
-        else if (trimmed.startsWith('description:')) currentFix.description = trimmed.replace('description:', '').trim()
-        else if (trimmed.startsWith('suggestion:')) currentFix.suggestion = trimmed.replace('suggestion:', '').trim()
-      }
-    }
-    if (currentFix) blockers.push(currentFix)
-    return blockers
+  try {
+    const crData = JSON.parse(fs.readFileSync(crJsonPath, 'utf-8'))
+    const openBlockers = (crData.issues || []).filter(
+      i => i.severity === 'BLOCKER' && i.status === 'open'
+    )
+    return openBlockers.map((b, idx) => ({
+      id: b.id || `FIX-${String(idx + 1).padStart(2, '0')}`,
+      severity: 'BLOCKER',
+      file: b.file || '',
+      line: b.line ? String(b.line) : '',
+      description: b.title ? `${b.title}: ${b.description || ''}` : (b.description || ''),
+      suggestion: b.suggestion || ''
+    }))
+  } catch (e) {
+    return []
   }
-
-  // 方式 2: 解析 ### BLOCKER 标题下的表格（兼容旧格式）
-  const blockerSection = content.match(/###\s*BLOCKER[^\n]*\n([\s\S]*?)(?=\n###|\n##[^#]|$)/i)
-  if (!blockerSection) return blockers
-
-  const rows = blockerSection[1].split('\n').filter(l =>
-    l.trim().startsWith('|') && !l.includes('---') && !l.toLowerCase().includes('文件') && !l.toLowerCase().includes('已修复')
-  )
-
-  rows.forEach((row, idx) => {
-    const cols = row.split('|').map(c => c.trim()).filter(Boolean)
-    if (cols.length >= 2) {
-      // 解析 "文件:行号" 格式
-      const fileMatch = (cols[0] || '').match(/^(.+?)(?::(\d+))?$/)
-      const file = fileMatch ? fileMatch[1].trim() : (cols[0] || '').trim()
-      const line = fileMatch && fileMatch[2] ? fileMatch[2] : ''
-
-      blockers.push({
-        id: `FIX-${String(idx + 1).padStart(2, '0')}`,
-        severity: 'BLOCKER',
-        file,
-        line,
-        description: cols[1] || '',
-        suggestion: cols.length >= 3 ? cols[2] : ''
-      })
-    }
-  })
-
-  return blockers
 }
 
 /**
@@ -317,16 +352,14 @@ if (fixLoopFlag) {
   let sourcePhase = null
   let sourceFile = null
 
-  // 尝试从 code-review.md 提取 BLOCKER
-  const reviewPath = path.join(storyDir, 'code-review.md')
-  if (fs.existsSync(reviewPath)) {
-    const reviewContent = fs.readFileSync(reviewPath, 'utf-8')
-    const extracted = extractFixIssuesFromReview(reviewContent)
-    if (extracted.length > 0) {
-      issues = extracted
-      sourcePhase = 3
-      sourceFile = 'code-review.md'
-    }
+  // 从 code-review.json / code-review.md 提取 BLOCKER
+  const extracted = extractFixIssuesFromReview(storyDir)
+  if (extracted.length > 0) {
+    issues = extracted
+    sourcePhase = 3
+    // 优先标记 JSON 信源
+    const crJsonPath = path.join(storyDir, 'code-review.json')
+    sourceFile = fs.existsSync(crJsonPath) ? 'code-review.json' : 'code-review.md'
   }
 
   // 如果审查报告没有 BLOCKER，尝试从 acceptance-verification.json 提取 failed
@@ -595,6 +628,24 @@ if (fixLoopFlag) {
 }
 
 if (targetPhase === currentPhase) {
+  // Phase 0 复用检测: 如果推进到 Phase 1 时 Phase 0 产出物已存在，输出提示
+  if (currentPhase === 0 && targetPhase === 0) {
+    const storyDir = path.join(PLANS_DIR, storyId)
+    const raPath = path.join(storyDir, 'requirement-analysis.md')
+    const acPath = path.join(storyDir, 'acceptance-criteria.json')
+    const hasPhase0Artifacts = fs.existsSync(raPath) && fs.existsSync(acPath)
+    if (hasPhase0Artifacts) {
+      console.log(JSON.stringify({
+        success: true, storyId, phase: currentPhase, name: currentPhaseName,
+        note: '已在目标 Phase，无需推进',
+        phase0Reuse: {
+          detected: true,
+          message: 'Phase 0 产出物已存在，可直接复用。如 bug 分析报告有更新但 AC 未反映，请手动更新 acceptance-criteria.json 后推进到 Phase 1'
+        }
+      }, null, 2))
+      process.exit(0)
+    }
+  }
   console.log(JSON.stringify({ success: true, storyId, phase: currentPhase, name: currentPhaseName, note: '已在目标 Phase，无需推进' }, null, 2))
   process.exit(0)
 }
@@ -1003,6 +1054,55 @@ const metricsInsights = experience.getMetricsInsights(targetPhase)
 if (metricsInsights) {
   result.metricsInsights = metricsInsights.trim()
 }
+
+// 🆕 注入 Agent 约束（主 Agent 在 Spawn 时必须包含在 prompt 中）
+// 解决: Agent prompt 缺少上下文和约束的问题
+result.agentConstraints = [
+  '禁止修改 e2e-state.json 和 dev-pass.json，状态机由 advance-phase.js 维护',
+  '只产出本 Phase 的产出物，完成后汇报产出物路径',
+  '由主 Agent 调用 advance-phase.js 推进 Phase，禁止自行修改 phase'
+]
+
+// 🆕 生成 suggestedAgentPrompt: 主 Agent 可直接使用的完整 prompt
+// 包含: 上下文摘要 + 历史教训 + 约束 + 契约文件内容(已读取)
+const contractContents = []
+for (const cf of result.contractFilesToLoad) {
+  const cfPath = path.join(PLANS_DIR, storyId, cf.replace(/^\.codebuddy\/plans\/[^/]+\//, ''))
+  if (fs.existsSync(cfPath)) {
+    try {
+      const content = fs.readFileSync(cfPath, 'utf-8')
+      // 截断过长的契约文件（保留前3000字符，避免 prompt 过长）
+      const truncated = content.length > 3000
+        ? content.slice(0, 3000) + '\n... (内容已截断，完整内容请读取源文件)'
+        : content
+      contractContents.push(`### ${cf}\n\`\`\`\n${truncated}\n\`\`\``)
+    } catch (e) {
+      contractContents.push(`### ${cf}\n(读取失败: ${e.message})`)
+    }
+  }
+}
+
+result.suggestedAgentPrompt = [
+  `## Story: ${storyId} | Phase: ${targetPhase} (${getPhaseName(targetPhase)})`,
+  '',
+  '## 上一 Phase 摘要',
+  summaryInfo ? summaryInfo.content : '(无摘要)',
+  '',
+  lessons ? `## 历史教训\n${lessons.trim()}\n` : '',
+  metricsInsights ? `## 度量洞察\n${metricsInsights.trim()}\n` : '',
+  '',
+  '## 契约文件内容',
+  contractContents.length > 0 ? contractContents.join('\n\n') : '(无契约文件)',
+  '',
+  '## 约束',
+  ...result.agentConstraints.map(c => `- 🚫 ${c}`),
+  '',
+  '## 你的任务',
+  '{主Agent在此填写具体任务描述}',
+  '',
+  '## 产出要求',
+  '{主Agent在此填写本Phase需要产出的文件清单}'
+].filter(Boolean).join('\n')
 
 // Phase 7 完成时自动触发度量聚合 + 标记工作流为 completed（终态）
 if (currentPhase === 7 && targetPhase > 7) {
