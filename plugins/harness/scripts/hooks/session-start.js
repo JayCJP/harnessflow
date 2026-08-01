@@ -27,11 +27,9 @@ const hookUtils = require(path.join(__dirname, '..', 'lib', 'state'))
 const contextRefresh = require(path.join(__dirname, '..', 'services', 'context-refresh'))
 const experience = require(path.join(__dirname, '..', 'services', 'experience'))
 
-/** 项目根目录 */
-const PROJECT_ROOT = process.env.CODEBUDDY_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd()
-
-/** plans 目录 */
-const PLANS_DIR = path.join(PROJECT_ROOT, '.codebuddy', 'plans')
+/** 项目根目录 / plans 目录 — 复用 lib/state.js 单一信源（已归一化 Git Bash 风格路径） */
+const PROJECT_ROOT = hookUtils.PROJECT_ROOT
+const PLANS_DIR = hookUtils.PLANS_DIR
 
 /** 验证脚本路径 — 服务层 services/ 目录 */
 const GATE_SCRIPT = path.join(__dirname, '..', 'services', 'validate-phase-gate')

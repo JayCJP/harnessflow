@@ -11,7 +11,12 @@ const summary = {}
 
 function auditSettings() {
   const sp = path.join(PROJECT_ROOT, ".codebuddy", "settings.json")
-  if (!fs.existsSync(sp)) { issues.push({ cat: "config", severity: "BLOCKER", msg: "settings.json 不存在" }); return }
+  if (!fs.existsSync(sp)) {
+    // 本机 hooks 由 CodeBuddy 全局配置注入，项目内不一定有 settings.json，
+    // 因此缺失时不报 BLOCKER，降级为 WARNING 提示
+    warnings.push({ cat: "config", severity: "WARNING", msg: "settings.json 不存在（hooks 可能由全局配置注入，可忽略）" })
+    return
+  }
   try { JSON.parse(fs.readFileSync(sp, "utf-8")); summary.settingsValid = true } catch (e) { issues.push({ cat: "config", severity: "BLOCKER", msg: "settings.json 解析失败: " + e.message }) }
 }
 

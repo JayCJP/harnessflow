@@ -39,7 +39,10 @@ process.stdin.on('end', () => {
 
   // 记录 trace
   try {
-    const PROJECT_ROOT = process.env.CODEBUDDY_PROJECT_DIR || process.cwd()
+    // 归一化 Git Bash / MSYS 风格盘符路径（"/d/xxx" → "d:/xxx"），仅 Windows
+    const rawRoot = process.env.CODEBUDDY_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd()
+    const winDrive = process.platform === 'win32' ? /^\/([a-zA-Z])\/(.*)$/.exec(rawRoot) : null
+    const PROJECT_ROOT = winDrive ? `${winDrive[1]}:/${winDrive[2]}` : rawRoot
     const plansDir = path.join(PROJECT_ROOT, '.codebuddy', 'plans')
     const storyDirs = fs.existsSync(plansDir)
       ? fs.readdirSync(plansDir).filter(d => fs.statSync(path.join(plansDir, d)).isDirectory())

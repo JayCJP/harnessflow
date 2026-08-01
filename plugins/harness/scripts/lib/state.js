@@ -17,8 +17,35 @@ const path = require('path')
 
 // ─── 路径常量 ──────────────────────────────────────────────────
 
+/**
+ * 归一化项目根路径，兼容 Windows 下 Git Bash / MSYS 风格路径
+ *
+ * 宿主（CodeBuddy / Claude）在 Git Bash 环境下注入的 CODEBUDDY_PROJECT_DIR
+ * 可能是 POSIX 风格（如 "/d/workfile/xxx" 或 "/c/Users/xxx"）。Windows 上
+ * Node 的 path.join 会把 "/d/workfile" 当作当前盘符下的绝对路径，解析成
+ * "d:\d\workfile\xxx"（多出一层盘符名目录），导致状态文件写错位置。
+ * 此函数在 Windows 平台把 "/<盘符>/rest" 还原为 "<盘符>:/rest"。
+ *
+ * @param {string} p - 原始路径（可能是 POSIX 风格）
+ * @returns {string} 归一化后的路径
+ */
+function normalizeProjectRoot (p) {
+  if (!p) return p
+  // 仅在 Windows 平台处理 Git Bash / MSYS 风格盘符路径
+  if (process.platform === 'win32') {
+    const m = /^\/([a-zA-Z])\/(.*)$/.exec(p)
+    if (m) {
+      // "/d/workfile/xxx" → "d:/workfile/xxx"
+      return `${m[1]}:/${m[2]}`
+    }
+  }
+  return p
+}
+
 /** 项目根目录 */
-const PROJECT_ROOT = process.env.CODEBUDDY_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd()
+const PROJECT_ROOT = normalizeProjectRoot(
+  process.env.CODEBUDDY_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd()
+)
 
 /** plans 目录 */
 const PLANS_DIR = path.join(PROJECT_ROOT, '.codebuddy', 'plans')

@@ -166,26 +166,19 @@ function aggregateMetrics () {
         storyFixLoopSucceeded = true
       }
 
-      // dev-pass 签发事件
+      // dev-pass 签发事件（精度统计从 trace 读取，
+      // 因为 dev-pass.json 在 Phase 2→3 撤销后即被删除，无法追溯）
       if (evt.type === 'dev_pass' && evt.result === 'issued') {
         totalDevPass++
+        const src = evt.details && evt.details.source
+        if (src && src !== 'fallback-src-glob' && src !== 'none') {
+          preciseDevPass++
+        }
       }
     }
 
     if (storyFixLoopCount > 0 && storyFixLoopSucceeded) {
       fixLoopSucceeded++
-    }
-
-    // dev-pass 限域精度（从 dev-pass.json 或 state 判断）
-    const devPassFile = path.join(getStoryDir(storyId), 'dev-pass.json')
-    if (fs.existsSync(devPassFile)) {
-      try {
-        const devPass = JSON.parse(fs.readFileSync(devPassFile, 'utf-8'))
-        totalDevPass++
-        if (devPass.pathSource && devPass.pathSource !== 'fallback-src-glob' && devPass.pathSource !== 'none') {
-          preciseDevPass++
-        }
-      } catch (e) { /* skip */ }
     }
 
     // BLOCKER 统计（从 gateChecks）

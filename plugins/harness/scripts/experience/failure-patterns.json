@@ -9,9 +9,9 @@
       "blockers": [
         "Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md)"
       ],
-      "occurrences": 20,
+      "occurrences": 21,
       "firstSeen": "2026-07-29T15:08:26.631Z",
-      "lastSeen": "2026-07-30T07:02:52.762Z",
+      "lastSeen": "2026-07-31T16:43:44.825Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -263,8 +263,23 @@
       "lastSeen": "2026-07-31T03:06:13.965Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "schema_validation_failed",
+      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: acceptance-criteria.json/criteria/0: must NOT have additional properties)",
+      "resolution": "请检查 acceptance-criteria.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "storyId": "STORY-20260801-01",
+      "blockers": [
+        "Schema 校验失败: acceptance-criteria.json/criteria/0: must NOT have additional properties"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-08-01T00:38:27.014Z",
+      "lastSeen": "2026-08-01T00:38:27.014Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.0",
-  "lastUpdated": "2026-07-31T03:06:13.965Z"
+  "lastUpdated": "2026-08-01T00:38:27.014Z"
 }
