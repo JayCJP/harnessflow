@@ -20,7 +20,7 @@ const path = require('path')
 /**
  * 归一化项目根路径，兼容 Windows 下 Git Bash / MSYS 风格路径
  *
- * 宿主（CodeBuddy / Claude）在 Git Bash 环境下注入的 CODEBUDDY_PROJECT_DIR
+ * 宿主在 Git Bash 环境下注入的 CLAUDE_PROJECT_DIR（CodeBuddy 兼容该别名）
  * 可能是 POSIX 风格（如 "/d/workfile/xxx" 或 "/c/Users/xxx"）。Windows 上
  * Node 的 path.join 会把 "/d/workfile" 当作当前盘符下的绝对路径，解析成
  * "d:\d\workfile\xxx"（多出一层盘符名目录），导致状态文件写错位置。

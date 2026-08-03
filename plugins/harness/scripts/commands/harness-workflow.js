@@ -93,34 +93,6 @@ function generateStoryId() {
 }
 
 /**
- * 自动检测多项目工作区
- * 优先级：CODEBUDDY_WORKSPACES env > repos.json 已有配置 > 单仓库默认
- * @returns {{ primary: string, repos: Object<string, string> }}
- */
-function detectWorkspaces() {
-  // 1. 从环境变量 CODEBUDDY_WORKSPACES 解析（JSON 格式：[{name,path},...]）
-  if (process.env.CODEBUDDY_WORKSPACES) {
-    try {
-      const wsList = JSON.parse(process.env.CODEBUDDY_WORKSPACES)
-      if (Array.isArray(wsList) && wsList.length > 0) {
-        const repos = {}
-        let primary = null
-        for (const ws of wsList) {
-          if (ws.name && ws.path) {
-            repos[ws.name] = ws.path
-            if (ws.primary || !primary) primary = ws.name
-          }
-        }
-        if (primary) return { primary, repos }
-      }
-    } catch {}
-  }
-  // 2. 回退到单仓库默认（不读取 story 级 repos.json，因为 start 时还未创建）
-  const name = path.basename(PROJECT_ROOT)
-  return { primary: name, repos: { [name]: PROJECT_ROOT } }
-}
-
-/**
  * 激活 harness 模式
  * @param {string} [storyId] - Story ID，不提供则自动生成
  * @param {string} [title] - 需求标题，不提供则标记为"待定"
@@ -140,19 +112,10 @@ function cmdStart(storyId, title) {
   const id = storyId || generateStoryId()
   const name = title || '待定'
 
-  // 自动检测多项目工作区
-  const detected = detectWorkspaces()
-  // story 级 repos.json：已有多项目配置则保留，否则用检测结果
-  const existingRepos = loadRepos(id)
-  const existingRepoCount = Object.keys(existingRepos.repos).length
-  let reposConfig
-  if (existingRepoCount > 1) {
-    // 已有多项目配置（AI 预配置或之前 start 写入），保留不覆盖
-    reposConfig = existingRepos
-  } else {
-    // 单仓库或无配置，使用检测结果写入 story 级 repos.json
-    reposConfig = ensureReposJson(id, detected)
-  }
+  // 多仓库唯一真实信源 = story 级 repos.json（由 AI 在 Phase 0/1 通过 ensureReposJson 预配置）
+  // 不再依赖任何宿主环境变量（CODEBUDDY_WORKSPACES/CLAUDE_WORKSPACES 均非官方变量，且原实现存在变量名不一致 bug）
+  // ensureReposJson: 若 repos.json 已存在（AI 预配置多仓库）则不覆盖，否则写入单仓库默认
+  const reposConfig = ensureReposJson(id)
 
   const data = {
     active: true,
@@ -182,7 +145,7 @@ function cmdStart(storyId, title) {
   console.log(JSON.stringify({
     ok: true,
     message: `✅ Harness 模式已激活\n   Story: ${id} "${name}"\n   Phase: 0 (需求分析)\n   标记文件: .codebuddy/plans/.harness-active` +
-      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '"'),
+      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '"'),
     data
   }))
 }

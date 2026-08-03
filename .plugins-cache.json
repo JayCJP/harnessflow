@@ -1,16 +1,16 @@
 {
   "version": 1,
   "marketplaceName": "harness-marketplace",
-  "manifestMtime": 1785371168954.4607,
-  "createdAt": 1785468583780,
+  "manifestMtime": 1785490576449.2356,
+  "createdAt": 1785719296201,
   "plugins": [
     {
       "name": "harness",
       "source": "./plugins/harness",
-      "description": "Harness Engineering 端到端工作流 — Bug分析 → 需求分析 → 任务规划 → 代码开发 → 审查 → 测试 → 部署 全流程自动化",
+      "description": "Harness Engineering 端到端工作流 — Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 审查 → 测试 → 部署 全流程自动化",
       "version": "2.0.0",
       "author": {
-        "name": "Harness Team"
+        "name": "CJP"
       },
       "license": "MIT",
       "strict": true,
@@ -20,13 +20,108 @@
         "bug-fix",
         "code-review",
         "testing",
-        "deployment"
+        "deployment",
+        "phase-management"
       ],
       "category": "开发工具",
       "homepage": "https://codebuddy.tencent.com",
       "marketplaceName": "harness-marketplace",
       "installedPath": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness",
       "_capabilitiesLoaded": true,
+      "commands": [
+        {
+          "name": "commands",
+          "path": "commands"
+        }
+      ],
+      "agents": [
+        {
+          "name": "agents",
+          "path": "agents"
+        }
+      ],
+      "skills": [
+        {
+          "name": "skills",
+          "path": "skills"
+        }
+      ],
+      "hooks": {
+        "SessionStart": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness/scripts/hooks/session-start.js",
+                "timeout": 30,
+                "pluginRoot": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness"
+              }
+            ]
+          }
+        ],
+        "PreToolUse": [
+          {
+            "matcher": "write_to_file|replace_in_file|Write|Edit|execute_command|Bash",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness/scripts/hooks/enforce-state-file.js",
+                "timeout": 5,
+                "pluginRoot": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness"
+              }
+            ]
+          },
+          {
+            "matcher": "write_to_file|replace_in_file",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness/scripts/hooks/enforce-dev-pass.js",
+                "timeout": 10,
+                "pluginRoot": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness"
+              }
+            ]
+          },
+          {
+            "matcher": "write_to_file|replace_in_file",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness/scripts/hooks/enforce-artifact.js",
+                "timeout": 10,
+                "pluginRoot": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness"
+              }
+            ]
+          }
+        ],
+        "PostToolUse": [
+          {
+            "matcher": "execute_command",
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness/scripts/hooks/trace-command.js",
+                "timeout": 5,
+                "pluginRoot": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness"
+              }
+            ]
+          }
+        ],
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "type": "command",
+                "command": "node C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness/scripts/hooks/session-stop.js",
+                "timeout": 10,
+                "pluginRoot": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness"
+              }
+            ]
+          }
+        ]
+      },
+      "sourcePath": "./plugins/harness",
+      "configPath": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness\\.claude-plugin\\plugin.json",
       "status": "enabled"
     }
   ]

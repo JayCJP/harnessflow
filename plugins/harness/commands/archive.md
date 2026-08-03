@@ -13,8 +13,8 @@ allowed-tools: Bash
 ## 脚本
 
 ```bash
-# 脚本路径：${CODEBUDDY_PLUGIN_ROOT}/scripts/commands
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> <command> [options]
+# 脚本路径：${CLAUDE_PLUGIN_ROOT}/scripts/commands
+node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> <command> [options]
 ```
 
 ## 命令一览
@@ -31,7 +31,7 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> <comma
 ## 归档：archive
 
 ```bash
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]
 ```
 
 | 选项 | 说明 |
@@ -55,7 +55,7 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> archiv
 ## 复档：restore
 
 ```bash
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]
 ```
 
 | 选项 | 说明 |
@@ -78,7 +78,7 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> restor
 ## 列表：list
 
 ```bash
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> list
+node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> list
 ```
 
 列出 story 的所有归档轮次，包含每轮的文件数、总大小、归档时间、达成的 Phase。
@@ -86,7 +86,7 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> list
 ## 状态：status
 
 ```bash
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
+node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 ```
 
 查看当前归档状态：root 是否有文件、e2e-state 是否存在、归档轮次等。root 无文件即视为已归档。

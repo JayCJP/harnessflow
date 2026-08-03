@@ -27,10 +27,10 @@ use_skill("harness-conductor")
 ### 脚本路径约定
 
 ```bash
-HARNESS=${CODEBUDDY_PLUGIN_ROOT}/scripts/commands
+HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 ```
 
-以下所有脚本路径均基于此目录。**始终使用完整路径** `node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/<脚本名>`。
+以下所有脚本路径均基于此目录。**始终使用完整路径** `node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/<脚本名>`。
 
 ### 执行流程（dispatch.js 单信源）
 
@@ -233,7 +233,7 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，�
 
 ## 附录 E：脚本速查（参考）
 
-> 根路径：`${CODEBUDDY_PLUGIN_ROOT}/scripts/`
+> 根路径：`${CLAUDE_PLUGIN_ROOT}/scripts/`
 
 ### commands/ — 工作流命令脚本（AI 直接调用）
 

@@ -35,8 +35,8 @@ use_skill("harness-conductor")
 ### 脚本路径约定
 
 ```bash
-HARNESS=${CODEBUDDY_PLUGIN_ROOT}/scripts/commands
-STORY_DIR=${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>
+HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
+STORY_DIR=${CLAUDE_PROJECT_DIR}/.codebuddy/plans/<storyId>
 ```
 
 ## 执行流程（3 阶段）

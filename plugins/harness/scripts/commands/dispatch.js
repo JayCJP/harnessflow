@@ -42,8 +42,8 @@ const promptBuilder = require('../services/prompt-builder')
 
 const MAX_PHASE = PHASE_SLUGS.length - 1
 
-/** 插件根目录下 advance-phase.js 的调用形式（文档中统一用 ${CODEBUDDY_PLUGIN_ROOT}） */
-const ADVANCE_CMD = 'node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/advance-phase.js'
+/** 插件根目录下 advance-phase.js 的调用形式（文档中统一用 ${CLAUDE_PLUGIN_ROOT}） */
+const ADVANCE_CMD = 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/advance-phase.js'
 
 /**
  * 构造调度结果骨架
@@ -132,7 +132,7 @@ function dispatch (storyId) {
       warnings: [`工作流尚未创建: .codebuddy/plans/${storyId}/e2e-state.json 不存在`],
       recovery: {
         type: 'not_started',
-        command: 'node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/harness-workflow.js start ' + storyId + ' "<标题>"',
+        command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/harness-workflow.js start ' + storyId + ' "<标题>"',
         description: '先创建工作流，再重新执行 dispatch.js'
       }
     }
@@ -166,7 +166,7 @@ function dispatch (storyId) {
     result.warnings.push(`Story 已归档 (round ${state.archiveRound || '?'})，工作流结束。`)
     result.recovery = {
       type: 'archived',
-      command: 'node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' restore',
+      command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' restore',
       description: '如需继续该 Story，先执行复档'
     }
     return result
@@ -178,7 +178,7 @@ function dispatch (storyId) {
     result.warnings.push('工作流已完成全部 Phase。')
     result.recovery = {
       type: 'completed',
-      command: 'node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' archive',
+      command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' archive',
       description: '可执行归档收尾'
     }
     return result

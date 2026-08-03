@@ -174,7 +174,7 @@ function buildAdditionalContext (workflowResults) {
   lines.push('2. gateChecks.prototypeConfirmed=false 且涉及 UI 变更 → 禁止推进')
   lines.push('3. 主 Agent 不亲自编写代码 → 必须 spawn 专用 Agent 执行')
   lines.push('4. 禁止直接写/改 e2e-state.json 和 dev-pass.json → 状态机由 advance-phase.js 独占维护')
-  lines.push('5. 推进 Phase → 必须执行 node ${CODEBUDDY_PLUGIN_ROOT}/scripts/commands/advance-phase.js <storyId> <targetPhase>')
+  lines.push('5. 推进 Phase → 必须执行 node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/advance-phase.js <storyId> <targetPhase>')
   lines.push('')
   lines.push('如果门控验证失败 → 向用户报告 blockers，等待用户解决，不可自行推进')
 
