@@ -15,11 +15,5 @@
     "testing",
     "deployment",
     "phase-management"
-  ],
-
-  "commands": "./commands",
-  "agents": "./agents",
-  "skills": "./skills",
-  "hooks": "./hooks/hooks.json",
-  "rules": "./rules"
+  ]
 }
