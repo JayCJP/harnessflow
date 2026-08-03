@@ -20,5 +20,6 @@
   "commands": "./commands",
   "agents": "./agents",
   "skills": "./skills",
-  "hooks": "./hooks/hooks.claude.json"
+  "hooks": "./hooks/hooks.json",
+  "rules": "./rules"
 }
