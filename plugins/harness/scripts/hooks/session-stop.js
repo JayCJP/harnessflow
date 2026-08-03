@@ -12,8 +12,8 @@
  * 4. 所有工作流完成后自动结束 Harness 模式
  * 5. 输出 session 变更摘要
  *
- * 输入：stdin JSON
- * 输出：stdout JSON
+ * 输入：stdin JSON（含 stop_hook_active，为 true 时直接放行）
+ * 输出：stdout JSON（additionalContext 上限 8000 字符，超限逐级降级）
  */
 
 const fs = require('fs')
@@ -37,6 +37,12 @@ const GIT_TIMEOUT = 5000
 
 /** 非代码文件目录前缀，不计入 src 变更统计 */
 const NON_SRC_PREFIXES = ['node_modules/', 'dist/', '.codebuddy/', '.git/']
+
+/** additionalContext 字符上限（Claude Code 对 hook 输出有截断，留出安全余量） */
+const MAX_CONTEXT_CHARS = 8000
+
+/** summary.changedFiles.src 最多列举的文件数，超出只记数量 */
+const MAX_SRC_FILES = 50
 
 // ─── 工作流扫描（单次迭代） ──────────────────────────────────────
 
@@ -200,9 +206,12 @@ function autoEndHarness(activeWorkflows, completedWorkflows) {
 // ─── 摘要构建 ────────────────────────────────────────────────────
 
 function buildSummary(activeWorkflows, completedWorkflows, changedFiles, harnessResult, kbTasks) {
-  const srcFiles = changedFiles
+  const allSrcFiles = changedFiles
     .filter(f => f.replace(/\\/g, '/').startsWith('src/'))
     .map(f => f.replace(/\\/g, '/'))
+
+  const srcFiles = allSrcFiles.slice(0, MAX_SRC_FILES)
+  const srcOmitted = allSrcFiles.length - srcFiles.length
 
   return {
     sessionEndedAt: new Date().toISOString(),
@@ -223,15 +232,70 @@ function buildSummary(activeWorkflows, completedWorkflows, changedFiles, harness
       ended: harnessResult.ended,
       message: harnessResult.message
     },
-    changedFiles: { total: changedFiles.length, src: srcFiles },
+    changedFiles: {
+      total: changedFiles.length,
+      srcTotal: allSrcFiles.length,
+      src: srcFiles,
+      ...(srcOmitted > 0 ? { srcOmitted } : {})
+    },
     kbUpdateTasks: kbTasks
   }
+}
+
+/**
+ * 序列化 summary，超过上限时逐级降级，保证不撞 hook 输出截断
+ * 降级顺序：完整 → 去掉 src 文件清单 → 只保留核心计数
+ * @param {object} summary
+ * @returns {string} 保证 length <= MAX_CONTEXT_CHARS 的 JSON 字符串
+ */
+function serializeSummary(summary) {
+  let json = JSON.stringify(summary)
+  if (json.length <= MAX_CONTEXT_CHARS) return json
+
+  // 降级 1：丢掉 src 文件清单，保留计数
+  const lite = {
+    ...summary,
+    changedFiles: {
+      total: summary.changedFiles.total,
+      srcTotal: summary.changedFiles.srcTotal,
+      src: [],
+      srcOmitted: summary.changedFiles.srcTotal,
+      truncated: true
+    }
+  }
+  json = JSON.stringify(lite)
+  if (json.length <= MAX_CONTEXT_CHARS) return json
+
+  // 降级 2：只保留核心计数
+  return JSON.stringify({
+    sessionEndedAt: summary.sessionEndedAt,
+    activeWorkflows: summary.activeWorkflows.map(w => ({ storyId: w.storyId, phase: w.phase, status: w.status })),
+    completedWorkflows: summary.completedWorkflows.map(w => ({ storyId: w.storyId })),
+    harness: summary.harness,
+    changedFiles: { total: summary.changedFiles.total, srcTotal: summary.changedFiles.srcTotal, src: [], truncated: true },
+    kbUpdateTasks: summary.kbUpdateTasks.map(t => ({ storyId: t.storyId })),
+    truncated: true
+  }).slice(0, MAX_CONTEXT_CHARS)
 }
 
 // ─── 入口 ────────────────────────────────────────────────────────
 
 function main() {
   const startedAt = Date.now()
+
+  // 0. 消费 stdin（避免管道场景 EPIPE），解析 Stop 输入
+  let input = {}
+  try {
+    const raw = readStdin()
+    if (raw && raw.trim()) input = JSON.parse(raw)
+  } catch (_) { /* stdin 缺失或非法 JSON，按空输入降级 */ }
+
+  // stop_hook_active = true 说明本 hook 已在续跑循环中，直接放行不再做收尾
+  if (input.stop_hook_active === true) {
+    console.log(JSON.stringify({ continue: true }))
+    console.error('[session-stop] stop_hook_active=true, skipped')
+    process.exit(0)
+  }
 
   // 1. 单次扫描（替代之前的 findActive + findCompleted 两次扫描）
   const { active, completed } = scanAllWorkflows()
@@ -252,12 +316,13 @@ function main() {
 
   // 3. 构建输出
   const summary = buildSummary(active, completed, changedFiles, harnessResult, kbTasks)
+  const additionalContext = serializeSummary(summary)
 
   const output = {
     continue: true,
     hookSpecificOutput: {
       hookEventName: 'Stop',
-      additionalContext: JSON.stringify(summary)
+      additionalContext
     }
   }
 
@@ -270,10 +335,11 @@ function main() {
   if (completed.length > 0) parts.push(`${completed.length} completed`)
   if (devPassCleaned > 0) parts.push(`${devPassCleaned} expired dev-pass cleaned`)
   if (traceRecorded > 0) parts.push(`${traceRecorded} trace rejections recorded`)
+  parts.push(`context ${additionalContext.length} chars`)
   parts.push(`took ${elapsed}ms`)
   console.error(`[session-stop] ${parts.join(' | ')}`)
 
-  return 0
+  process.exit(0)
 }
 
 main()
