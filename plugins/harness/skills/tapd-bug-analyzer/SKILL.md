@@ -132,19 +132,28 @@ get_bug_count → get_bug(current_owner + 状态筛选，分页拉取)
 
 #### 4.3 代码定位
 
-采用三层递进策略：
+**双源并行检索，交叉验证收敛**：
 
 ```
-知识库 > graphify > 源码搜索
+kb-query ∥ graphify  →  交叉验证  →  search_content 兜底
 ```
 
-1. **知识库查询（优先）**：调用 `kb-query` skill，按功能模块/接口名检索项目知识库
-   - 命中 → 直接定位到文件、函数、数据流
-   - 优势：有结构化文档，理解模块间关系更快
-2. **graphify 补充**：`query` 搜索关键词、`explain` 理解模块、`path` 追踪调用链
-   - 知识库未覆盖的细节由 graphify 补全
-3. **源码搜索（fallback）**：`search_content` + `search_file` 关键词搜索
-   - 前两层均未命中时使用
+1. **同时发起两路检索**（不是先后降级）
+   - **知识库** (`kb-query`)：按功能模块/接口名检索，拿到业务语义 + 候选文件 + 该域历史踩坑
+   - **graphify**：`query "<报错信息/功能关键词>"` 拿到结构视图，`explain "<模块>"` 理解职责，`path "<API>" "<渲染出口>"` 追数据流
+
+2. **交叉验证收敛到嫌疑点**
+
+   | 情况 | 处理 |
+   |------|------|
+   | 两者都指向同一文件 | 最高置信度，优先精读该文件 |
+   | 仅知识库命中 | `graphify query` 补调用方，bug 可能在上游 |
+   | 仅 graphify 命中 | 知识库缺此模块，报告末尾建议 `kb-update` |
+   | 两边冲突 | 以源码为准，标注知识库过期 |
+
+   > 知识库的 `pitfalls.md` 常直接命中同类历史 bug，graphify 的调用链常暴露「需求没提但被波及」的隐式路径 —— 两者互补，缺一路就容易定位到表象而非根因。
+
+3. **源码搜索兜底**：`search_content` + `search_file`，仅当上述两路都没定位到文件时使用
 
 定位到**具体文件 + 函数 + 行号**。
 
@@ -232,10 +241,12 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 | `get_image` | 获取截图/图片 |
 | `get_entity_custom_fields` | 自定义字段配置 |
 
-### 代码定位工具（三层递进）
+### 代码定位工具（双源并行 + 兜底）
 
-| 优先级 | 工具 | 用途 |
-|--------|------|------|
-| L1 | `kb-query` skill | 知识库检索：按功能模块/接口名查找结构化文档（优先） |
-| L2 | `graphify query/explain/path` | 代码知识图谱：搜索关键词、理解模块、追踪调用链 |
-| L3 | `search_content` + `search_file` | 源码搜索：文本匹配（fallback） |
+| 层级 | 工具 | 用途 |
+|------|------|------|
+| 主检索 A | `kb-query` skill | 语义层：按功能模块/接口名查结构化文档、历史踩坑 |
+| 主检索 B | `graphify query/explain/path` | 结构层：搜关键词、理解模块职责、追调用链与数据流 |
+| 兜底 | `search_content` + `search_file` | 文本匹配，仅当 A+B 都未定位到文件时使用 |
+
+> A 与 B **同时调用**并交叉验证，不是 A 命中就跳过 B。

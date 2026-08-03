@@ -35,9 +35,25 @@ Step 4: 按需加载 api.md / store.md / architecture.md 等
 
 - ❌ 禁止一次性加载所有域的文档
 - ✅ 定位到 1-2 个域后，只加载该域的文档
-- ✅ 文档不命中时，再用 search_content 搜索源码
 
-## 与 graphify 的关系
+## 与 graphify 的关系：并行互补，不是降级
 
-知识库 > graphify > 源码搜索
-知识库命中了就不要再用 graphify
+> **kb-query 与 graphify 同时用**。知识库命中了也要用 graphify，两者查的不是同一类信息。
+
+| 层 | 工具 | 擅长 | 产出 |
+|----|------|------|------|
+| 语义层 | `kb-query` | 业务域、模块职责、接口契约、踩坑记录 | 候选文件清单 |
+| 结构层 | `graphify` | import/调用关系、依赖链、变更影响面 | 精确依赖图 |
+| 补漏层 | `search_content` | 前两层未覆盖的字面量、魔法字符串 | 兜底定位 |
+
+### 并行检索流程
+
+1. **同时发起** — kb-query 定位业务域，graphify `query "<关键词>"` 建立结构视图
+   - `graphify-out/graph.json` 已存在时，graphify 走 query 快速路径，不重建图
+2. **交叉验证** — 对比两边给出的文件清单
+   - 双方都命中 → 高置信度，直接 `read_file` 精读
+   - 仅知识库命中 → `graphify explain "<模块>"` 补齐结构关系
+   - 仅 graphify 命中 → 知识库缺该模块，任务收尾时提醒 `kb-update` 补录
+   - 结论冲突 → 以源码为准，并标注知识库可能过期
+3. **追链** — 跨模块数据流用 `graphify path "<起点>" "<终点>"`
+4. **补漏** — 仅当上述都没定位到具体文件 + 行号时，才用 `search_content`
