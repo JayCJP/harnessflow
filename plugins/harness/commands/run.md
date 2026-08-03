@@ -268,7 +268,7 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，�
 | `hooks/enforce-dev-pass.js` | PreToolUse Hook：src/ 编辑保护，校验 dev-pass 有效性 + 路径限域 |
 | `hooks/enforce-artifact.js` | PreToolUse Hook：防跳 Phase，检查前置产出物是否存在 |
 | `hooks/session-start.js` | SessionStart Hook：断点恢复 + 加载 summary + 注入经验教训 |
-| `hooks/session-stop.js` | SessionStop Hook：清理过期 dev-pass + 沉淀 Hook 拒绝事件到经验库 |
+| `hooks/session-stop.js` | Stop Hook：清理过期 dev-pass + 沉淀 Hook 拒绝事件到经验库 |
 | `hooks/trace-command.js` | PostToolUse Hook：命令执行后自动记录 trace.jsonl |
 
 ### audit/ — 审计工具（按需手动执行）

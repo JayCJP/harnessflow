@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * SessionStop Hook — 会话结束时自动收尾
+ * Stop Hook — Agent 回答结束时自动收尾
+ *
+ * ⚠️ 注册在 Claude Code 的 `Stop` 事件下，每轮回答结束都会触发（不是会话终止）。
+ *    会话终止对应 `SessionEnd` 事件。
  *
  * 功能：
  * 1. 单次扫描所有工作流（活跃 + 已完成）
@@ -253,7 +256,7 @@ function main() {
   const output = {
     continue: true,
     hookSpecificOutput: {
-      hookEventName: 'SessionStop',
+      hookEventName: 'Stop',
       additionalContext: JSON.stringify(summary)
     }
   }
