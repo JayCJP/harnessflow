@@ -21,7 +21,10 @@ const {
   PLANS_DIR,
   PHASE_ARTIFACTS,
   getPhaseName,
-  getPhaseAgent
+  getPhaseAgent,
+  STORY_INPUT_FILE,
+  readStoryInput,
+  getStoryMode
 } = require('../lib/state')
 
 const contextRefresh = require('./context-refresh')
@@ -112,6 +115,65 @@ function readStoryContext (storyId) {
 }
 
 /**
+ * 构造「本 Story 原始输入」prompt 片段。
+ *
+ * 设计意图: 主 Agent 只把用户消息里的参数搬运进 story-input.json 就结束职责，
+ * 不做任何分析。分析由需求分析师在 Phase 0 自行完成（fixbugs 模式下由它自己
+ * 调用 tapd-bug-analyzer skill），这样中间推理始终留在同一个上下文里，
+ * 不会因跨 Agent 传递而丢失。
+ *
+ * 只在 Phase 0 注入完整内容 —— 后续 Phase 需要的是分析结论（bug 分析报告 /
+ * requirement-analysis.md），不是原始链接，注入全文只会挤占上下文。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} targetPhase - 目标 Phase
+ * @returns {string} markdown 片段，无内容时返回空串
+ */
+function buildStoryInputSection (storyId, targetPhase) {
+  if (targetPhase !== 0) return ''
+
+  const input = readStoryInput(storyId)
+  if (!input) return ''
+
+  if (input._parseError) {
+    return `## 本 Story 原始输入\n⚠️ ${STORY_INPUT_FILE} 解析失败: ${input._parseError}\n请读取源文件 .codebuddy/plans/${storyId}/${STORY_INPUT_FILE} 自行确认，或向主 Agent 索要参数。\n`
+  }
+
+  const mode = input.mode === 'fixbugs' ? 'fixbugs' : 'run'
+  const lines = [
+    '## 本 Story 原始输入',
+    `文件: .codebuddy/plans/${storyId}/${STORY_INPUT_FILE}`,
+    '',
+    '```json',
+    JSON.stringify(input, null, 2),
+    '```',
+    ''
+  ]
+
+  if (mode === 'fixbugs') {
+    lines.push(
+      '**模式: fixbugs（Bug 修复）**',
+      '',
+      '- 上述参数由主 Agent 原样搬运，**未经任何分析** —— Bug 分析是你的职责，不是主 Agent 的。',
+      '- 你需要自行 `use_skill("tapd-bug-analyzer")`，用 sources 里的 tapdUrl / workspaceId / owner / statusFilter 拉取并分析缺陷。',
+      '- Bug 分析报告**只记录事实**: 问题复述、复现步骤、代码定位、根因、责任方分类。',
+      '  🚫 **不要写修复方案**（不写"应该怎么改"、不给伪代码/diff）—— 修复设计属于开发工程师。',
+      '- 产出 `{标题}_bug分析报告.md` 后，再写 `requirement-analysis.md`：只引用 Bug 编号，不复制 Bug 正文。',
+      ''
+    )
+  } else {
+    lines.push(
+      '**模式: run（新功能开发）**',
+      '',
+      '- 上述参数由主 Agent 原样搬运，未经分析。请按 sources 里实际存在的字段决定检索策略。',
+      ''
+    )
+  }
+
+  return lines.join('\n')
+}
+
+/**
  * 探测修复回路上下文（推进/调度到 Phase 3 时使用）
  * @param {string} storyId - Story ID
  * @param {number} targetPhase - 目标 Phase
@@ -189,6 +251,10 @@ function buildAgentPrompt (opts) {
   // Story 级背景资料（如 bug 分析报告）
   const storyContext = readStoryContext(storyId)
 
+  // 本 Story 原始输入（仅 Phase 0 注入完整内容）
+  const storyInputSection = buildStoryInputSection(storyId, targetPhase)
+  const storyMode = getStoryMode(storyId)
+
   // 修复回路上下文
   const fixLoopContext = buildFixLoopContext(storyId, targetPhase)
 
@@ -201,12 +267,20 @@ function buildAgentPrompt (opts) {
     ? phaseArtifacts.artifacts.map(a => a.fileName ? `${a.fileName} — ${a.description}` : a.description)
     : []
 
+  // fixbugs 模式下 Phase 0 额外要求 Bug 分析报告（文件名含动态标题，无法进 PHASE_ARTIFACTS 固定表）
+  // 同时进 expectedOutputs —— 主 Agent 靠它校验子 Agent 的产出物汇报，只写 descriptions 会漏检
+  if (targetPhase === 0 && storyMode === 'fixbugs') {
+    expectedOutputs.unshift('*bug分析报告.md')
+    expectedDescriptions.unshift('{需求标题}_bug分析报告.md — Bug 事实记录（问题复述 + 复现步骤 + 代码定位 + 根因 + 责任方分类，不含修复方案）')
+  }
+
   const promptLines = [
     `## Story: ${storyId} | Phase: ${targetPhase} (${getPhaseName(targetPhase)})`,
     '',
     agentInfo ? `## 你的角色\n${agentInfo.label} (注册名: ${agentInfo.agent})` : '',
     agentInfo ? `\n## 你的任务\n${agentInfo.instruction}` : '',
     '',
+    storyInputSection,
     storyContext.length > 0 ? `## Story 背景资料\n${storyContext.join('\n\n')}\n` : '',
     '## 上一 Phase 摘要',
     summaryInfo ? summaryInfo.content : '(无摘要)',
@@ -221,6 +295,9 @@ function buildAgentPrompt (opts) {
       ? `## 产出要求\n${expectedDescriptions.map(d => `- ${d}`).join('\n')}\n产出目录: .codebuddy/plans/${storyId}/`
       : '',
     '',
+    (storyMode === 'fixbugs' && targetPhase === 2)
+      ? '## Bug 修复说明\nBug 分析报告只提供**事实**（问题复述 / 复现步骤 / 代码定位 / 根因），**不含修复方案**。\n修复怎么做由你设计: 先按报告的「代码定位」用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再自行给出修复实现。\n'
+      : '',
     '## 约束',
     ...AGENT_CONSTRAINTS.map(c => `- 🚫 ${c}`),
     '',
@@ -235,7 +312,8 @@ function buildAgentPrompt (opts) {
     agentPrompt: promptLines.filter(Boolean).join('\n'),
     contractFilesToLoad,
     agentConstraints: AGENT_CONSTRAINTS,
-    expectedOutputs
+    expectedOutputs,
+    storyMode
   }
 
   if (lessons) result.lessonsFromHistory = lessons.trim()
@@ -248,6 +326,7 @@ function buildAgentPrompt (opts) {
 module.exports = {
   buildAgentPrompt,
   buildFixLoopContext,
+  buildStoryInputSection,
   readContractContents,
   readStoryContext,
   AGENT_CONSTRAINTS,

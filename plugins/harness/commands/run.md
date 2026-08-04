@@ -186,18 +186,23 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，�
 **code-review.json** (Phase 3，代码审查师产出 — 唯一产出物，已废弃 code-review.md):
 ```json
 {
+  "storyId": "STORY-001",              // MUST
   "issues": [{
-    "id": "B1",
-    "severity": "BLOCKER|MAJOR|MINOR",
-    "status": "open|fixed",        // MUST: 门控唯一信源，BLOCKER+open 阻断推进
+    "id": "B1",                        // MUST: 匹配 ^(B|W|S)\d+$
+    "severity": "BLOCKER|WARNING|SUGGESTION",
+    "status": "open|fixed|skipped",    // MUST: 门控唯一信源，BLOCKER+open 阻断推进
     "file": "src/views/xxx.vue",
     "line": 42,
-    "title": "...",
-    "description": "...",
+    "title": "...",                    // MUST
+    "description": "...",              // MUST
     "suggestion": "..."
-  }]
+  }],
+  "summary": { "blockerCount": 0, "warningCount": 0, "suggestionCount": 0 }  // MUST
 }
 ```
+
+> 以上字段约束与 `scripts/schemas/code-review.schema.json` 一致（`additionalProperties: false`，
+> 多写字段会被门控拒绝）。schema 是唯一权威，本表仅为速查。
 
 **acceptance-verification.json** (Phase 4，测试工程师产出):
 ```json

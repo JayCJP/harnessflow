@@ -163,7 +163,11 @@ function dispatch (storyId) {
   // ── 终态: 已归档 ──────────────────────────────────────────
   if (state.status === 'archived') {
     result.status = 'terminal'
-    result.warnings.push(`Story 已归档 (round ${state.archiveRound || '?'})，工作流结束。`)
+    result.warnings.push(
+      state.archiveRound
+        ? `Story 已归档 (round ${state.archiveRound})，工作流结束。`
+        : 'Story 已归档，工作流结束。'
+    )
     result.recovery = {
       type: 'archived',
       command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' restore',
@@ -215,6 +219,22 @@ function dispatch (storyId) {
         description: `Phase ${phase} 存在 BLOCKER，执行修复回路回退到 Phase 2 修复` +
           (fixLoop.active ? `（当前第 ${fixLoop.round}/${fixLoop.maxRounds} 轮）` : ''),
         blockers: gate.blockers.map(b => ({ type: errorToType(b), message: errorToString(b) }))
+      }
+
+      // 回退后要干活的是 Phase 2 的开发者。此处一并给出 Agent 与 prompt，
+      // 否则主 Agent 执行完 --fix-loop 只能自行判断该 Spawn 谁 —— 判断权回流即失控。
+      const fixAgentInfo = getPhaseAgent(2)
+      if (fixAgentInfo) {
+        const pb = promptBuilder.buildAgentPrompt({
+          storyId,
+          targetPhase: 2,
+          summaryPhase: phase
+        })
+        result.nextAgent = pb.agent
+        result.agentLabel = pb.agentLabel
+        result.agentPrompt = pb.agentPrompt
+        result.expectedOutputs = pb.expectedOutputs
+        result.instruction = `先执行 recovery.command 回退到 Phase 2，成功后 Spawn ${pb.agent} 并注入 agentPrompt 修复 BLOCKER`
       }
       return result
     }

@@ -2,9 +2,10 @@
 name: tapd-bug-analyzer
 description: >
   TAPD 缺陷分析器 —— 从 TAPD 拉取需求关联的 bugs，按处理人过滤，
-  逐条分析根因、定位代码、分类责任，产出结构化 Bug 分析报告文档。
-  报告写入 Story 的 plans 目录，作为 Harness Phase 0（需求分析）的输入。
-  触发：用户提供 TAPD 链接 + 处理人、提到"分析 TAPD bugs"、"生成 Bug 报告"。
+  逐条记录问题复述、复现步骤、代码定位、根因与责任方分类，产出结构化 Bug 分析报告。
+  只采集事实，不产出修复方案（修复设计属于开发工程师）。
+  报告写入 Story 的 plans 目录，由需求分析师在 Harness Phase 0 内部调用产出。
+  触发：需求分析师在 fixbugs 模式下自行加载；用户提供 TAPD 链接 + 处理人。
   不执行代码修改，只产出分析文档。
 ---
 
@@ -12,42 +13,67 @@ description: >
 
 ## Overview
 
-通过 TAPD MCP 采集需求关联的 bugs → 按处理人过滤 → 逐条深度分析（问题理解 → 代码定位 → 根因追踪 → 分类）→ 输出**结构化 Bug 分析报告**到 Story 的 plans 目录。
+通过 TAPD MCP 采集需求关联的 bugs → 按处理人过滤 → 逐条采集事实（问题理解 → 复现路径 → 代码定位 → 根因追踪 → 责任方分类）→ 输出**结构化 Bug 分析报告**到 Story 的 plans 目录。
 
-> 本 skill **只分析、不修代码**。产出文档作为 Harness 工作流 Phase 0 的输入材料。
+> 本 skill **只记录事实，不设计方案**。产出文档作为 Harness Phase 0 需求分析的输入材料。
+
+## 🚨 边界：只回答「问题在哪、为什么」，不回答「应该怎么改」
+
+这是本 skill 最容易越界的地方，单独强调：
+
+| ✅ 应该写 | 🚫 禁止写 |
+|----------|----------|
+| 问题现象是什么 | 应该改成什么 |
+| 怎么复现 | 修复建议 / 解决方案 / 改造方案 |
+| 代码在哪个文件哪一行 | 伪代码、diff、`将 xxx 改为 yyy` |
+| 为什么会错（数据流 + 触发条件） | 测试验证步骤 |
+| 该谁负责（责任方分类） | 技术选型建议 |
+
+**为什么这样切分**：
+
+1. **上下文成本** —— 设计修复方案需要精读完整实现，而 Bug 分析阶段只需定位到嫌疑点。在分析阶段做设计会把大量源码拉进上下文，挤掉真正该记的事实。
+2. **修复方案会过期** —— 报告在 Phase 0 产出，代码在 Phase 2 才改。中间 Phase 1 拆任务、多仓库协同都可能改变前提，Phase 0 写死的方案到 Phase 2 往往已不成立。
+3. **职责归属** —— 开发工程师拿到「代码定位 + 根因」后会用 `kb-query ∥ graphify` 双源验证真实改动点再动手。上游给一个未经验证的方案，反而诱导开发跳过验证直接照抄。
+
+> 责任方分类（前端-Bug / 后端-缺失 等）**不属于**修复方案，它是分诊事实 —— 决定这个 Bug 该不该由前端处理，必须保留。
 
 ## Harness 集成
 
 ```
-TAPD Bug Analyzer                       Harness 工作流
-       │                                     │
-       │  产出 .codebuddy/plans/<storyId>/   │
-       │  {storyTitle}_bug分析报告.md         │
-       ├─────────────────────────────────────→ Phase 0（需求分析师）
-       │                                     │
-       │                                     ├→ Phase 1（任务规划师）
-       │                                     ├→ Phase 2（前端开发工程师）
-       │                                     └→ ...
+Phase 0（需求分析师，单一上下文内完成两件事）
+       │
+       ├─ ① use_skill("tapd-bug-analyzer")
+       │     └→ {STORY_DIR}/{storyTitle}_bug分析报告.md   ← 事实
+       │
+       └─ ② 基于 ① 的分析结论产出
+             requirement-analysis.md（只引用 Bug 编号，不复制正文）
+             acceptance-criteria.json（每个 Bug ≥ 1 条 AC）
+             open-questions.json
+                     │
+                     ↓
+       Phase 1 任务规划 → Phase 2 开发（自行设计修复）→ ...
 ```
 
-- **Pre-Phase 0**：用户提供 TAPD 链接 + 处理人 + storyId → 本 skill 拉取需求关联的 bugs → 过滤处理人 → 产出报告到 `{STORY_DIR}/`
-- **Phase 0**：需求分析师读取 `{STORY_DIR}/{storyTitle}_bug分析报告.md` → 产出 `requirement-analysis.md` + `acceptance-criteria.json` + `open-questions.json`
-- **Phase 1→8**：标准 Harness 流水线
+- **调用方是需求分析师，不是主 Agent**。主 Agent 只把用户消息里的参数搬进 `story-input.json` 就结束职责，不加载本 skill、不做任何分析。
+- 这样「分析」全程发生在需求分析师的上下文内：拉取 TAPD 原始数据、代码定位的中间推理都不会因跨 Agent 传递而丢失。
+- 报告落在 Story 目录后，`prompt-builder.js` 的 `readStoryContext()` 会自动把它注入 Phase 0→8 的每个 prompt，无需任何人手动转述。
 
 ## 触发条件
 
-- 用户提供 TAPD 需求链接 + 处理人 + storyId
+- 需求分析师在 Phase 0 发现 `story-input.json` 的 `mode` 为 `fixbugs` → 自行加载本 skill
+- 用户直接提供 TAPD 需求/缺陷链接 + 处理人
 - 用户提到"分析 TAPD bugs"、"拉取 TAPD 缺陷"、"生成 Bug 报告"
-- `/harness fixbugs` 流程中自动加载
 
-> **所有参数（workspace_id、处理人、storyId 等）必须从当前用户消息中动态提取，禁止硬编码。**
+> **所有参数（workspace_id、处理人、storyId 等）必须动态提取，禁止硬编码。**
+> 参数优先从 `.codebuddy/plans/<storyId>/story-input.json` 的 `sources` 读取；该文件不存在时回退到当前用户消息。
 
 ## 核心约束
 
-1. **只分析，不修代码** — 产出报告后即结束，不进入代码修改
-2. **产出到 Story 目录** — 必须写入 `${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/` 目录
-3. **真实数据** — 所有字段来自 TAPD API 返回值或代码定义，禁止编造
-4. **动态参数** — 从用户消息提取，禁止写死默认值
+1. **只记录事实，不设计方案** — 见上文「边界」表格，产出中不得出现修复建议 / 测试验证章节
+2. **只分析，不修代码** — 产出报告后即结束，不进入代码修改
+3. **产出到 Story 目录** — 必须写入 `${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/` 目录
+4. **真实数据** — 所有字段来自 TAPD API 返回值或代码定义，禁止编造
+5. **动态参数** — 从 `story-input.json` 或用户消息提取，禁止写死默认值
 
 ---
 
@@ -55,22 +81,21 @@ TAPD Bug Analyzer                       Harness 工作流
 
 ### Step 1：提取参数
 
-从用户消息中解析：
-
-| 参数 | 必填 | 提取方式 |
-|------|------|---------|
-| `workspace_id` | ✅ | 正则 `tapd_fe/(\d+)/` 从 TAPD 链接提取 |
-| 处理人 | ✅ | "处理人: XXX"、"负责人: XXX"、"指派给 XXX" |
-| `storyId` | ✅ | `/harness fixbugs <storyId>` 或用户消息中指定 |
-| `story_id` | 选填 | `/story/detail/{story_id}` 从 TAPD 链接提取 |
-| 状态筛选 | 选填 | 默认 "待解决"，可指定 "重新打开" 等 |
-| 终端类型 | 选填 | "H5"、"PC"、"移动端"、"小程序" |
-
-**输出目录确定**：
+**优先读取 `story-input.json`**（需求分析师在 Phase 0 的 prompt 中已获得其内容）：
 
 ```bash
 STORY_DIR=${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>
+cat ${STORY_DIR}/story-input.json
 ```
+
+| 参数 | 必填 | story-input.json 字段 | 回退提取方式（无该文件时） |
+|------|------|----------------------|--------------------------|
+| `workspace_id` | ✅ | `sources.workspaceId` | 正则 `tapd_fe/(\d+)/` 从 TAPD 链接提取 |
+| 处理人 | ✅ | `sources.owner` | "处理人: XXX"、"负责人: XXX"、"指派给 XXX" |
+| `storyId` | ✅ | 顶层 `storyId` | `/harness fixbugs <storyId>` 或用户消息中指定 |
+| `story_id` | 选填 | `sources.storyIdInTapd` | `/story/detail/{story_id}` 从 TAPD 链接提取 |
+| 状态筛选 | 选填 | `sources.statusFilter` | 默认 "待解决"，可指定 "重新打开" 等 |
+| 终端类型 | 选填 | `sources.terminal` | "H5"、"PC"、"移动端"、"小程序" |
 
 > 如果 `${STORY_DIR}` 目录不存在，需先创建。
 
@@ -112,12 +137,12 @@ get_bug_count → get_bug(current_owner + 状态筛选，分页拉取)
 
 | MCP 工具 | 用途 |
 |----------|------|
-| `get_comments` | 读取评论（开发讨论、处理记录） |
+| `get_comments` | 读取评论（开发讨论、处理记录，常含复现条件） |
 | `get_entity_attachments` | 获取附件（日志、截图文件） |
 | `get_image` | 获取截图（如有图片引用） |
 | `get_entity_custom_fields` | 自定义字段（如终端类型、严重级别） |
 
-### Step 4：逐条深度分析
+### Step 4：逐条采集事实
 
 对每个 bug 执行：
 
@@ -157,14 +182,36 @@ kb-query ∥ graphify  →  交叉验证  →  search_content 兜底
 
 定位到**具体文件 + 函数 + 行号**。
 
+> **定位到即停**。确认「问题出在这里」就够了，不要为了设计改法而通读整个模块 —— 那是 Phase 2 开发工程师的工作，且他会重新做一次双源验证。
+
 #### 4.4 根因分析
 - 判断：代码逻辑缺陷 / 数据异常 / 接口问题 / 环境问题
 - 追踪数据流：API → Store → computed → 渲染
-- 提取触发条件
+- 提取触发条件（什么情况下会错、什么情况下不会错）
+
+> 根因回答的是「**为什么会错**」，不是「**应该怎么改**」。
+> ✅「`userInfo` 在 onMounted 前被 computed 读取，此时为 undefined」
+> 🚫「应把初始化移到 created 中」
+
+#### 4.5 复现步骤
+
+这是本次分析要交付给开发工程师的关键事实之一 —— 开发无法复现就无法验证修复是否生效。
+
+按以下结构记录，信息来自 TAPD 描述 + 评论 + 截图：
+
+```
+前置条件: 账号类型 / 数据状态 / 环境（测试环境、特定商户）
+复现步骤: 1. ... 2. ... 3. ...（可点击可操作的具体动作）
+预期结果: ...
+实际结果: ...
+复现概率: 必现 / 偶现（附触发条件）
+```
+
+> TAPD 信息不足以还原复现路径时，**如实标注「TAPD 未提供，需向报告人确认」**，不要凭代码推测编造步骤 —— 编造的复现路径会让开发按错误场景验证。此类缺口应由需求分析师写进 `open-questions.json`。
 
 ### Step 5：分类 + 产出报告到 Story 目录
 
-#### 5.1 问题分类
+#### 5.1 问题分类（责任方分诊）
 
 | 类别 | 负责方 | 说明 |
 |------|--------|------|
@@ -174,6 +221,8 @@ kb-query ∥ graphify  →  交叉验证  →  search_content 兜底
 | 后端-缺失 | 后端补充 | 缺少字段、接口未实现 |
 | 协作-联调 | 双方协作 | 接口定义不一致 |
 
+> 分类只判断「该谁改」，不判断「怎么改」。后端类问题标注清楚后，需求分析师会把它转成 `open-questions.json` 的待确认项，而不是排进前端开发任务。
+
 #### 5.2 输出路径
 
 ```
@@ -181,11 +230,15 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 ```
 
 > 文件名使用 `get_stories_or_tasks` 返回的需求标题，非法字符替换为 `_`。
+> 后缀必须是 `_bug分析报告.md` —— `prompt-builder.js` 与门控校验都按此后缀自动发现该文件。
 
 #### 5.3 报告文件结构
 
 ```markdown
 # {storyTitle}_bug分析报告
+
+> 本报告只记录事实（问题 / 复现 / 定位 / 根因），不含修复方案。
+> 修复实现由 Phase 2 前端开发工程师基于「代码定位」自行设计。
 
 ## 1. 总览
 
@@ -205,17 +258,18 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 ### Bug #1: {标题}
 
 #### 缺陷复述
+#### 复现步骤
+（前置条件 / 步骤 / 预期结果 / 实际结果 / 复现概率）
 #### 根因分析
 ##### 数据流追踪
 ##### 触发条件
 ##### 代码定位
-#### 修复建议
-#### 测试验证
+（文件 + 函数 + 行号；标注 kb-query / graphify 两路的命中情况与置信度）
 
 ### Bug #2: {标题}
 ...
 
-## 4. 修复优先级建议
+## 4. 优先级排序
 
 | 优先级 | Bug | 原因 |
 |--------|-----|------|
@@ -223,6 +277,9 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 | P1 | #1, #5 | 影响用户体验 |
 ...
 ```
+
+> 🚫 报告中不得出现 `#### 修复建议`、`#### 解决方案`、`#### 测试验证` 等章节。
+> `validate-phase-gate.js` 会扫描标题行，命中时输出警告。
 
 ---
 

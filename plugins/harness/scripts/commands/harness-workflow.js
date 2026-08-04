@@ -96,8 +96,11 @@ function generateStoryId() {
  * 激活 harness 模式
  * @param {string} [storyId] - Story ID，不提供则自动生成
  * @param {string} [title] - 需求标题，不提供则标记为"待定"
+ * @param {'run'|'fixbugs'} [mode='run'] - 工作流模式
  */
-function cmdStart(storyId, title) {
+function cmdStart(storyId, title, mode) {
+  const workflowMode = mode === 'fixbugs' ? 'fixbugs' : 'run'
+
   // 检查是否已有激活的 harness
   const existing = readFlag()
   if (existing && existing.active) {
@@ -121,6 +124,7 @@ function cmdStart(storyId, title) {
     active: true,
     storyId: id,
     title: name,
+    mode: workflowMode,
     activatedAt: new Date().toISOString(),
     primaryRepo: reposConfig.primary,
     repoCount: Object.keys(reposConfig.repos).length
@@ -131,7 +135,7 @@ function cmdStart(storyId, title) {
   // 内部调用 create-workflow.js 创建 e2e-state.json（断链修复）
   let workflowResult = null
   try {
-    workflowResult = createWorkflow(id, name, false)
+    workflowResult = createWorkflow(id, name, false, false, workflowMode)
     if (workflowResult && workflowResult.success) {
       data.phase = workflowResult.phase
       data.e2eStateCreated = true
@@ -144,8 +148,8 @@ function cmdStart(storyId, title) {
 
   console.log(JSON.stringify({
     ok: true,
-    message: `✅ Harness 模式已激活\n   Story: ${id} "${name}"\n   Phase: 0 (需求分析)\n   标记文件: .codebuddy/plans/.harness-active` +
-      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '"'),
+    message: `✅ Harness 模式已激活\n   Story: ${id} "${name}"\n   模式: ${workflowMode}${workflowMode === 'fixbugs' ? ' (Bug 修复，免原型文档)' : ''}\n   Phase: 0 (需求分析)\n   标记文件: .codebuddy/plans/.harness-active` +
+      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '" --mode=' + workflowMode),
     data
   }))
 }
@@ -210,9 +214,18 @@ function cmdStatus() {
 const args = process.argv.slice(2)
 const command = args[0]
 
+// --mode=run|fixbugs 可出现在任意位置，先摘出来再解析位置参数
+const modeArg = args.find(a => a.startsWith('--mode='))
+const cliMode = modeArg ? modeArg.slice('--mode='.length) : 'run'
+const positional = args.filter(a => !a.startsWith('--'))
+
 switch (command) {
   case 'start':
-    cmdStart(args[1], args.slice(2).join(' ').replace(/^["']|["']$/g, ''))
+    if (cliMode !== 'run' && cliMode !== 'fixbugs') {
+      console.error(`❌ 无效的 --mode 值: ${cliMode}（仅支持 run / fixbugs）`)
+      process.exit(1)
+    }
+    cmdStart(positional[1], positional.slice(2).join(' ').replace(/^["']|["']$/g, ''), cliMode)
     break
 
   case 'end':
@@ -228,9 +241,11 @@ switch (command) {
       '/harness 工作流管理脚本',
       '',
       '用法:',
-      '  node harness-workflow.js start <storyId> "<标题>"   激活 harness 模式',
+      '  node harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs]   激活 harness 模式',
       '  node harness-workflow.js end                          关闭 harness 模式',
       '  node harness-workflow.js status                       查看当前状态',
+      '',
+      '  --mode=fixbugs   Bug 修复模式：免除原型文档要求，Phase 0 需求分析师负责产出 Bug 分析报告',
       '',
       '详细文档见: CODEBUDDY.md § /harness 工作流'
     ].join('\n'))

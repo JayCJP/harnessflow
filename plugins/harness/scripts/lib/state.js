@@ -340,6 +340,16 @@ const OPEN_QUESTIONS_FILE = 'open-questions.json'
 const TASK_DAG_JSON_FILE = 'task-dag.json'
 const ACCEPTANCE_VERIFICATION_FILE = 'acceptance-verification.json'
 
+/**
+ * Story 原始输入契约文件名
+ *
+ * 主 Agent 从用户消息提取参数写入此文件后即完成职责，不做任何分析。
+ * 需求分析师在 Phase 0 读取它，自行决定检索策略（含 fixbugs 模式下调用
+ * tapd-bug-analyzer skill）。这样「分析」始终发生在需求分析师上下文内，
+ * 不会因跨 Agent 传递而丢失中间推理。
+ */
+const STORY_INPUT_FILE = 'story-input.json'
+
 /** 🌐 Figma 设计稿清单文件名 */
 const FIGMA_FRAME_INVENTORY_FILE = 'figma-frame-inventory.json'
 
@@ -528,6 +538,110 @@ function checkPhaseArtifact (storyId, phaseNum) {
     exists: missing.length === 0,
     missing,
     description: phaseDef.artifacts.map(a => a.description).join(', ')
+  }
+}
+
+/**
+ * 读取 Story 原始输入契约（story-input.json）
+ * @param {string} storyId - Story ID
+ * @returns {Object|null} 解析后的对象；文件不存在返回 null，解析失败返回 { _parseError }
+ */
+function readStoryInput (storyId) {
+  const filePath = path.join(getStoryDir(storyId), STORY_INPUT_FILE)
+  if (!fs.existsSync(filePath)) return null
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch (e) {
+    return { _parseError: e.message }
+  }
+}
+
+/**
+ * 获取 Story 的工作流模式
+ *
+ * 优先取 story-input.json 的 mode；缺失时回退到 e2e-state.json 的 mode
+ * （create-workflow.js 会把 --mode 落到状态文件，供 story-input.json
+ * 尚未写入或已被清理的场景使用）。都没有则默认 'run'。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {'run'|'fixbugs'}
+ */
+function getStoryMode (storyId) {
+  const input = readStoryInput(storyId)
+  if (input && !input._parseError && (input.mode === 'run' || input.mode === 'fixbugs')) {
+    return input.mode
+  }
+  const state = readStateFile(storyId)
+  if (state && (state.mode === 'run' || state.mode === 'fixbugs')) {
+    return state.mode
+  }
+  return 'run'
+}
+
+/**
+ * 判断本 Story 是否需要原型分析文档
+ *
+ * 历史问题: create-workflow.js 曾无条件检查 prototype-analysis.md，缺失即写入
+ * Greenfield stub。fixbugs 场景本无原型，于是每个 Bug 修复 Story 都留下一个
+ * 空壳文件，还会被 context-refresh 当成 Phase 0 产出物收集。
+ *
+ * 现在改为按需判定: 只有 story-input.json 里真的给了原型/Figma 链接，
+ * 才要求产出 prototype-analysis.md。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {{ required: boolean, reason: string }}
+ */
+function isPrototypeRequired (storyId) {
+  const input = readStoryInput(storyId)
+
+  // 无 story-input.json → 无法判定，沿用旧行为（要求原型文档）以免漏检 run 模式
+  if (!input || input._parseError) {
+    return { required: true, reason: 'story-input.json 不存在或解析失败，保守要求原型文档' }
+  }
+
+  if (input.mode === 'fixbugs') {
+    return { required: false, reason: 'fixbugs 模式，Bug 修复无原型依赖' }
+  }
+
+  const sources = input.sources || {}
+  const protoCount = Array.isArray(sources.prototypeUrls) ? sources.prototypeUrls.length : 0
+  const figmaCount = Array.isArray(sources.figmaUrls) ? sources.figmaUrls.length : 0
+
+  if (protoCount + figmaCount > 0) {
+    return {
+      required: true,
+      reason: `提供了 ${protoCount} 个原型链接 + ${figmaCount} 个 Figma 链接`
+    }
+  }
+
+  return { required: false, reason: '未提供原型或 Figma 链接' }
+}
+
+/**
+ * 查找 Story 目录下的 Bug 分析报告
+ *
+ * 文件名含动态需求标题（`{storyTitle}_bug分析报告.md`），无法进 PHASE_ARTIFACTS
+ * 的固定文件名表，故用后缀匹配单独检查。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {{ exists: boolean, files: string[], paths: string[] }}
+ */
+function findBugAnalysisReports (storyId) {
+  const dir = getStoryDir(storyId)
+  if (!fs.existsSync(dir)) return { exists: false, files: [], paths: [] }
+
+  let names
+  try {
+    names = fs.readdirSync(dir)
+  } catch (e) {
+    return { exists: false, files: [], paths: [] }
+  }
+
+  const files = names.filter(n => /bug分析报告\.md$/.test(n)).sort()
+  return {
+    exists: files.length > 0,
+    files,
+    paths: files.map(f => path.join(dir, f))
   }
 }
 
@@ -1321,6 +1435,8 @@ module.exports = {
   // 产出物检查
   checkPhaseArtifact,
   checkPrototypeDoc,
+  isPrototypeRequired,
+  findBugAnalysisReports,
   checkRequirementDoc,
   checkTaskDAGDoc,
   checkFigmaComponentMap,
@@ -1334,6 +1450,9 @@ module.exports = {
   TASK_DAG_JSON_FILE,
   ACCEPTANCE_VERIFICATION_FILE,
   FIGMA_FRAME_INVENTORY_FILE,
+  STORY_INPUT_FILE,
+  readStoryInput,
+  getStoryMode,
   readJsonArtifact,
   checkAcceptanceCriteria,
   checkOpenQuestions,

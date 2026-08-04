@@ -54,7 +54,7 @@ Step 3: 子 Agent 汇报产出物路径 → 回到 Step 1
 ## 脚本路径约定
 
 ```bash
-HARNESS=${CODEBUDDY_PLUGIN_ROOT}/scripts/commands
+HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 ```
 
 ## Phase → Agent 对照（仅供阅读，不作为执行依据）

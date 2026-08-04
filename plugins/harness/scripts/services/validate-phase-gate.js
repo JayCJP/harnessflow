@@ -34,6 +34,8 @@ const {
   hasFigmaDesign,
   checkFigmaFrameInventory,
   validateTaskFigmaReferences,
+  getStoryMode,
+  findBugAnalysisReports,
   getPhaseName: getPhaseNameFromUtils
 } = require('../lib/state')
 
@@ -167,6 +169,15 @@ function checkPrototypeConfirmation (storyId) {
     return { confirmed: false, reason: '状态文件不存在' }
   }
 
+  // 本 Story 根本不需要原型（fixbugs 模式 / 未提供原型链接）→ 直接放行
+  // create-workflow.js 在建流程时按 story-input.json 判定并写入此字段
+  if (state.gateChecks?.prototypeRequired === false) {
+    return {
+      confirmed: true,
+      reason: `无原型依赖: ${state.gateChecks.prototypeRequiredReason || '未提供原型/Figma 链接'}`
+    }
+  }
+
   // 检查 gateChecks 中是否有 prototypeConfirmed
   if (state.gateChecks?.prototypeConfirmed) {
     return { confirmed: true, reason: '已确认' }
@@ -182,6 +193,45 @@ function checkPrototypeConfirmation (storyId) {
   }
 
   return { confirmed: true, reason: '无原型依赖或已隐含确认' }
+}
+
+/**
+ * fixbugs 模式下检查 Phase 0 的 Bug 分析报告
+ *
+ * 两项检查:
+ *   1. 报告必须存在（blocker）—— 否则后续 Phase 拿不到 Bug 事实，
+ *      开发工程师只能凭 requirement-analysis.md 的转述猜代码位置。
+ *   2. 报告不应包含修复方案（warning）—— 修复设计属于开发工程师。
+ *      关键词匹配是启发式的，「根因」段落里出现"建议"类措辞会误报，
+ *      因此**只警告不阻断**，由人判断。
+ *
+ * @param {string} storyId
+ * @returns {{ exists: boolean, files: string[], solutionHints: string[] }}
+ */
+function checkBugAnalysisReport (storyId) {
+  const found = findBugAnalysisReports(storyId)
+  const solutionHints = []
+
+  // 只扫描标题行 —— 正文里出现"修复"是正常的（如"该 Bug 在 xx 版本已修复"），
+  // 而独立的「修复建议 / 解决方案」章节才是越界信号
+  const SOLUTION_HEADINGS = /^#{1,6}\s*.*(修复建议|修复方案|解决方案|改造建议|优化建议|测试验证)/
+
+  for (const p of found.paths) {
+    let raw
+    try {
+      raw = fs.readFileSync(p, 'utf-8')
+    } catch (e) {
+      continue
+    }
+    const name = path.basename(p)
+    for (const line of raw.split(/\r?\n/)) {
+      if (SOLUTION_HEADINGS.test(line.trim())) {
+        solutionHints.push(`${name}: ${line.trim()}`)
+      }
+    }
+  }
+
+  return { exists: found.exists, files: found.files, solutionHints }
 }
 
 /**
@@ -335,6 +385,26 @@ function validateGate (storyId, targetPhase) {
     details.prototypeConfirmation = protoCheck
     if (!protoCheck.confirmed) {
       blockers.push(`原型/设计稿未确认: ${protoCheck.reason}`)
+    }
+  }
+
+  // ── Phase 0 特殊门控：fixbugs 模式必须有 Bug 分析报告 ──
+  // 文件名含动态需求标题（{标题}_bug分析报告.md），无法进 PHASE_ARTIFACTS 固定文件名表，故单独校验
+  if (targetPhase >= 1 && getStoryMode(storyId) === 'fixbugs') {
+    const bugCheck = checkBugAnalysisReport(storyId)
+    details.bugAnalysisReport = bugCheck
+
+    if (!bugCheck.exists) {
+      blockers.push(
+        'fixbugs 模式缺少 Bug 分析报告: 未在 Story 目录找到 *bug分析报告.md。\n' +
+        '  需求分析师应在 Phase 0 自行 use_skill("tapd-bug-analyzer") 产出该报告（记录问题复述/复现步骤/代码定位/根因）'
+      )
+    } else if (bugCheck.solutionHints.length > 0) {
+      // 仅警告: 关键词匹配是启发式的，正常的根因描述也可能命中
+      warnings.push(
+        `Bug 分析报告疑似包含修复方案章节（应只记录事实，修复设计属于开发工程师）:\n` +
+        bugCheck.solutionHints.map(h => `  - ${h}`).join('\n')
+      )
     }
   }
 

@@ -25,7 +25,7 @@ description: >
 
 **执行命令**:
 ```bash
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/audit/harness-audit.js --json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/harness-audit.js --json
 ```
 
 **采集数据**:
@@ -53,7 +53,7 @@ node ${CODEBUDDY_PLUGIN_ROOT}/scripts/audit/harness-audit.js --json
 
 **执行命令**:
 ```bash
-node ${CODEBUDDY_PLUGIN_ROOT}/scripts/audit/metrics-aggregator.js --json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/metrics-aggregator.js --json
 ```
 
 **采集指标**:

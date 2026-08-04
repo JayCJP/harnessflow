@@ -1,13 +1,15 @@
 ---
-description: Harness Bug 修复流水线 — 从 TAPD 拉取 Bug 分析报告，自动触发端到端修复流程
+description: Harness Bug 修复流水线 — 以 fixbugs 模式启动标准 8 Phase 流程，Bug 分析由需求分析师在 Phase 0 内完成
 category: workflow
 allowed-tools: Bash, Write
 ---
 
 # /harness fixbugs — Bug 修复端到端流水线
 
-> 串联 TAPD Bug Analyzer + Harness 8 Phase 流水线。
-> 先拉取 Bug 并产出分析报告，再逐 Phase 推进修复（需求分析 → 开发 → 审查 → 测试 → 部署）。
+> 与 `/harness run` 走**同一条** 8 Phase 流水线，唯一区别是 `mode=fixbugs`：
+> 免除原型文档要求，且 Phase 0 的需求分析师会自行拉取并分析 TAPD 缺陷。
+>
+> **主 Agent 不分析 Bug。** 你只负责把用户给的参数搬进 `story-input.json`，然后进入标准 dispatch 循环。
 
 ## 用法
 
@@ -22,11 +24,9 @@ allowed-tools: Bash, Write
 
 ## AI 执行协议
 
-你是 Harness 工作流的主控 Agent。按以下流程依次执行。
+你是 Harness 工作流的主控 Agent。职责是 **搬运参数 + 执行脚本推进 Phase**，不做任何 Bug 分析。
 
 ### 必须加载的 Skill
-
-在执行任何操作前，先调用以下 skill：
 
 ```
 use_skill("harness-conductor")
@@ -39,115 +39,112 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 STORY_DIR=${CLAUDE_PROJECT_DIR}/.codebuddy/plans/<storyId>
 ```
 
-## 执行流程（3 阶段）
+## 执行流程（2 阶段）
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  阶段 1：Harness 初始化 + Bug 分析（Pre-Phase 0）          │
-│  ├── 1A. harness-workflow.js start <storyId> "<标题>"   │
-│  └── 1B. 加载 tapd-bug-analyzer skill → 产出报告           │
+│  阶段 1：初始化（主 Agent，只搬参数不分析）                 │
+│  ├── 1A. harness-workflow.js start ... --mode=fixbugs   │
+│  └── 1B. 写 story-input.json（TAPD 链接 / 处理人 / 筛选） │
 │                                                         │
-│  阶段 2：Harness Phase 0（需求分析）                       │
-│  └── 需求分析师 Agent（读取 bug分析报告.md）                │
-│                                                         │
-│  阶段 3：Harness Phase 1→8（标准流水线）                    │
-│  └── 按 run 命令的标准 Phase 循环执行                      │
+│  阶段 2：标准 dispatch 循环（Phase 0→8）                   │
+│  └── Phase 0 需求分析师内部:                              │
+│        use_skill("tapd-bug-analyzer") → Bug 分析报告      │
+│        → requirement-analysis.md + AC + open-questions   │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 阶段 1：Harness 初始化 + Bug 分析
+## 阶段 1：初始化
 
-### Step 1A：启动 Harness
+### Step 1A：以 fixbugs 模式启动
 
 ```bash
-node $HARNESS/harness-workflow.js start <storyId> "<标题>"
+node $HARNESS/harness-workflow.js start <storyId> "<标题>" --mode=fixbugs
 ```
 
-确认 e2e-state.json 创建成功，Phase = 0。
+`--mode=fixbugs` 的作用：
 
-### Step 1B：加载 Bug Analyzer Skill 并产出报告
+- `e2e-state.json` 记录 `mode: "fixbugs"`
+- `gateChecks.prototypeRequired = false` → **不再生成空的 `prototype-analysis.md`**，Phase 0→1 门控也不检查它
+- `prompt-builder.js` 会给 Phase 0 注入 Bug 分析指引、给 Phase 2 注入「修复方案自行设计」说明
 
-**加载 skill**：
-调用 `use_skill("tapd-bug-analyzer")` 加载 TAPD Bug Analyzer。
+确认返回 `e2e-state.json: ✅ 已创建`，Phase = 0。
 
-**输入**：从用户消息中提取的 TAPD 链接、处理人、状态筛选等参数。
+### Step 1B：写 story-input.json
 
-**产出**：`{storyTitle}_bug分析报告.md`，写入 `${STORY_DIR}/`（当前 Story 的 plans 目录）。
+把用户消息里的参数**原样**写入，不做解析、不做归纳、不访问 TAPD：
 
-**检查点**：
-- 报告文件已生成且非空
-- Bug 清单完整（含复述、根因、代码定位、修复建议）
-- 按项目分组、按优先级排序
+```bash
+${STORY_DIR}/story-input.json
+```
 
-> 如果 TAPD 连接失败或 Bug 列表为空，中止流程并提示用户。
+```json
+{
+  "mode": "fixbugs",
+  "storyId": "STORY-001",
+  "title": "管家反馈需求合集",
+  "createdAt": "2026-08-04T10:00:00.000Z",
+  "sources": {
+    "tapdUrl": "https://www.tapd.cn/tapd_fe/10109441/story/detail/1010944xxxx",
+    "workspaceId": "10109441",
+    "storyIdInTapd": "1010944xxxx",
+    "owner": "小明",
+    "statusFilter": "待解决",
+    "terminal": "H5",
+    "text": "用户消息中除上述参数外的补充描述"
+  }
+}
+```
+
+字段规则：
+
+| 字段 | 必填 | 来源 |
+|------|------|------|
+| `mode` | ✅ | 固定 `"fixbugs"` |
+| `sources.tapdUrl` | ✅ | 用户消息中的 TAPD 链接，原样复制 |
+| `sources.workspaceId` | ✅ | 从链接 `tapd_fe/(\d+)/` 提取 |
+| `sources.storyIdInTapd` | 选填 | 从链接 `/story/detail/(\d+)` 提取 |
+| `sources.owner` | ✅ | "处理人: XXX" |
+| `sources.statusFilter` | 选填 | "状态筛选: XXX"，缺省不写 |
+| `sources.terminal` | 选填 | 用户提到的 H5 / PC / 小程序 |
+| `sources.text` | 选填 | 剩余自由描述 |
+
+> Schema: `scripts/schemas/story-input.schema.json`（`additionalProperties: false`，多写字段会校验失败）。
+> 从 URL 提正则、拆参数是**搬运**，不是分析 —— 允许做。判断哪些 Bug 归前端、代码在哪个文件，是分析 —— 不允许做。
 
 ---
 
-## 阶段 2：Harness Phase 0（需求分析）
+## 阶段 2：标准 dispatch 循环
 
-从 Stage 1 的 Bug 分析报告出发，进入标准 Harness 流程。
-
-### 推进命令
-
-```bash
-node $HARNESS/advance-phase.js <storyId> 1
-```
-
-### Phase 0 Agent：需求分析师
-
-Spawn `requirement-analyst`（需求分析师）Agent，prompt 必须包含：
+此后与 `/harness run` **完全一致**（详见 run.md）：
 
 ```
-## 上下文
-
-本 Story 为 Bug 修复任务。Bug 分析报告: ${STORY_DIR}/{storyTitle}_bug分析报告.md
-
-请读取该报告，提取以下信息：
-- 涉及的 Bug 列表和项目
-- 需修改的文件清单（从报告的代码定位章节提取）
-- 按项目分组的修复范围
-
-## 产出要求
-
-基于 Bug 分析报告生成：
-1. requirement-analysis.md — Bug 修复需求文档（汇总所有 Bug 及修复目标）
-2. acceptance-criteria.json — 验收标准（每条 Bug 对应至少 1 个 AC）
-3. open-questions.json — 待确认问题（如有不确定的修复方案）
-
-## 约束
-
-- 验收标准必须可测试，关联具体 Bug
-- AC description 中引用 Bug 分析报告中的 Bug #
-- 跨项目 Bug 需在 AC 中标注所属项目
+Step 1: node $HARNESS/dispatch.js <storyId>
+Step 2: 按 status 四态分支
+  ┌ ready     → readyToAdvance=true 则执行 advanceCommand，否则 Spawn nextAgent（prompt = agentPrompt 原样注入）
+  ├ fix_loop  → 执行 recovery.command
+  ├ blocked   → 按 recovery.description 处理
+  └ terminal  → 收尾
+Step 3: 子 Agent 汇报产出物路径 → 回 Step 1
 ```
 
-### 推进检查
+主 Agent **不拼 prompt**。`agentPrompt` 由 `prompt-builder.js` 统一生成，fixbugs 模式下它已经包含：
 
-- `advance-phase.js` 返回 `success: true`
-- `acceptance-criteria.json` 的 criteria 非空
-- `open-questions.json` 中所有条目的 `resolved` 必须为 `true`（用户已确认）
+| Phase | 自动注入的内容 |
+|-------|--------------|
+| 0 | `story-input.json` 原文 + 「自行 `use_skill("tapd-bug-analyzer")`、报告只记事实不写修复方案」指引 |
+| 0 | 产出物清单里追加 `{标题}_bug分析报告.md` |
+| 1→8 | Story 目录下的 `*bug分析报告.md` 全文（由 `readStoryContext()` 自动发现并注入） |
+| 2 | 「Bug 修复说明」：报告只给事实，**修复怎么改由开发工程师用 `kb-query ∥ graphify` 双源验证后自行设计** |
 
----
+### Phase 0 门控
 
-## 阶段 3：Phase 1→8 标准流水线
+`validate-phase-gate.js` 在 fixbugs 模式下额外检查：
 
-此后完全按照 `/harness run` 的 Phase 循环执行（详见 run.md）。
-
-### Phase 1：任务规划
-
-Spawn `task-planner`（任务规划师），prompt 中注入 Bug 分析报告的代码定位信息，确保 task-dag 中的 files[] 包含所有受影响文件。
-
-### Phase 2：代码开发
-
-Spawn `frontend-developer`（前端开发工程师，如有多项目，并行启动多个开发者 Agent）。
-
-每个 prompt 必须包含对应项目的 Bug 分析报告章节（问题复述 + 根因 + 修复建议）。
-
-### Phase 3→8
-
-按标准流程执行（代码审查 → 测试 → Git 提交 → 知识库 → 部署）。
+- **阻断项**：Story 目录必须存在 `*bug分析报告.md`，否则 Phase 0→1 被拦截
+- **警告项**：报告标题行出现 `修复建议` / `解决方案` / `测试验证` 等 → 输出警告（越界但不阻断）
 
 ---
 
@@ -155,15 +152,25 @@ Spawn `frontend-developer`（前端开发工程师，如有多项目，并行启
 
 | 维度 | `/harness run` | `/harness fixbugs` |
 |------|---------------|-------------------|
-| 前置动作 | 无 | TAPD 拉取 Bug + 分析报告 |
-| Phase 0 输入 | 用户提供的 PRD/描述 | `bug分析报告.md` |
-| Phase 0 Agent prompt | 通用需求分析 | 含 Bug 报告路径 + 结构化指引 |
-| 适用场景 | 新功能开发 | Bug 修复任务 |
+| 启动参数 | `start <id> "<标题>"` | `start <id> "<标题>" --mode=fixbugs` |
+| 主 Agent 前置动作 | 无 | 写 `story-input.json`（仅搬参数） |
+| 原型文档 | 提供了原型/Figma 链接则必需 | 免除 |
+| Phase 0 产出物 | requirement-analysis / AC / open-questions | 同左 **+ `{标题}_bug分析报告.md`** |
+| Bug 分析执行方 | — | **Phase 0 需求分析师**（非主 Agent） |
+| Phase 1→8 | 标准流水线 | 完全相同 |
 
 ## 铁律
 
-- 🚫 AI 不直接写 e2e-state.json / dev-pass.json
-- 🚫 AI 不跳过 Phase 直接开发
-- 🚫 AI 不自行标记 open-questions 为 resolved
-- ✅ Bug 分析报告必须产出一份 `.md` 文件
-- ✅ Phase 0 必须读取 Bug 分析报告作为输入
+| 禁止行为 | 原因 |
+|---------|------|
+| 🚫 主 Agent 加载 `tapd-bug-analyzer` | 分析必须发生在需求分析师上下文内。主 Agent 分析会导致：① 中间推理（候选文件排除过程、双源命中情况）在跨 Agent 传递中丢失；② 主 Agent 上下文被 TAPD 原始数据 + 源码撑满，后续 8 个 Phase 的调度全程带着这些无关内容 |
+| 🚫 主 Agent 调用任何 TAPD MCP 工具 | 同上 |
+| 🚫 主 Agent 自行拼 Phase 0 prompt | `agentPrompt` 是唯一出口，自行拼装会导致注入内容逐轮不一致 |
+| 🚫 AI 直接写 e2e-state.json / dev-pass.json | 状态机唯一信源，只能由脚本维护 |
+| 🚫 AI 跳过 Phase 直接开发 | 门控依赖前置产出物 |
+| 🚫 AI 自行标记 open-questions 为 resolved | 待确认项必须由用户确认 |
+
+| 必做 | 说明 |
+|------|------|
+| ✅ `--mode=fixbugs` 必须带上 | 漏掉会退回 run 模式，重新要求原型文档且不做 Bug 报告门控 |
+| ✅ `story-input.json` 必须在 Phase 0 dispatch 前写好 | 需求分析师靠它拿 TAPD 参数；缺失则 prompt 里没有 sources，分析师只能回退到用户描述 |
