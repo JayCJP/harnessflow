@@ -127,6 +127,21 @@ node ${HARNESS}/dispatch.js <storyId>
 不同轮次注入的内容会不一致，Phase 2 的 `files[]` 写入范围也可能被漏掉——这是流程不可控的直接来源。
 prompt 内容需要调整时，改 `prompt-builder.js`，不改主 Agent 行为。
 
+## 代码检索规范（查找代码时强制）
+
+> 编排过程中需要查找/定位代码（Spawn 子 Agent、撰写上下文、判断改动范围）时，**必须使用双源交叉验证**，
+> 不要只依赖单一检索方式（如仅 Explore agent 或仅文本搜索）。
+
+**标准流程**:
+1. **kb-query** — 业务语义层：按功能模块/接口名检索，拿业务语义、候选文件、历史踩坑
+2. **graphify** — 结构层：`query "<关键词>"` 拿结构视图，`explain "<模块>"` 理解职责，`path "<API>" "<渲染出口>"` 追调用链
+3. 双源交叉验证收敛（规则见 kb-query skill「双源交叉验证」章节）
+4. `search_content` / `search_file` 兜底：仅当两路都没定位到文件时使用
+
+**禁止**:
+- 🚫 仅用 Explore agent 或仅文本搜索定位代码
+- 🚫 跳过 kb-query / graphify 直接猜文件路径
+
 ## 铁律
 
 - 🚫 AI 不直接写/改 `e2e-state.json`

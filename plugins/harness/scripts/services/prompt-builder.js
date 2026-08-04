@@ -41,7 +41,8 @@ const AGENT_CONSTRAINTS = [
   '禁止修改 e2e-state.json 和 dev-pass.json，状态机由 advance-phase.js 独占维护',
   '禁止通过 shell 命令绕过上述限制写状态文件（hook 会拦截并记录违规）',
   '只产出本 Phase 的产出物，完成后汇报产出物路径',
-  '由主 Agent 调用 advance-phase.js 推进 Phase，禁止自行修改 phase'
+  '由主 Agent 调用 advance-phase.js 推进 Phase，禁止自行修改 phase',
+  '查找/定位代码时必须使用 kb-query + graphify 双源交叉验证，禁止仅用 Explore agent 或仅文本搜索'
 ]
 
 /**
