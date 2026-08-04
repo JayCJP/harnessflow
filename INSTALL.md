@@ -13,8 +13,8 @@
 
 | # | 检查项 | 通过条件 | 失败处理 |
 |---|--------|---------|---------|
-| 1 | 工具已安装 | 能识别 `/plugin` 命令 | 提示用户先安装 Claude Code 或 CodeBuddy Code |
-| 2 | GitLab 可访问 | `git ls-remote https://gitlab.vzan.com/caijiepeng/harness-marketplace.git` 返回 refs | 提示用户检查内网/VPN 与 GitLab 账号权限 |
+| 1 | 工具已安装 | 已安装 **Claude Code** 或 **CodeBuddy Code**（两者任一即可，均能识别 `/plugin` 命令） | 提示用户先安装 Claude Code 或 CodeBuddy Code |
+| 2 | GitHub 可访问 | `git ls-remote https://github.com/JayCJP/harnessflow.git` 返回 refs | 提示用户检查网络与 GitHub 账号权限 |
 | 3 | 仓库结构完整 | 仓库根目录存在 `.codebuddy-plugin/marketplace.json`（或 `.claude-plugin/marketplace.json`）与 `plugins/harness/plugin.json` | 提示用户仓库克隆不完整 |
 | 4 | 无需 npm 依赖 | `plugins/harness/vendor/ajv.bundle.js` 存在（ajv 已单文件内置，**不需要 `npm install`**） | 若缺失，从 GitHub 官方 `ajv-dist` 的 CDN 重新 vendor 后提交 |
 
@@ -29,13 +29,13 @@
 在工具命令输入框中执行：
 
 ```bash
-/plugin marketplace add https://gitlab.vzan.com/caijiepeng/harness-marketplace.git
+/plugin marketplace add https://github.com/JayCJP/harnessflow.git
 ```
 
 - 添加成功后市场名为 **`harness-marketplace`**。
-- 若本机已配置内部 GitLab 域名，也可用 SSH 方式：
+- 若本机已配置 GitHub SSH 密钥，也可用 SSH 方式：
   ```bash
-  /plugin marketplace add git@gitlab.vzan.com:caijiepeng/harness-marketplace.git
+  /plugin marketplace add git@github.com:JayCJP/harnessflow.git
   ```
 
 **验证**：执行 `/plugin marketplace list`，输出中应包含 `harness-marketplace`。

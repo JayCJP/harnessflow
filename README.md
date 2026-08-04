@@ -4,7 +4,11 @@
 
 通过本插件市场，你可以安装 **Harness** 插件，获得一条覆盖「Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 审查 → 测试 → 部署」全流程的自动化开发流水线，并配套知识库（KB）管理、文档生成、API 生成、Figma 协作等能力。
 
-> 安装源（Git）：`https://gitlab.vzan.com/caijiepeng/harness-marketplace.git`
+> **同时兼容 Claude Code 与 CodeBuddy Code**
+> 本插件市场同时支持 **Claude Code** 与 **CodeBuddy Code** 两款 AI 编程工具，两者使用相同的 `/plugin` 命令体系，安装步骤完全一致。
+> 市场清单分别位于 `.claude-plugin/marketplace.json`（Claude Code）与 `.codebuddy-plugin/marketplace.json`（CodeBuddy Code），内容一致，可任选其一安装。
+
+> 安装源（GitHub）：`https://github.com/JayCJP/harnessflow.git`
 
 ---
 
@@ -35,8 +39,8 @@
 
 ## 环境要求
 
-- 已安装 **CodeBuddy Code**（建议使用最新版本）。
-- 安装后可访问内部 GitLab 仓库：`https://gitlab.vzan.com/caijiepeng/harness-marketplace.git`。
+- 已安装 **Claude Code** 或 **CodeBuddy Code**（建议使用最新版本，两者均可）。
+- 安装后可访问 GitHub 仓库：`https://github.com/JayCJP/harnessflow.git`。
 - 如需使用 TAPD、Figma、DevOps 等能力，请确保对应 MCP 服务已配置。
 
 ---
@@ -47,16 +51,16 @@
 
 ### 第 1 步：添加市场
 
-在 CodeBuddy Code 的命令输入框中执行：
+在 Claude Code 或 CodeBuddy Code 的命令输入框中执行：
 
 ```bash
-/plugin marketplace add https://gitlab.vzan.com/caijiepeng/harness-marketplace.git
+/plugin marketplace add https://github.com/JayCJP/harnessflow.git
 ```
 
-> 若当前仓库已配置为内部 GitLab 域名，也可使用 SSH 方式：
+> 若本机已配置 GitHub SSH 密钥，也可使用 SSH 方式：
 >
 > ```bash
-> /plugin marketplace add git@gitlab.vzan.com:caijiepeng/harness-marketplace.git
+> /plugin marketplace add git@github.com:JayCJP/harnessflow.git
 > ```
 
 添加成功后，市场名称为 **`harness-marketplace`**。
@@ -136,7 +140,7 @@
 
 | 问题 | 解决方法 |
 | --- | --- |
-| 市场添加后无法加载 | 确认 GitLab 地址可访问，且仓库根目录存在 `.codebuddy-plugin/marketplace.json` |
+| 市场添加后无法加载 | 确认 GitHub 地址可访问，且仓库根目录存在 `.codebuddy-plugin/marketplace.json` |
 | 安装时提示「路径未找到」 | 优先使用 Git 型市场（即上面的 Git 地址），不要用 URL 型 |
 | 命令 / 技能不显示 | 删除缓存 `rm -rf ~/.codebuddy/plugins/cache` 后重启并重新安装 |
 | 需要调试日志 | 启动 CodeBuddy Code 时加 `--debug` 参数 |
