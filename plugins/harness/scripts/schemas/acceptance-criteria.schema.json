@@ -15,6 +15,8 @@
           "id": { "type": "string", "pattern": "^AC-\\d+$" },
           "title": { "type": "string" },
           "description": { "type": "string", "minLength": 1 },
+          "project": { "type": ["string", "null"] },
+          "repoPath": { "type": ["string", "null"] },
           "testType": { "type": "string", "enum": ["ui", "api", "integration"] },
           "given": { "type": "string" },
           "when": { "type": "string" },

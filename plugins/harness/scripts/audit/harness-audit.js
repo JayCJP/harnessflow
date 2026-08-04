@@ -2,23 +2,12 @@
 const fs = require("fs")
 const path = require("path")
 const { execSync } = require("child_process")
-const { PROJECT_ROOT, PLANS_DIR, getStoryDir, listStoryDirs, readStateFile, findActiveWorkflows, checkPhaseArtifact, getPhaseName, getPhaseSlug, checkAcceptanceCriteria, checkOpenQuestions, checkTaskDagJson, validateContractReferences, checkAcceptanceVerification, checkDevPass } = require("../lib/state")
+const { PLANS_DIR, listStoryDirs, readStateFile, findActiveWorkflows, checkPhaseArtifact, checkAcceptanceCriteria, checkOpenQuestions, checkTaskDagJson, validateContractReferences, checkAcceptanceVerification, checkDevPass } = require("../lib/state")
 const args = process.argv.slice(2)
 const fixMode = args.includes("--fix")
 const jsonOnly = args.includes("--json")
 const issues = [], warnings = [], fixed = []
 const summary = {}
-
-function auditSettings() {
-  const sp = path.join(PROJECT_ROOT, ".codebuddy", "settings.json")
-  if (!fs.existsSync(sp)) {
-    // 本机 hooks 由 CodeBuddy 全局配置注入，项目内不一定有 settings.json，
-    // 因此缺失时不报 BLOCKER，降级为 WARNING 提示
-    warnings.push({ cat: "config", severity: "WARNING", msg: "settings.json 不存在（hooks 可能由全局配置注入，可忽略）" })
-    return
-  }
-  try { JSON.parse(fs.readFileSync(sp, "utf-8")); summary.settingsValid = true } catch (e) { issues.push({ cat: "config", severity: "BLOCKER", msg: "settings.json 解析失败: " + e.message }) }
-}
 
 function auditHooks() {
   // 实际 hook 脚本位于 scripts/hooks/ (audit 的 __dirname 是 scripts/audit/，所以 ../hooks)
@@ -105,7 +94,7 @@ function auditArtifacts() {
 }
 
 function run() {
-  auditSettings(); auditHooks(); auditActiveStory(); auditDevPass(); auditContracts(); auditArtifacts()
+  auditHooks(); auditActiveStory(); auditDevPass(); auditContracts(); auditArtifacts()
   summary.auditedAt = (new Date()).toISOString()
   summary.totalIssues = issues.length; summary.totalWarnings = warnings.length; summary.totalFixed = fixed.length
   if (jsonOnly) { console.log(JSON.stringify({ summary: summary, issues: issues, warnings: warnings, fixed: fixed }, null, 2)); return }

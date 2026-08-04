@@ -12,7 +12,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const Ajv = require('ajv')
+const Ajv = require('../../vendor/ajv.bundle.js')
 const { PLANS_DIR } = require('../lib/state')
 
 /** Schema 文件目录 */

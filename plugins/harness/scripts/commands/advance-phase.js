@@ -62,6 +62,12 @@ let autoFixFlag = false
 let rollbackFlag = false
 let fixLoopFlag = false
 
+// 纯数字参数可能同时包含 storyId（TAPD 需求 ID 为纯数字）与 phase 数字。
+// 解析规则：第一个纯数字视为 storyId，最后一个纯数字视为 targetPhase。
+// 非数字参数（含路径前缀）优先作为 storyId。
+const numericArgs = []
+const nonNumericArgs = []
+
 for (let i = 0; i < args.length; i++) {
   const arg = args[i]
   if (arg === '--renew-pass') renewFlag = true
@@ -69,8 +75,18 @@ for (let i = 0; i < args.length; i++) {
   else if (arg === '--auto-fix') autoFixFlag = true
   else if (arg === '--rollback') rollbackFlag = true
   else if (arg === '--fix-loop') fixLoopFlag = true
-  else if (/^\d+$/.test(arg)) targetPhase = parseInt(arg, 10)
-  else if (!storyId) storyId = arg.replace(/^(plans\/|\.codebuddy\/plans\/)/i, '')
+  else if (/^\d+$/.test(arg)) numericArgs.push(arg)
+  else nonNumericArgs.push(arg)
+}
+
+// 非数字参数优先作为 storyId（兼容 plans/xxx 前缀）
+if (nonNumericArgs.length > 0) {
+  storyId = nonNumericArgs[0].replace(/^(plans\/|\.codebuddy\/plans\/)/i, '')
+}
+// 纯数字：第一个为 storyId，最后一个为 targetPhase
+if (numericArgs.length > 0) {
+  if (!storyId) storyId = numericArgs[0]
+  targetPhase = parseInt(numericArgs[numericArgs.length - 1], 10)
 }
 
 if (!storyId || targetPhase === null) {

@@ -267,19 +267,19 @@
     {
       "phase": 0,
       "failureType": "schema_validation_failed",
-      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: acceptance-criteria.json/criteria/0: must NOT have additional properties)",
-      "resolution": "请检查 acceptance-criteria.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "rootCause": "acceptance-criteria.schema.json 的 criteria items 未声明 project/repoPath 字段，多项目场景（userlive+vzanlivemobile）下 AC 追加 project 字段触发 additionalProperties 校验失败",
+      "resolution": "① schema 已扩展: acceptance-criteria.schema.json 的 criteria items 增加 project/repoPath 字段（与 task-dag.schema.json 保持一致，type 为 [string, null]）② 多项目归属改用结构化 project 字段表达，description 中不再使用 [userlive]/[vzanlivemobile] 前缀 ③ requirement-analyst 生成 AC 时必须遵循 schemas/ 定义，禁止添加 schema 未声明的字段",
       "storyId": "STORY-20260801-01",
       "blockers": [
         "Schema 校验失败: acceptance-criteria.json/criteria/0: must NOT have additional properties"
       ],
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-08-01T00:38:27.014Z",
-      "lastSeen": "2026-08-01T00:38:27.014Z",
+      "lastSeen": "2026-08-03T11:08:01.954Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     }
   ],
-  "version": "2.0",
-  "lastUpdated": "2026-08-01T00:38:27.014Z"
+  "version": "2.1",
+  "lastUpdated": "2026-08-04T01:30:00.000Z"
 }
