@@ -278,8 +278,51 @@
       "lastSeen": "2026-08-03T11:08:01.954Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "schema_validation_failed",
+      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: open-questions.json(root): should NOT have additional properties)",
+      "resolution": "请检查 open-questions.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "storyId": "STORY-1029062",
+      "blockers": [
+        "Schema 校验失败: open-questions.json(root): should NOT have additional properties"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-08-05T02:03:38.161Z",
+      "lastSeen": "2026-08-05T02:03:38.161Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:\\workfile\\userlive\\src\\views\\topic-manage\\AiAssistant.vue",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "ai-assistant-extract",
+      "blockers": [],
+      "occurrences": 6,
+      "firstSeen": "2026-08-05T02:36:44.009Z",
+      "lastSeen": "2026-08-05T02:36:44.082Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 3,
+      "failureType": "schema_validation_failed",
+      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: code-review.json(root): should match pattern \"^(B|W|S)\\d+$\")",
+      "resolution": "请检查 code-review.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "storyId": "groupv2",
+      "blockers": [
+        "Schema 校验失败: code-review.json(root): should match pattern \"^(B|W|S)\\d+$\""
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-08-05T11:13:46.186Z",
+      "lastSeen": "2026-08-05T11:13:46.186Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.1",
-  "lastUpdated": "2026-08-04T01:30:00.000Z"
+  "lastUpdated": "2026-08-05T11:13:46.186Z"
 }

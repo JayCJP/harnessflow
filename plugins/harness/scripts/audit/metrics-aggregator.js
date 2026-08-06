@@ -153,12 +153,31 @@ function aggregateMetrics () {
     const events = readTraceEvents(storyId)
     let storyFixLoopCount = 0
     let storyFixLoopSucceeded = false
+    // 有效 fix-loop 数：扣除「全部 issue 均为误报(skipped)、无任何真实修复」的空转 fix-loop
+    let storyValidFixLoopCount = 0
+
+    // 读取 fix-verification.json 判断是否有真实修复（status=fixed），用于区分误报空转
+    const fixVerificationPath = path.join(getStoryDir(storyId), 'fix-verification.json')
+    let fixHasRealFix = false
+    if (fs.existsSync(fixVerificationPath)) {
+      try {
+        const fv = JSON.parse(fs.readFileSync(fixVerificationPath, 'utf-8'))
+        if (fv && Array.isArray(fv.fixes)) {
+          fixHasRealFix = fv.fixes.some(f => f.status === 'fixed')
+        }
+      } catch (e) { /* 解析失败则按有真实修复处理，不误伤 */ }
+    }
 
     for (const evt of events) {
       // Fix-loop 事件
       if (evt.type === 'fix_loop') {
-        fixLoopCount++
         storyFixLoopCount++
+        // P-003: 该 Story 的 fix-verification.json 中无任何 status=fixed 的真实修复
+        // （全部为 skipped 误报）时，该次 fix-loop 视为误报空转，不计入有效触发率
+        if (fixHasRealFix) {
+          fixLoopCount++
+          storyValidFixLoopCount++
+        }
       }
 
       // Phase 3 门控通过（fix-loop 后成功修复）
@@ -177,7 +196,8 @@ function aggregateMetrics () {
       }
     }
 
-    if (storyFixLoopCount > 0 && storyFixLoopSucceeded) {
+    // 仅统计「有真实修复」的有效 fix-loop（与 fixLoopCount 的口径一致，扣除误报空转）
+    if (storyValidFixLoopCount > 0 && storyFixLoopSucceeded) {
       fixLoopSucceeded++
     }
 
