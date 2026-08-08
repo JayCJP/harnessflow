@@ -50,7 +50,7 @@ prompt-builder 收口的理由（"拼接就是判断"），全部指向同一件
 | 5 | 副作用绑死数字 | `advance-phase.js`：dev-pass 签发@2、撤销@3、兜底撤销@5、metrics+完成@7→8 | 节点顺序一变，副作用全错位 |
 | 6 | 修复回路目标写死 | `advance-phase.js --fix-loop` 目标恒为 2，来源恒为 3/4，state key 是字面量 `'2_development'`；`dispatch.js` 里 `const isReviewOrTest = phase === 3 || phase === 4` | 只有一种修复回路形状 |
 | 7 | Agent 阵容单一 | `PHASE_AGENTS` 绑定固定 6 个前端 Agent | 无法切后端 / 纯测试 / hotfix 阵容 |
-| 8 | 影子拓扑表（隐蔽） | `create-workflow.js` 的 `phaseKeys[]`、`context-refresh.js` 的 `phaseFiles{}` / `getNextSteps{}` / `baseContracts{}`、`schema-validator.js` 的 `getPhaseArtifacts()`、`prompt-builder.js` 的 `targetPhase !== 3`、`e2e-state.schema.json` 的 `"maximum": 8` | **同一份拓扑知识散落在 6 个以上文件里各写一遍。** 这是最危险的一条：改拓扑要同步 6 处，漏一处就静默错位 |
+| 8 | 影子拓扑表（隐蔽） | `create-workflow.js` 的 `phaseKeys[]`、`context-refresh.js` 的 `baseContracts{}`、`schema-validator.js` 的 `getPhaseArtifacts()`、`prompt-builder.js` 的 `targetPhase !== 3`、`e2e-state.schema.json` 的 `"maximum": 8` | **同一份拓扑知识散落在多个文件里各写一遍。** 这是最危险的一条：改拓扑要同步多处，漏一处就静默错位。<br>已消除：`context-refresh.js` 的 `phaseFiles{}` 改读 `PHASE_ARTIFACTS`；`getNextSteps{}`（第二份 Phase→Agent 映射）已删除 |
 
 第 8 条决定了改造顺序 —— **必须先收口，再动态化**。否则动态化只是把 1 份硬编码变成 6 份不一致的动态配置。
 

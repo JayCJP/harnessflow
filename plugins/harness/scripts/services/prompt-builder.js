@@ -24,7 +24,9 @@ const {
   getPhaseAgent,
   STORY_INPUT_FILE,
   readStoryInput,
-  getStoryMode
+  getStoryMode,
+  detectFigmaSource,
+  readStateFile
 } = require('../lib/state')
 
 const contextRefresh = require('./context-refresh')
@@ -170,7 +172,43 @@ function buildStoryInputSection (storyId, targetPhase) {
     )
   }
 
+  // Figma 解析指令 —— 不分模式注入。
+  // 门控开关（state.hasFigmaDesign）只管「是否强制校验清单完整性」，run 开 fixbugs 关；
+  // 而「有 Figma 链接就要去解析」两种模式都成立，所以这里直接看 figmaUrls 而非门控开关。
+  lines.push(...buildFigmaInstruction(storyId, input))
+
   return lines.join('\n')
+}
+
+/**
+ * 构造 Figma 解析指令片段
+ *
+ * 与 fixbugs 注入 `tapd-bug-analyzer` 对称: 检测到设计稿链接就显式点名要调用的
+ * skill，避免子 Agent 拿到链接却不知道该走哪条解析路径。
+ *
+ * @param {string} storyId - Story ID
+ * @param {Object} input - 已解析的 story-input.json
+ * @returns {string[]} markdown 行，无 Figma 链接时返回空数组
+ */
+function buildFigmaInstruction (storyId, input) {
+  const detected = detectFigmaSource(storyId)
+  if (!detected.hasFigma) return []
+
+  const state = readStateFile(storyId)
+  const gateEnabled = state?.hasFigmaDesign === true
+
+  return [
+    `**🌐 检测到 ${detected.urls.length} 个 Figma 设计稿链接**`,
+    '',
+    '- 必须调用 `use_skill("figma-to-component-map")` 解析设计稿，**禁止凭链接猜测 UI 结构**。',
+    '- 前置条件: Figma 桌面端需处于运行状态并已打开该文件；未运行则如实告知用户并停止，不要退回缓存数据。',
+    `- 产出 \`figma-frame-inventory.json\`：覆盖每个 page / dialog / drawer 的完整 node 链接。`,
+    gateEnabled
+      ? '- ⚠️ 本 Story 已开启 Figma 门控，Phase 0→1 会校验该清单完整性，缺失或不完整将阻断推进。'
+      : '- 本 Story 未开启 Figma 强制门控（fixbugs 模式），但涉及 UI 的改动仍应按清单核对设计规范。',
+    ...detected.urls.map(u => `  - ${u}`),
+    ''
+  ]
 }
 
 /**
@@ -259,13 +297,15 @@ function buildAgentPrompt (opts) {
   const fixLoopContext = buildFixLoopContext(storyId, targetPhase)
 
   // 本 Phase 应产出的文件（来自 PHASE_ARTIFACTS，Phase 2/5/6/7 无文件产出）
+  // optional 产出物（原型/Figma）按条件产出，不列入 expectedOutputs——主 Agent 靠该
+  // 列表校验子 Agent 汇报，列进去会让「按条件不产出」被误判为漏产。
   const phaseArtifacts = PHASE_ARTIFACTS[targetPhase]
-  const expectedOutputs = phaseArtifacts
-    ? phaseArtifacts.artifacts.filter(a => a.fileName).map(a => a.fileName)
+  const requiredArtifacts = phaseArtifacts
+    ? phaseArtifacts.artifacts.filter(a => !a.optional)
     : []
-  const expectedDescriptions = phaseArtifacts
-    ? phaseArtifacts.artifacts.map(a => a.fileName ? `${a.fileName} — ${a.description}` : a.description)
-    : []
+  const expectedOutputs = requiredArtifacts.filter(a => a.fileName).map(a => a.fileName)
+  const expectedDescriptions = requiredArtifacts
+    .map(a => a.fileName ? `${a.fileName} — ${a.description}` : a.description)
 
   // fixbugs 模式下 Phase 0 额外要求 Bug 分析报告（文件名含动态标题，无法进 PHASE_ARTIFACTS 固定表）
   // 同时进 expectedOutputs —— 主 Agent 靠它校验子 Agent 的产出物汇报，只写 descriptions 会漏检

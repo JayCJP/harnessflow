@@ -15,7 +15,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { getStoryDir, readJsonArtifact, readStateFile, getPhaseName, PHASE_SLUGS } = require('../lib/state')
+const { getStoryDir, readJsonArtifact, readStateFile, getPhaseName, PHASE_SLUGS, PHASE_ARTIFACTS } = require('../lib/state')
 
 /**
  * 生成 Phase 完成后的上下文摘要
@@ -82,13 +82,6 @@ function generatePhaseSummary (storyId, phase) {
     summaryLines.push('- 无待确认项')
   }
 
-  // 下一步指引
-  summaryLines.push('', `## 下一步 (Phase ${phase + 1})`, '')
-  const nextSteps = getNextSteps(phase, storyId)
-  for (const step of nextSteps) {
-    summaryLines.push(`- ${step}`)
-  }
-
   // 契约文件清单（供下个 Agent 快速加载）
   summaryLines.push('', '## 契约文件清单', '')
   const contracts = getContractFiles(storyId, phase)
@@ -104,6 +97,9 @@ function generatePhaseSummary (storyId, phase) {
 
 /**
  * 获取指定 Phase 的产出物信息
+ *
+ * 产出物清单来自 state.js 的 PHASE_ARTIFACTS（唯一信源）。此处不再自建映射表——
+ * 历史上本函数维护过第二份表，与 PHASE_ARTIFACTS 漂移（Phase 0 多出原型/Figma 两项）。
  * @param {string} storyId
  * @param {number} phase
  * @returns {Array<{name: string, path: string, summary?: string}>}
@@ -112,18 +108,10 @@ function getPhaseArtifacts (storyId, phase) {
   const storyDir = getStoryDir(storyId)
   const artifacts = []
 
-  const phaseFiles = {
-    0: ['requirement-analysis.md', 'acceptance-criteria.json', 'open-questions.json', 'prototype-analysis.md', 'figma-frame-inventory.json'],
-    1: ['task-dag.md', 'task-dag.json'],
-    2: [], // 代码变更，无文件产出物
-    3: ['code-review.json'],
-    4: ['test-report.md', 'acceptance-verification.json'],
-    5: [], // git commit
-    6: [], // 知识库更新
-    7: []  // 部署
-  }
-
-  const files = phaseFiles[phase] || []
+  const phaseDef = PHASE_ARTIFACTS[phase]
+  const files = phaseDef
+    ? phaseDef.artifacts.filter(a => a.fileName).map(a => a.fileName)
+    : []
   for (const f of files) {
     const filePath = path.join(storyDir, f)
     if (fs.existsSync(filePath)) {
@@ -155,54 +143,6 @@ function getPhaseArtifacts (storyId, phase) {
   }
 
   return artifacts
-}
-
-/**
- * 获取下一步指引
- * @param {number} completedPhase
- * @param {string} storyId
- * @returns {string[]}
- */
-function getNextSteps (completedPhase, storyId) {
-  const next = completedPhase + 1
-  // 注意: Spawn 时必须使用 agent 的注册名（frontmatter 的 name 字段，英文），
-  // 中文仅为可读性标注。传中文名无法解析到 agent。
-  const steps = {
-    0: [
-      `Spawn 任务规划师 (task-planner) → 拆解任务 DAG`,
-      `生成 task-dag.md + task-dag.json (含 figmaLink)`,
-      `运行: node advance-phase.js ${storyId} 2`
-    ],
-    1: [
-      `dev-pass 已签发，可编辑 src/`,
-      `Fork → 并行 spawn 前端开发工程师 (frontend-developer) (注入 figmaLink + AC)`,
-      `Join → npm run lint → node advance-phase.js ${storyId} 3`
-    ],
-    2: [
-      `dev-pass 已撤销，禁止直接编辑 src/`,
-      `Spawn 代码审查师 (code-reviewer) → git diff → code-review.json`,
-      `无 BLOCKER → node advance-phase.js ${storyId} 4`
-    ],
-    3: [
-      `Spawn 测试工程师 (test-engineer) → 用例设计 + 接口验证`,
-      `生成 test-report.md + acceptance-verification.json`,
-      `100% AC passed → node advance-phase.js ${storyId} 5`
-    ],
-    4: [
-      `Spawn 发布助手 (release-assistant) → git add + commit + push`,
-      `禁止 --no-verify → node advance-phase.js ${storyId} 6`
-    ],
-    5: [
-      `Spawn 发布助手 (release-assistant) → kb-update Skill`,
-      `保留手工批注 → node advance-phase.js ${storyId} 7`
-    ],
-    6: [
-      `Spawn 发布助手 (release-assistant) → devops MCP`,
-      `构建 + 部署 → node advance-phase.js ${storyId} 8`
-    ],
-    7: [`🎉 工作流完成！`]
-  }
-  return steps[completedPhase] || ['未知下一步']
 }
 
 /**
@@ -294,7 +234,6 @@ function loadLatestSummary (storyId, currentPhase = Infinity, maxLines = 200) {
 module.exports = {
   generatePhaseSummary,
   getPhaseArtifacts,
-  getNextSteps,
   getContractFiles,
   loadLatestSummary
 }

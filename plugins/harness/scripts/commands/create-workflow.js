@@ -30,17 +30,54 @@ const {
   readStateFile,
   writeStateFile,
   isPrototypeRequired,
+  detectFigmaSource,
   issueDevPass,
   ensureReposJson,
   DEFAULT_MAX_FIX_ROUNDS
 } = require('../lib/state')
 
 /**
+ * 判定本 Story 是否开启 Figma 硬门控（hasFigmaDesign）
+ *
+ * 分模式处理 —— run 与 fixbugs 对设计稿的用法本质不同:
+ *   - run: 照设计稿从零搭 UI，需要完整 frame 清单 + 全量组件映射 → 开门控
+ *   - fixbugs: 只碰个别页面，强制全量清单会卡死修复流程 → 关门控
+ *   - --figma: 手工覆盖，任何模式下强制开启（无 story-input.json 时的兜底入口）
+ *
+ * ⚠️ 门控开关不影响 prompt 注入。子 Agent 是否被提示解析 Figma 由
+ * prompt-builder 直接读 story-input.json 的 figmaUrls 决定，两种模式都注入。
+ *
+ * @param {string} storyId - Story ID
+ * @param {boolean} hasFigmaFlag - CLI `--figma` 手工开关
+ * @param {'run'|'fixbugs'} workflowMode - 工作流模式
+ * @param {boolean} bypass - 是否跳过 Phase 0-1
+ * @returns {{ enabled: boolean, reason: string, detectedUrls: number }}
+ */
+function resolveFigmaDesign (storyId, hasFigmaFlag, workflowMode, bypass) {
+  const detected = detectFigmaSource(storyId)
+
+  if (hasFigmaFlag) {
+    return { enabled: true, reason: '--figma 手工指定', detectedUrls: detected.urls.length }
+  }
+  if (bypass) {
+    return { enabled: false, reason: 'bypass 模式跳过 Phase 0-1，Figma 门控无意义', detectedUrls: detected.urls.length }
+  }
+  if (workflowMode === 'fixbugs') {
+    return {
+      enabled: false,
+      reason: 'fixbugs 模式不做全量设计稿还原（如需强制开启用 --figma）',
+      detectedUrls: detected.urls.length
+    }
+  }
+  return { enabled: detected.hasFigma, reason: detected.reason, detectedUrls: detected.urls.length }
+}
+
+/**
  * 执行工作流创建
  * @param {string} storyId - Story ID
  * @param {string} title - 需求标题
  * @param {boolean} bypass - 是否跳过 Phase 0-1（hotfix 模式）
- * @param {boolean} hasFigma - 是否提供了 Figma 设计稿
+ * @param {boolean} hasFigma - 是否提供了 Figma 设计稿（CLI --figma 手工开关）
  * @param {'run'|'fixbugs'} [mode='run'] - 工作流模式
  * @returns {{ success: boolean, storyId: string, message: string, errors?: string[] }}
  */
@@ -67,6 +104,9 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode) {
     protoRequired = isPrototypeRequired(storyId)
   }
 
+  // 2b. 判定 Figma 硬门控开关（run 开 / fixbugs 关 / --figma 强制开）
+  const figma = resolveFigmaDesign(storyId, hasFigma, workflowMode, bypass)
+
   // 3. 确保 story 级 repos.json 存在（单仓库自动生成默认，多仓库由 AI 预先写入覆盖）
   ensureReposJson(storyId)
 
@@ -84,7 +124,8 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode) {
     createdAt: now,
     updatedAt: now,
     bypass: bypass || false,
-    hasFigmaDesign: hasFigma || false, // 🌐 是否提供了 Figma 设计稿链接
+    hasFigmaDesign: figma.enabled, // 🌐 是否开启 Figma 硬门控（信源: story-input.json figmaUrls / --figma）
+    hasFigmaDesignReason: figma.reason, // 判定依据，便于排查门控为何未触发
     maxFixRounds: DEFAULT_MAX_FIX_ROUNDS, // 修复回路最大轮次（审查/测试失败后回退开发的最大修复次数，可按需修改）
     gateChecks: {
       // 本 Story 是否要求 prototype-analysis.md（false 时 Phase 0→1 门控跳过原型检查）
@@ -154,13 +195,70 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode) {
     bypass,
     mode: workflowMode,
     prototypeRequired: protoRequired.required,
+    hasFigmaDesign: figma.enabled,
     stateFile: stateFilePath,
     message: bypass
       ? `✅ 工作流已创建（bypass 模式），直接进入 Phase 2 (代码开发)，dev-pass 已签发`
       : `✅ 工作流已创建（mode=${workflowMode}），当前 Phase 0 (需求分析)，请 spawn 需求分析师 (agent 注册名: requirement-analyst)` +
         (protoRequired.required
           ? `\n   原型文档: 必需 — ${protoRequired.reason}，由需求分析师产出 prototype-analysis.md`
-          : `\n   原型文档: 免除 — ${protoRequired.reason}`)
+          : `\n   原型文档: 免除 — ${protoRequired.reason}`) +
+        `\n   Figma 门控: ${figma.enabled ? '开启' : '关闭'} — ${figma.reason}` +
+        `\n   ⚠️ 若 story-input.json 是在本命令之后才写入的，请执行:` +
+        `\n      node ${path.basename(__filename)} ${storyId} --refresh-input`
+  }
+}
+
+/**
+ * 补算 story-input.json 派生的判定结果（--refresh-input）
+ *
+ * 为何需要这条命令: harness-workflow.js 的 Step 1A 先创建工作流，主 Agent 的
+ * Step 1B 才写 story-input.json。createWorkflow 执行时该文件尚不存在，
+ * prototypeRequired 走「保守要求」分支、hasFigmaDesign 恒为 false。
+ * 主 Agent 写完 story-input.json 后执行本命令回填，让两项判定与实际输入一致。
+ *
+ * 显式命令而非惰性重算 —— 状态文件只能由授权脚本改写（enforce-state-file.js），
+ * 在 dispatch 通道隐式改写会破坏「状态机单写者」这条铁律。
+ *
+ * 只回填这两项，不触碰 phase / status —— 相位跃迁仍归 advance-phase.js 独有。
+ *
+ * @param {string} storyId - Story ID
+ * @param {boolean} [hasFigmaFlag=false] - 是否附带 --figma 手工开关
+ * @returns {{ success: boolean, storyId: string, message?: string, errors?: string[] }}
+ */
+function refreshStoryInput (storyId, hasFigmaFlag = false) {
+  const state = readStateFile(storyId)
+  if (!state) {
+    return { success: false, storyId, errors: [`工作流不存在: 未找到 .codebuddy/plans/${storyId}/e2e-state.json`] }
+  }
+
+  const workflowMode = state.mode === 'fixbugs' ? 'fixbugs' : 'run'
+  const bypass = state.bypass || false
+
+  const protoRequired = (bypass || workflowMode === 'fixbugs')
+    ? { required: false, reason: bypass ? 'bypass 模式跳过 Phase 0' : 'fixbugs 模式，Bug 修复无原型依赖' }
+    : isPrototypeRequired(storyId)
+  const figma = resolveFigmaDesign(storyId, hasFigmaFlag || state.hasFigmaDesign, workflowMode, bypass)
+
+  const before = { proto: state.gateChecks.prototypeRequired, figma: state.hasFigmaDesign }
+
+  state.hasFigmaDesign = figma.enabled
+  state.hasFigmaDesignReason = figma.reason
+  state.gateChecks.prototypeRequired = protoRequired.required
+  state.gateChecks.prototypeRequiredReason = protoRequired.reason
+  state.gateChecks.prototypeConfirmed = !protoRequired.required
+  state.updatedAt = new Date().toISOString()
+  writeStateFile(storyId, state)
+
+  const changed = before.proto !== protoRequired.required || before.figma !== figma.enabled
+  return {
+    success: true,
+    storyId,
+    prototypeRequired: protoRequired.required,
+    hasFigmaDesign: figma.enabled,
+    message: `${changed ? '✅ 判定已更新' : 'ℹ️ 判定无变化'}（mode=${workflowMode}）` +
+      `\n   原型文档: ${protoRequired.required ? '必需' : '免除'} — ${protoRequired.reason}` +
+      `\n   Figma 门控: ${figma.enabled ? '开启' : '关闭'} — ${figma.reason}`
   }
 }
 
@@ -174,13 +272,27 @@ if (require.main === module) {
   const cliHasFigma = args.includes('--figma')
   const modeArg = args.find(a => a.startsWith('--mode='))
   const cliMode = modeArg ? modeArg.slice('--mode='.length) : 'run'
+  const cliRefreshInput = args.includes('--refresh-input')
+
+  // --refresh-input 只需 storyId（模式/bypass 从既有状态文件读取）
+  if (cliRefreshInput) {
+    if (!cliStoryId) {
+      console.error('用法: node create-workflow.js <storyId> --refresh-input [--figma]')
+      process.exit(1)
+    }
+    const refreshResult = refreshStoryInput(cliStoryId, cliHasFigma)
+    console.log(JSON.stringify(refreshResult, null, 2))
+    process.exit(refreshResult.success ? 0 : 1)
+  }
 
   if (!cliStoryId || !cliTitle) {
     console.error('用法: node create-workflow.js <storyId> "<title>" [--bypass] [--figma] [--mode=run|fixbugs]')
+    console.error('      node create-workflow.js <storyId> --refresh-input [--figma]')
     console.error('示例: node create-workflow.js STORY-001 "1v1客服等级分配模式"')
     console.error('  --bypass          跳过 Phase 0-1')
-    console.error('  --figma           标注有 Figma 设计稿，强制要求 Phase 2 前生成 figma-component-map.md')
+    console.error('  --figma           手工强制开启 Figma 硬门控（任何模式生效，覆盖自动推导）')
     console.error('  --mode=fixbugs    Bug 修复模式，免除原型文档要求，Phase 0 需产出 Bug 分析报告')
+    console.error('  --refresh-input   story-input.json 写入后补算原型/Figma 判定（不改 phase）')
     process.exit(1)
   }
 
@@ -199,4 +311,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { createWorkflow }
+module.exports = { createWorkflow, refreshStoryInput }

@@ -112,6 +112,92 @@ fix-loop 由 `advance-phase.js --fix-loop` 全程自动编排：提取 BLOCKER �
 
 ---
 
+## 初始化两步：start 之后必须写 story-input.json
+
+`start` 只建状态文件，**不携带用户的原始输入**。原始输入走 `story-input.json`
+这个单独通道 —— 与 `/harness fixbugs` 用的是同一份 schema、同一批消费者。
+
+### Step 1A：启动工作流
+
+```bash
+node $HARNESS/harness-workflow.js start <storyId> "<标题>"
+```
+
+### Step 1B：写 story-input.json（run 模式同样必须写）
+
+把用户消息里的链接、终端、补充描述**原样**写入，不做解析、不做归纳、不访问外部系统：
+
+```bash
+${CLAUDE_PROJECT_DIR}/.codebuddy/plans/<storyId>/story-input.json
+```
+
+```json
+{
+  "mode": "run",
+  "storyId": "STORY-001",
+  "title": "1v1客服等级分配模式",
+  "createdAt": "2026-08-08T10:00:00.000Z",
+  "sources": {
+    "prototypeUrls": ["https://proto.example.com/xxx"],
+    "figmaUrls": ["https://www.figma.com/design/AbC123/订单中心?node-id=12-345"],
+    "terminal": "H5",
+    "text": "用户消息中除上述链接外的补充描述"
+  }
+}
+```
+
+字段规则（`sources` 下全部选填，按用户实际给了什么写什么）：
+
+| 字段 | 来源 | 写入后的效果 |
+|------|------|------------|
+| `mode` | 固定 `"run"` | 决定 Phase 0/2 注入哪套指引 |
+| `sources.prototypeUrls` | 用户消息中的原型链接 | 非空 → `prototypeRequired = true`，Phase 0 需产出 `prototype-analysis.md` |
+| `sources.figmaUrls` | 用户消息中的 Figma 链接 | 非空 → **自动开启 Figma 硬门控**（详见下节） |
+| `sources.terminal` | 用户提到的 H5 / PC / 小程序 | 进 Phase 0 prompt，影响检索策略 |
+| `sources.text` | 剩余自由描述 | 进 Phase 0 prompt |
+
+> Schema: `scripts/schemas/story-input.schema.json`（`additionalProperties: false`，多写字段会校验失败）。
+> 从 URL 提正则、拆参数是**搬运**，不是分析 —— 允许做。判断需求影响哪些文件、该怎么改，是分析 —— 归 Phase 0 需求分析师。
+
+### Step 1C：回填判定（Step 1B 之后必须执行一次）
+
+`start` 先执行、`story-input.json` 后写入，所以建流程那一刻两项判定拿不到输入：
+`prototypeRequired` 走保守分支（恒为 `true`）、`hasFigmaDesign` 恒为 `false`。写完输入后执行：
+
+```bash
+node $HARNESS/create-workflow.js <storyId> --refresh-input
+```
+
+只回填 `hasFigmaDesign` 与 `gateChecks.prototypeRequired`，**不碰 `phase` / `status`** ——
+相位跃迁仍归 `advance-phase.js` 独有。输出会打印两项判定的最终值与依据。
+
+> 漏执行的后果：无原型的纯文字需求会被卡在「必须产出 `prototype-analysis.md`」，
+> 有 Figma 的需求则完全不会触发设计稿门控。
+
+---
+
+## Figma 设计稿的两条通道
+
+给了 `figmaUrls` 后，系统分两条独立通道处理，**互不替代**：
+
+| 通道 | 开关 | run | fixbugs | 作用 |
+|------|------|-----|---------|------|
+| **解析指引**（软） | 只看 `figmaUrls` 非空 | ✅ 注入 | ✅ 注入 | Phase 0 prompt 里显式点名 `use_skill("figma-to-component-map")`，禁止凭链接猜 UI 结构 |
+| **硬门控**（阻断） | `state.hasFigmaDesign` | ✅ 开启 | ❌ 关闭 | Phase 0→1 校验 `figma-frame-inventory.json` 完整性、Phase 1→2 校验 `figma-component-map.md`、task 需带 `figmaNodeId` |
+
+为什么 fixbugs 不开硬门控：Bug 修复只碰个别页面，要求全量 frame 清单会直接把修复流程卡死；
+但"有设计稿就该去解析"两种模式都成立，所以解析指引不分模式注入。
+
+```bash
+# 任何模式强制开启硬门控（覆盖自动推导）
+node $HARNESS/create-workflow.js <storyId> --refresh-input --figma
+```
+
+前置条件：Figma 桌面端需处于运行状态并已打开该文件。未运行时子 Agent 应如实告知并停止，
+不得退回缓存数据 —— 这条已写进 Phase 0 的 `agentPrompt`。
+
+---
+
 ## 铁律 (MUST NOT)
 
 | 禁止行为 | 原因 | 正确做法 |
@@ -245,7 +331,7 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，�
 | 脚本 | 用途 |
 |------|------|
 | `commands/harness-workflow.js` | 工作流生命周期：`start` 激活 / `end` 关闭 / `status` 查看状态 |
-| `commands/create-workflow.js` | 创建 e2e-state.json（被 harness-workflow.js start 内部调用） |
+| `commands/create-workflow.js` | 创建 e2e-state.json（被 harness-workflow.js start 内部调用）；`--refresh-input` 在 story-input.json 写入后回填原型/Figma 判定 |
 | `commands/advance-phase.js` | Phase 状态机推进 + dev-pass 生命周期 + 门控校验 + 修复回路 |
 | `commands/archive-story.js` | Story 归档 / 复档 / 列表 / 状态 |
 

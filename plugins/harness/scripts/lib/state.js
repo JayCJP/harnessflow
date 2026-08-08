@@ -239,13 +239,25 @@ const PHASE_NAMES = [
   '工作流完成'      // 8 — 工作流终态
 ]
 
-/** 每个 Phase 的产出物文件名模式（新版：无 storyId 前缀） */
+/**
+ * 每个 Phase 的产出物文件名模式（新版：无 storyId 前缀）
+ *
+ * 本表是产出物清单的**唯一信源**: 门控校验（checkPhaseArtifact）、
+ * prompt 产出要求（prompt-builder）、上下文摘要（context-refresh）都从此读取。
+ *
+ * `optional: true` 的产出物按条件产出（如原型/Figma 视 Story 输入而定），
+ * 门控不因其缺失而失败，但存在时会进摘要与 prompt。判定逻辑各自独立:
+ *   - prototype-analysis.md   → gateChecks.prototypeRequired
+ *   - figma-frame-inventory.json → state.hasFigmaDesign
+ */
 const PHASE_ARTIFACTS = {
   0: {
     artifacts: [
       { fileName: 'requirement-analysis.md', description: '需求分析文档', contract: false },
       { fileName: 'acceptance-criteria.json', description: '验收标准契约', contract: true },
-      { fileName: 'open-questions.json', description: '待确认项契约', contract: true }
+      { fileName: 'open-questions.json', description: '待确认项契约', contract: true },
+      { fileName: 'prototype-analysis.md', description: '原型分析文档（有原型链接时产出）', contract: false, optional: true },
+      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出）', contract: true, optional: true }
     ]
   },
   1: {
@@ -513,7 +525,8 @@ function getPhaseName (phaseNum) {
 
 /**
  * 检查指定 Phase 的产出物文件是否存在
- * 新版支持每个 Phase 多个产出物（含契约 JSON），任意 artifact 不存在即返回 exists=false。
+ * 新版支持每个 Phase 多个产出物（含契约 JSON），任意**必需** artifact 不存在即返回 exists=false。
+ * `optional: true` 的产出物按条件产出（原型/Figma），不参与门控判定。
  * @param {string} storyId - Story ID
  * @param {number} phaseNum - Phase 编号
  * @returns {{ exists: boolean, missing: Array<{path:string, description:string}>, description: string }}
@@ -524,10 +537,9 @@ function checkPhaseArtifact (storyId, phaseNum) {
     return { exists: true, missing: [], description: '无' }
   }
 
+  const required = phaseDef.artifacts.filter(a => a.fileName && !a.optional)
   const missing = []
-  for (const artifact of phaseDef.artifacts) {
-    if (!artifact.fileName) continue // 无文件产出物，跳过
-
+  for (const artifact of required) {
     const filePath = path.join(getStoryDir(storyId), artifact.fileName)
     if (!fs.existsSync(filePath)) {
       missing.push({ path: filePath, description: artifact.description, fileName: artifact.fileName })
@@ -537,7 +549,7 @@ function checkPhaseArtifact (storyId, phaseNum) {
   return {
     exists: missing.length === 0,
     missing,
-    description: phaseDef.artifacts.map(a => a.description).join(', ')
+    description: required.map(a => a.description).join(', ')
   }
 }
 
@@ -576,6 +588,39 @@ function getStoryMode (storyId) {
     return state.mode
   }
   return 'run'
+}
+
+/**
+ * 探测 story-input.json 里是否提供了 Figma 设计稿链接
+ *
+ * 历史问题: `hasFigmaDesign` 只来自 `--figma` CLI flag，而唯一入口
+ * `harness-workflow.js` 调 createWorkflow 时该参数硬编码 false，导致三道
+ * Figma 门控（validate-phase-gate.js 的 hasFigmaFrameInventoryIfDesign /
+ * hasFigmaMapIfDesign / task figmaNodeId 校验）在正常流程下永远不触发。
+ *
+ * 现以 story-input.json 的 `sources.figmaUrls` 为信源自动推导，`--figma`
+ * 降级为手工覆盖开关（无 story-input.json 时仍可强制开启）。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {{ hasFigma: boolean, urls: string[], reason: string }}
+ */
+function detectFigmaSource (storyId) {
+  const input = readStoryInput(storyId)
+  if (!input || input._parseError) {
+    return { hasFigma: false, urls: [], reason: 'story-input.json 不存在或解析失败' }
+  }
+
+  const urls = Array.isArray(input.sources?.figmaUrls)
+    ? input.sources.figmaUrls.filter(u => typeof u === 'string' && u.trim())
+    : []
+
+  return {
+    hasFigma: urls.length > 0,
+    urls,
+    reason: urls.length > 0
+      ? `story-input.json 提供了 ${urls.length} 个 Figma 链接`
+      : 'story-input.json 未提供 Figma 链接'
+  }
 }
 
 /**
@@ -1436,6 +1481,7 @@ module.exports = {
   checkPhaseArtifact,
   checkPrototypeDoc,
   isPrototypeRequired,
+  detectFigmaSource,
   findBugAnalysisReports,
   checkRequirementDoc,
   checkTaskDAGDoc,

@@ -109,10 +109,26 @@ ${STORY_DIR}/story-input.json
 | `sources.owner` | ✅ | "处理人: XXX" |
 | `sources.statusFilter` | 选填 | "状态筛选: XXX"，缺省不写 |
 | `sources.terminal` | 选填 | 用户提到的 H5 / PC / 小程序 |
+| `sources.figmaUrls` | 选填 | 用户消息中的 Figma 链接，原样复制 |
 | `sources.text` | 选填 | 剩余自由描述 |
 
 > Schema: `scripts/schemas/story-input.schema.json`（`additionalProperties: false`，多写字段会校验失败）。
 > 从 URL 提正则、拆参数是**搬运**，不是分析 —— 允许做。判断哪些 Bug 归前端、代码在哪个文件，是分析 —— 不允许做。
+
+> **给了 `figmaUrls` 时**：Phase 0 的 `agentPrompt` 会自动注入 `use_skill("figma-to-component-map")` 解析指引，
+> 但 fixbugs **不开 Figma 硬门控** —— Bug 修复只碰个别页面，要求全量 frame 清单会把修复流程卡死。
+> 确需强制门控时执行 `node $HARNESS/create-workflow.js <storyId> --refresh-input --figma`。
+
+### Step 1C：回填判定
+
+Step 1A 先执行、`story-input.json` 后写入，建流程那一刻 `hasFigmaDesign` 拿不到输入而恒为 `false`。
+写完输入后执行一次回填（fixbugs 的 `prototypeRequired` 恒为 false，本步主要影响 Figma 判定）：
+
+```bash
+node $HARNESS/create-workflow.js <storyId> --refresh-input
+```
+
+只回填 `hasFigmaDesign` 与 `gateChecks.prototypeRequired`，**不碰 `phase` / `status`**。
 
 ---
 
@@ -153,8 +169,10 @@ Step 3: 子 Agent 汇报产出物路径 → 回 Step 1
 | 维度 | `/harness run` | `/harness fixbugs` |
 |------|---------------|-------------------|
 | 启动参数 | `start <id> "<标题>"` | `start <id> "<标题>" --mode=fixbugs` |
-| 主 Agent 前置动作 | 无 | 写 `story-input.json`（仅搬参数） |
+| 主 Agent 前置动作 | 写 `story-input.json` + `--refresh-input` 回填 | 同左（仅搬参数，不分析） |
 | 原型文档 | 提供了原型/Figma 链接则必需 | 免除 |
+| Figma 解析指引 | 有 `figmaUrls` 就注入 | 同左 |
+| Figma 硬门控 | 有 `figmaUrls` 则开启 | 关闭（`--figma` 可强制开） |
 | Phase 0 产出物 | requirement-analysis / AC / open-questions | 同左 **+ `{标题}_bug分析报告.md`** |
 | Bug 分析执行方 | — | **Phase 0 需求分析师**（非主 Agent） |
 | Phase 1→8 | 标准流水线 | 完全相同 |
@@ -174,3 +192,4 @@ Step 3: 子 Agent 汇报产出物路径 → 回 Step 1
 |------|------|
 | ✅ `--mode=fixbugs` 必须带上 | 漏掉会退回 run 模式，重新要求原型文档且不做 Bug 报告门控 |
 | ✅ `story-input.json` 必须在 Phase 0 dispatch 前写好 | 需求分析师靠它拿 TAPD 参数；缺失则 prompt 里没有 sources，分析师只能回退到用户描述 |
+| ✅ 写完 `story-input.json` 执行一次 `--refresh-input` | 建流程早于写输入，不回填则 `hasFigmaDesign` 恒为 false，Figma 解析指引虽在但门控状态与实际输入不符 |
