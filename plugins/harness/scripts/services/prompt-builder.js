@@ -117,6 +117,76 @@ function readStoryContext (storyId) {
 }
 
 /**
+ * 读取 Phase 1 产出的 Figma 组件映射文档（figma-component-map.md），在 Phase 2 注入 prompt。
+ *
+ * 历史教训: 仅向前端 agent 注入 figmaLink 链接不足以让它对齐设计稿 —— 链接存在 ≠ 样式对齐。
+ * 必须同时提供: ①「按设计稿实现」显式指令 ② 设计稿的视觉规范（色值/间距/字体，即组件映射）。
+ * 本函数把 Phase 1 产出的组件映射（若有）注入 Phase 2 前端 agent 的 prompt，补齐第②项。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {string[]} 已格式化的 markdown 片段，无组件映射时返回空数组
+ */
+function readFigmaDesignMap (storyId) {
+  const mapPath = path.join(PLANS_DIR, storyId, 'figma-component-map.md')
+  if (!fs.existsSync(mapPath)) return []
+  try {
+    const content = fs.readFileSync(mapPath, 'utf-8')
+    const truncated = content.length > CONTRACT_TRUNCATE_LIMIT
+      ? content.slice(0, CONTRACT_TRUNCATE_LIMIT) + '\n... (内容已截断，完整内容请读取源文件)'
+      : content
+    return [
+      '## Figma 组件映射（Phase 1 产出，开发必须遵循）',
+      '',
+      '> 以下映射把 Figma 设计稿的视觉规范翻译为开发规范，**严格按此实现样式**，不要使用默认/直觉样式。',
+      '```',
+      truncated,
+      '```',
+      ''
+    ]
+  } catch (e) {
+    return [`## Figma 组件映射\n(读取失败: ${e.message})\n`]
+  }
+}
+
+/**
+ * 构造「有 Figma 设计稿时必须对齐」的开发阶段指令片段。
+ *
+ * 仅在 Phase 2（前端开发）注入。核心诉求: 有 Figma 链接时，前端 agent 必须亲自
+ * 用 Figma MCP 拉取完整设计内容实现，而不是吃 Phase 0/1 转译的二手 token 摘要
+ * （色值/间距/字体只是设计稿的极小部分，会丢失大量细节）。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} targetPhase - 目标 Phase
+ * @returns {string[]} markdown 行，无 Figma 或非 Phase 2 时返回空数组
+ */
+function buildFigmaAlignInstruction (storyId, targetPhase) {
+  if (targetPhase !== 2) return []
+  const detected = detectFigmaSource(storyId)
+  if (!detected.hasFigma) return []
+
+  return [
+    '## 🎨 Figma 设计稿对齐（强制 — 必须用 Figma MCP 拉取完整设计内容）',
+    '',
+    '**本 Story 已注入 Figma 设计稿链接，UI 必须严格对齐设计稿，禁止使用 ElementUI/组件库默认样式或自行发挥。**',
+    '',
+    '**硬性要求：每个 UI 任务都必须亲自调用 Figma MCP 拉取该节点的完整设计内容，不得依赖二手摘要/截图/组件映射推测。**',
+    '',
+    '对每个 UI 任务，必须：',
+    '1. 从 task 的 `figmaLink` 提取 node-id，调用 Figma MCP 拉取该节点的**完整设计上下文**：',
+    '   - `get_design_context` → 拿完整的布局/层级/样式/文案（不要只看截图）',
+    '   - `get_screenshot` → 作为视觉核对基准',
+    '   - 设计稿中的嵌套组件、状态变体（hover/disabled/空态/加载态）、交互细节，一律以 `get_design_context` 返回为准',
+    '2. **100% 还原** — 尺寸、颜色、字号、字重、间距、圆角、边框、文案、层级、状态变体与设计稿一致',
+    '3. 样式使用 CSS class（禁用内联 style），动态样式用 `:class`；深度选择器统一用 `::v-deep`（禁止 /deep/，避免 SCSS 编译失败）',
+    '4. 完成后再输出「Figma 设计稿确认」清单，逐条核对对齐项（必须附上已调用的 node-id）',
+    '',
+    '> `figma-component-map.md`（若存在）仅作辅助参考，**不能替代** Figma MCP 的完整拉取；',
+    '> 与 MCP 返回不一致时，以 MCP 完整设计上下文为准。',
+    ''
+  ]
+}
+
+/**
  * 构造「本 Story 原始输入」prompt 片段。
  *
  * 设计意图: 主 Agent 只把用户消息里的参数搬运进 story-input.json 就结束职责，
@@ -293,6 +363,11 @@ function buildAgentPrompt (opts) {
   const storyInputSection = buildStoryInputSection(storyId, targetPhase)
   const storyMode = getStoryMode(storyId)
 
+  // Figma 组件映射（Phase 2 前端开发时注入 Phase 1 产出的设计规范）
+  const figmaDesignMap = readFigmaDesignMap(storyId)
+  // Figma 对齐指令（Phase 2 前端开发时强制要求按设计稿实现）
+  const figmaAlignInstruction = buildFigmaAlignInstruction(storyId, targetPhase)
+
   // 修复回路上下文
   const fixLoopContext = buildFixLoopContext(storyId, targetPhase)
 
@@ -322,6 +397,8 @@ function buildAgentPrompt (opts) {
     '',
     storyInputSection,
     storyContext.length > 0 ? `## Story 背景资料\n${storyContext.join('\n\n')}\n` : '',
+    figmaAlignInstruction.length > 0 ? figmaAlignInstruction.join('\n') : '',
+    figmaDesignMap.length > 0 ? figmaDesignMap.join('\n') : '',
     '## 上一 Phase 摘要',
     summaryInfo ? summaryInfo.content : '(无摘要)',
     '',
@@ -369,6 +446,8 @@ module.exports = {
   buildStoryInputSection,
   readContractContents,
   readStoryContext,
+  readFigmaDesignMap,
+  buildFigmaAlignInstruction,
   AGENT_CONSTRAINTS,
   CONTRACT_TRUNCATE_LIMIT,
   STORY_CONTEXT_TRUNCATE_LIMIT

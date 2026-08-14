@@ -132,8 +132,11 @@ function validateArtifact (storyId, artifactFileName, storyDir) {
   const valid = schemaResult.validate(data)
   if (!valid) {
     const errors = (schemaResult.validate.errors || []).map(err => {
-      const field = err.instancePath || '(root)'
-      return `${artifactFileName}${field}: ${err.message}`
+      // vendor/ajv.bundle.js 是 Ajv 6 系（错误位置字段为 dataPath）；
+      // instancePath 是 Ajv 8 的字段名，只读它会让所有错误都退化成 (root)，定位不到具体条目。
+      const field = err.instancePath || err.dataPath || '(root)'
+      const missing = err.params && err.params.missingProperty ? ` [${err.params.missingProperty}]` : ''
+      return `${artifactFileName}${field}: ${err.message}${missing}`
     })
     return { valid: false, errors }
   }

@@ -20,6 +20,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { execSync } = require('child_process')
 const {
   PLANS_DIR,
   checkPhaseArtifact,
@@ -29,6 +30,7 @@ const {
   checkAcceptanceVerification,
   validateContractReferences,
   checkFigmaFrameInventory,
+  validateTaskFigmaReferences,
   hasFigmaDesign,
   readJsonArtifact,
   getStoryDir,
@@ -144,6 +146,12 @@ const RECOVERY_SUGGESTIONS = {
       return fixed
     }
   },
+  // Phase 1→2: 跨项目 task description 缺少行号引用
+  task_missing_line_ref: {
+    level: 2,
+    action: '跨项目 task（有 project 字段）的 description 必须包含行号引用（如 L123 或 line 45），便于定位代码改动点。请检查 task-dag.json 中跨项目 task 的 description 并补充行号。',
+    autoFixable: false
+  },
   // Phase 1→2: acceptanceCriteria 空数组
   empty_ac_ref: {
     level: 2,
@@ -166,6 +174,42 @@ const RECOVERY_SUGGESTIONS = {
   invalid_ac_ref: {
     level: 2,
     action: 'Task 引用的 AC ID 必须在 acceptance-criteria.json 中存在',
+    autoFixable: false
+  },
+  // Phase 0→1: PRD 功能点未全部落到 AC 上
+  prd_coverage_missing: {
+    level: 2,
+    action: '在 acceptance-criteria.json 的 featurePoints 中逐条声明功能点覆盖情况（covered+acIds 或 deferred+deferredReason）',
+    autoFixable: false
+  },
+  // Phase 1→2: Task 引用的 figmaNodeId 不在 figma-frame-inventory.json 中
+  invalid_figma_ref: {
+    level: 2,
+    action: 'Task 的 figmaNodeId 必须存在于 figma-frame-inventory.json 的 frames 中',
+    autoFixable: false
+  },
+  // Phase 4→5: UI 交互型 AC 仅凭代码审读判 passed
+  static_evidence_for_ui_ac: {
+    level: 2,
+    action: '交互型 AC 必须有运行时证据（Playwright 实跑或人工点验），给不出就把 status 改为 unverifiable，不允许用代码审读冒充通过',
+    autoFixable: false
+  },
+  // Phase 4→5: code-review 未修复项与验收结论自相矛盾
+  review_acceptance_conflict: {
+    level: 2,
+    action: '修复该审查问题（status→fixed），或把对应 AC 从 passed 改为 failed 并走修复回路 —— 不允许"问题未修 + AC 通过"并存',
+    autoFixable: false
+  },
+  // Phase 2→3: 变更文件存在 lint error
+  lint_error: {
+    level: 2,
+    action: '修复本次变更文件的 lint error（门控只 lint 变更文件，不含存量问题）',
+    autoFixable: false
+  },
+  // Phase 2→3: 本地编译失败
+  build_failed: {
+    level: 2,
+    action: '本地复现并修复编译错误（SCSS/模板/语法），不要把编译问题留给云端构建',
     autoFixable: false
   },
   // Phase 3→4: code-review 含 BLOCKER 关键词
@@ -293,6 +337,7 @@ function matchRecoverySuggestion (blocker) {
   if (lower.includes('evidence')) return RECOVERY_SUGGESTIONS.evidence_not_array
   if (lower.includes('blocker')) return RECOVERY_SUGGESTIONS.code_review_blocker
   if (lower.includes('acceptancecriteria') && lower.includes('空')) return RECOVERY_SUGGESTIONS.empty_ac_ref
+  if (lower.includes('行号引用') || lower.includes('line 45') || lower.includes('l123')) return RECOVERY_SUGGESTIONS.task_missing_line_ref
 
   // 类型未登记且关键词未命中 → 返回显式 unknown 条目（而非 null），
   // 保证每个 blocker 都带 level-3 恢复建议，并提示将该模式补录为独立条目
@@ -314,8 +359,8 @@ function runGateCheck (storyId, phaseNum, state) {
 
   if (phaseNum < 0) return result // Phase 0 无前置
 
-  // 1. 产出物存在性检查
-  const artifact = checkPhaseArtifact(storyId, phaseNum)
+  // 1. 产出物存在性检查（传入 state 以启用条件必需产出物，如 hasFigmaDesign 时的 figma-component-map.md）
+  const artifact = checkPhaseArtifact(storyId, phaseNum, state)
   if (!artifact.exists) {
     for (const m of artifact.missing) {
       const blocker = structuredError(
@@ -354,7 +399,9 @@ function runGateCheck (storyId, phaseNum, state) {
   if (phaseNum === 0) {
     checkPhase0Gate(storyId, state, result)
   } else if (phaseNum === 1) {
-    checkPhase1Gate(storyId, result)
+    checkPhase1Gate(storyId, state, result)
+  } else if (phaseNum === 2) {
+    checkPhase2Gate(storyId, state, result)
   } else if (phaseNum === 3) {
     checkPhase3Gate(storyId, result)
   } else if (phaseNum === 4) {
@@ -469,12 +516,87 @@ function checkPhase0Gate (storyId, state, result) {
       }
     }
   }
+
+  // PRD 功能点 → AC 覆盖率校验（run 模式）
+  checkPrdCoverage(storyId, result)
 }
 
 /**
- * Phase 1→2 门控: task-dag + AC↔Task 交叉引用
+ * Phase 0→1: PRD 功能点覆盖率校验
+ *
+ * 历史缺陷: 门控只能校验"已写下的 AC 是否格式合规"，无法发现"整条功能压根没进 AC"。
+ *   TrainWeChatStore 有 3 个交付文档里的功能点从未变成 AC，14 条 AC 全绿而功能缺失。
+ *
+ * 解法: 让需求分析师在 acceptance-criteria.json 里额外枚举 featurePoints
+ *   （功能点 → covered+acIds / deferred+deferredReason）。
+ *   枚举是 LLM 的活，校验映射完整性是程序的活 —— 程序不去猜 PRD 里有什么，
+ *   只保证"凡是被枚举出来的功能点，都必须明确落到 AC 或明确写下不做的原因"。
+ *   fixbugs 模式不要求（Bug 修复没有 PRD 功能点可枚举）。
  */
-function checkPhase1Gate (storyId, result) {
+function checkPrdCoverage (storyId, result) {
+  const input = readJsonArtifact(storyId, 'story-input.json')
+  // 读不到 input 时不阻塞（老 Story 或输入缺失，另有门控覆盖）
+  if (!input || input._parseError || input.mode !== 'run') return
+
+  const ac = readJsonArtifact(storyId, 'acceptance-criteria.json')
+  if (!ac || ac._parseError) return
+
+  const fps = ac.featurePoints
+  if (!Array.isArray(fps) || fps.length === 0) {
+    result.blockers.push(structuredError(
+      'prd_coverage_missing',
+      'acceptance-criteria.json 缺少 featurePoints：run 模式必须枚举需求文档/原型中的功能点并逐条声明 AC 覆盖情况',
+      2,
+      '在 acceptance-criteria.json 增加 featurePoints 数组，每项 { id: "FP-N", source, coverage: "covered"|"deferred", acIds | deferredReason }'
+    ))
+    result.passed = false
+    return
+  }
+
+  const acIds = new Set((ac.criteria || []).map(c => c.id).filter(Boolean))
+  for (const fp of fps) {
+    const tag = fp.id || '(缺少 id)'
+    if (fp.coverage === 'deferred') {
+      if (!fp.deferredReason || !String(fp.deferredReason).trim()) {
+        result.blockers.push(structuredError(
+          'prd_coverage_missing',
+          `功能点 ${tag} 标记为 deferred 但未写 deferredReason: ${fp.source || ''}`,
+          2,
+          '本次不做的功能点必须写明原因，便于后续追踪'
+        ))
+        result.passed = false
+      }
+      continue
+    }
+    // covered（含 coverage 字段缺失/非法，一并按 covered 严格要求）
+    const refs = Array.isArray(fp.acIds) ? fp.acIds : []
+    if (refs.length === 0) {
+      result.blockers.push(structuredError(
+        'prd_coverage_missing',
+        `功能点 ${tag} 未关联任何 AC: ${fp.source || ''}`,
+        2,
+        '为该功能点补充 acIds，或改为 coverage:"deferred" 并写明 deferredReason'
+      ))
+      result.passed = false
+      continue
+    }
+    const dangling = refs.filter(id => !acIds.has(id))
+    if (dangling.length > 0) {
+      result.blockers.push(structuredError(
+        'prd_coverage_missing',
+        `功能点 ${tag} 引用的 AC 不存在: ${dangling.join(', ')}`,
+        2,
+        'featurePoints[].acIds 必须引用 criteria 中真实存在的 AC ID'
+      ))
+      result.passed = false
+    }
+  }
+}
+
+/**
+ * Phase 1→2 门控: task-dag + AC↔Task 交叉引用 + Figma nodeId 引用（条件性）
+ */
+function checkPhase1Gate (storyId, state, result) {
   const taskCheck = checkTaskDagJson(storyId)
   if (!taskCheck.valid) {
     for (const e of taskCheck.errors) {
@@ -542,6 +664,101 @@ function checkPhase1Gate (storyId, result) {
       result.blockers.push(structuredError(type, String(e), level, resolution))
       result.passed = false
     }
+  }
+
+  // Figma nodeId 引用校验（条件性：仅当 hasFigmaDesign=true）
+  // 从 validate-phase-gate.js 迁入 —— run.md 声称的"task 需带 figmaNodeId"硬门控此前从未在生效路径执行。
+  // 取舍：引用了不存在的 frame → BLOCKER（明确错误）；Vue task 未绑 nodeId → WARNING（可能是纯逻辑改动）
+  if (hasFigmaDesign(state)) {
+    const figmaRef = validateTaskFigmaReferences(storyId)
+    for (const r of figmaRef.invalidRefs || []) {
+      result.blockers.push(structuredError(
+        'invalid_figma_ref',
+        `Task ${r.taskId || ''} 引用的 figmaNodeId 无效: ${r.reason || JSON.stringify(r)}`,
+        2,
+        'task-dag.json 的 figmaNodeId 必须存在于 figma-frame-inventory.json 的 frames 中'
+      ))
+      result.passed = false
+    }
+    if ((figmaRef.unmatched || []).length > 0) {
+      result.warnings.push(
+        `${figmaRef.unmatched.length} 个含 .vue 文件的 Task 未绑定 figmaNodeId: ` +
+        figmaRef.unmatched.map(u => `${u.taskId}(${u.title})`).join(', ')
+      )
+    }
+  }
+}
+
+/**
+ * Phase 2→3 门控: 增量 lint + 编译校验
+ *
+ * 历史缺陷: Phase 2 此前无任何专项检查（PHASE_ARTIFACTS[2].fileName 为 null，
+ *   产出物存在性检查被跳过），Phase 2→3 等价于无条件通过。结果是 SCSS
+ *   `/deep/ ... ::after` 编译错误逃过全部本地门控，直到 Phase 7 云端构建才暴露。
+ *
+ * 设计取舍:
+ *   - lint 只跑**本次变更文件**，避免仓库存量问题导致门控永久阻塞
+ *   - build 无法增量，但存量代码本应可编译，失败即可归因于本次变更
+ *   - `HARNESS_SKIP_BUILD=1` 可跳过编译，但会留 warning 痕迹
+ *   - 未检测到变更时降级为 warning（可能代码已提交或本 Story 无代码改动），不误阻塞
+ */
+function checkPhase2Gate (storyId, state, result) {
+  const repos = loadRepos(storyId)
+  const repoNames = Object.keys(repos.repos || {})
+  const targets = repoNames.length > 0 ? repoNames : [null]
+  let anyChange = false
+
+  for (const name of targets) {
+    const repoRoot = getRepoRoot(name, repos)
+    const label = name ? `[${name}] ` : ''
+    if (!repoRoot || !fs.existsSync(repoRoot)) {
+      // 不静默跳过：仓库路径配置错误会让门控失效，必须留痕
+      result.warnings.push(`${label}仓库路径不存在，无法执行 lint/编译校验: ${repoRoot}（请检查 repos.json）`)
+      continue
+    }
+
+    const changed = getChangedFiles(repoRoot)
+    if (changed.length === 0) continue
+    anyChange = true
+
+    // 1. 增量 lint
+    const lintTargets = changed.filter(f => /\.(js|jsx|ts|tsx|vue)$/i.test(f))
+    if (lintTargets.length > 0) {
+      const lint = runIncrementalLint(repoRoot, lintTargets)
+      if (lint.skipped) {
+        result.warnings.push(`${label}未找到可用的 lint 工具，已跳过增量 lint 校验`)
+      } else if (lint.hasErrors) {
+        result.blockers.push(structuredError(
+          'lint_error',
+          `${label}本次变更文件存在 lint error:\n${lint.details}`,
+          2,
+          `在 ${repoRoot} 修复上述 lint error 后重新执行 advance-phase.js ${storyId} 3`
+        ))
+        result.passed = false
+      }
+    }
+
+    // 2. 编译校验
+    if (process.env.HARNESS_SKIP_BUILD === '1') {
+      result.warnings.push(`${label}HARNESS_SKIP_BUILD=1 已跳过编译校验（SCSS/模板编译错误将只能在云端构建暴露）`)
+    } else {
+      const build = runBuildCheck(repoRoot)
+      if (build.skipped) {
+        result.warnings.push(`${label}package.json 未找到可用的 build script，已跳过编译校验`)
+      } else if (!build.ok) {
+        result.blockers.push(structuredError(
+          'build_failed',
+          `${label}本地编译失败（${build.command}）:\n${build.details}`,
+          2,
+          `在 ${repoRoot} 执行 ${build.command} 复现并修复编译错误后重新执行 advance-phase.js ${storyId} 3`
+        ))
+        result.passed = false
+      }
+    }
+  }
+
+  if (!anyChange) {
+    result.warnings.push('Phase 2 未检测到未提交的代码变更（可能已提交或本 Story 无代码改动），已跳过 lint/编译校验')
   }
 }
 
@@ -643,6 +860,12 @@ function checkPhase4Gate (storyId, result) {
     result.warnings.push(`AC ${u.id}: unverifiable（跨项目或环境限制，代码逻辑已验证）`)
   }
 
+  // 交叉对账: code-review 里仍 open 的问题，若自称影响某条 AC，而该 AC 已判 passed → 矛盾
+  crossCheckReviewVsAcceptance(storyId, avCheck, result)
+
+  // 证据强度: UI 交互型 AC 不允许仅凭代码审读判 passed
+  checkEvidenceQuality(storyId, avCheck, result)
+
   // AV 内部校验错误 → 结构化
   for (const e of avCheck.errors) {
     const lower = String(e).toLowerCase()
@@ -702,6 +925,107 @@ function checkPhase4Gate (storyId, result) {
 }
 
 /**
+ * Phase 4→5 交叉对账: code-review 未修复项 vs 验收结论
+ *
+ * 历史缺陷: checkPhase4Gate 从不读 code-review.json，checkPhase3Gate 只看
+ *   `severity==='BLOCKER' && status==='open'`。结果 WARNING 级问题只要不改成 BLOCKER
+ *   就能带病过关 —— 即使问题描述里明写"影响 AC-3 选品交互的正确性"，而 AC-3 同时被判 passed。
+ *   两份产出物各自自洽，合起来自相矛盾，没有任何一道门控看得见这个矛盾。
+ *
+ * 判定: open 状态的问题（任意 severity）文本中出现 AC-N，而该 AC 在
+ *   acceptance-verification.json 中为 passed → BLOCKER。
+ *   要么修问题，要么把该 AC 从 passed 改成 failed，不允许两者并存。
+ */
+function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
+  const crJsonPath = path.join(PLANS_DIR, storyId, 'code-review.json')
+  if (!fs.existsSync(crJsonPath)) return
+
+  let crData
+  try {
+    crData = JSON.parse(fs.readFileSync(crJsonPath, 'utf-8'))
+  } catch (e) {
+    result.warnings.push(`交叉对账: code-review.json 解析失败，已跳过（${e.message}）`)
+    return
+  }
+
+  const passedACIds = new Set(
+    (avCheck.results || []).filter(r => r.status === 'passed').map(r => r.id).filter(Boolean)
+  )
+  if (passedACIds.size === 0) return
+
+  const openIssues = (crData.issues || []).filter(i => i.status === 'open')
+  for (const issue of openIssues) {
+    // 在问题的全部文本字段里找 AC 引用（审查师通常写在 title/description/impact 里）
+    const text = [issue.title, issue.description, issue.impact, issue.suggestion, issue.reason]
+      .filter(v => typeof v === 'string').join(' ')
+    const refs = text.match(/AC-\d+/gi) || []
+    const conflicting = [...new Set(refs.map(r => r.toUpperCase()))].filter(id => passedACIds.has(id))
+    if (conflicting.length === 0) continue
+
+    result.blockers.push(structuredError(
+      'review_acceptance_conflict',
+      `审查问题 ${issue.id || ''}(${issue.severity || 'WARNING'}, status=open) 自称影响 ` +
+      `${conflicting.join('/')}，但该 AC 在 acceptance-verification.json 中为 passed` +
+      `${issue.title ? ': ' + issue.title : ''}`,
+      2,
+      `二选一: ① 修复该问题并把 status 改为 fixed；② 把 ${conflicting.join('/')} 的 status 从 passed 改为 failed 并走修复回路`
+    ))
+    result.passed = false
+  }
+}
+
+/**
+ * Phase 4→5 证据强度校验: UI 交互型 AC 不允许仅凭代码审读判 passed
+ *
+ * 历史缺陷: TrainWeChatStore 14 条 AC 的 evidence 全部是 `文件:行号 + 代码语义描述`，
+ *   没有一条来自实际运行。AC-3「导入商品并关联课程」凭读到 `:selectable="selectable"`
+ *   就判 passed，而审查师同时发现「选品弹窗取消勾选失效」—— 读代码读不出运行时行为，
+ *   passed 于是变成了"我认为这段代码应该是对的"。
+ *
+ * 判定（按 acceptance-criteria.json 的 testType 分级，避免一刀切把门控变成墙）:
+ *   - testType=ui   + passed + evidenceType=static → BLOCKER。纯交互断言（点击/禁用态/
+ *     弹窗）不可能靠静态阅读证明，要么补 playwright/manual 证据，要么老实改成 unverifiable。
+ *   - 其余 testType + passed + evidenceType=static → WARNING。集成/接口型 AC 的静态证据
+ *     强度不足但仍有参考价值，且若一律阻塞会迫使大批 AC 降级成 unverifiable，
+ *     反而触发 checkAcceptanceVerification 的「unverifiable 比例 > 50%」硬阻塞。
+ *
+ * evidenceType 缺失按 static 处理（schema 已要求必填，缺失即未如实声明）。
+ */
+function checkEvidenceQuality (storyId, avCheck, result) {
+  const ac = readJsonArtifact(storyId, 'acceptance-criteria.json')
+  if (!ac || ac._parseError) return
+
+  const testTypeById = new Map(
+    (ac.criteria || []).filter(c => c.id).map(c => [c.id, c.testType])
+  )
+  const weakNonUi = []
+
+  for (const r of avCheck.results || []) {
+    if (r.status !== 'passed') continue
+    const evidenceType = r.evidenceType || 'static'
+    if (evidenceType !== 'static') continue
+
+    if (testTypeById.get(r.id) === 'ui') {
+      result.blockers.push(structuredError(
+        'static_evidence_for_ui_ac',
+        `AC ${r.id}(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码`,
+        2,
+        `二选一: ① 用 Playwright 实跑或人工点验后把 evidenceType 改为 playwright/manual 并补运行时证据；② 把 ${r.id} 的 status 改为 unverifiable 并写明环境限制`
+      ))
+      result.passed = false
+    } else {
+      weakNonUi.push(r.id)
+    }
+  }
+
+  if (weakNonUi.length > 0) {
+    result.warnings.push(
+      `${weakNonUi.length} 条 AC 仅凭代码审读判 passed（证据强度偏弱，建议补运行时验证）: ${weakNonUi.join(', ')}`
+    )
+  }
+}
+
+/**
  * Spec-Anchored 契约回归检查
  * 验证 task-dag.json 声称的 files 是否都有对应的代码变更
  * @param {string} storyId
@@ -729,6 +1053,92 @@ function checkContractRegression (storyId) {
   }
 
   return result
+}
+
+// ─── Phase 2 门控辅助: 变更采集 / lint / build ──────────────────
+
+/**
+ * 采集仓库内未提交的变更文件（相对仓库根的路径）
+ * @param {string} repoRoot
+ * @returns {string[]} 变更文件列表；非 git 仓库或异常时返回空数组
+ */
+function getChangedFiles (repoRoot) {
+  try {
+    const out = execSync('git status --porcelain', {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000
+    })
+    return out.split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
+      .map(l => {
+        const p = l.replace(/^\S+\s+/, '')
+        // 重命名 "old -> new" 取新路径
+        return p.includes(' -> ') ? p.split(' -> ')[1] : p
+      })
+      .map(p => p.replace(/^"|"$/g, ''))
+      .filter(p => !p.endsWith('/'))
+  } catch (e) {
+    return []
+  }
+}
+
+/**
+ * 对指定文件跑 eslint（只读，绝不带 --fix，避免门控层改动代码）
+ * @param {string} repoRoot
+ * @param {string[]} files - 相对仓库根的文件路径
+ * @returns {{ hasErrors: boolean, details: string, skipped: boolean }}
+ */
+function runIncrementalLint (repoRoot, files) {
+  if (!fs.existsSync(path.join(repoRoot, 'node_modules', 'eslint'))) {
+    return { hasErrors: false, details: '', skipped: true }
+  }
+  const args = files.map(f => `"${f}"`).join(' ')
+  let output = ''
+  try {
+    output = execSync(`npx eslint ${args} --format compact`, {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 180000
+    })
+  } catch (e) {
+    output = String(e.stdout || e.stderr || e.message || '')
+  }
+  const errorLines = output.split('\n').filter(l => /:\s*line\s+\d+,\s*col\s+\d+,\s*Error\s+-/i.test(l))
+  return {
+    hasErrors: errorLines.length > 0,
+    details: errorLines.slice(0, 10).join('\n'),
+    skipped: false
+  }
+}
+
+/**
+ * 本地编译校验。优先使用 build:dev / build:test（比生产构建快），回退 build。
+ * @param {string} repoRoot
+ * @returns {{ ok: boolean, details: string, command: string, skipped: boolean }}
+ */
+function runBuildCheck (repoRoot) {
+  const pkgPath = path.join(repoRoot, 'package.json')
+  if (!fs.existsSync(pkgPath)) return { ok: true, details: '', command: '', skipped: true }
+
+  let scripts = {}
+  try {
+    scripts = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).scripts || {}
+  } catch (e) {
+    return { ok: true, details: '', command: '', skipped: true }
+  }
+
+  const name = ['build:dev', 'build:test', 'build'].find(s => scripts[s])
+  if (!name) return { ok: true, details: '', command: '', skipped: true }
+
+  const command = `npm run ${name}`
+  try {
+    execSync(command, {
+      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 900000
+    })
+    return { ok: true, details: '', command, skipped: false }
+  } catch (e) {
+    const output = String(e.stdout || '') + '\n' + String(e.stderr || e.message || '')
+    const lines = output.split('\n').filter(l => l.trim())
+    return { ok: false, details: lines.slice(-25).join('\n'), command, skipped: false }
+  }
 }
 
 // ─── 错误恢复执行 ───────────────────────────────────────────────

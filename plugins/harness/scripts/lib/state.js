@@ -263,7 +263,8 @@ const PHASE_ARTIFACTS = {
   1: {
     artifacts: [
       { fileName: 'task-dag.md', description: '任务 DAG 文档', contract: false },
-      { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true }
+      { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true },
+      { fileName: 'figma-component-map.md', description: 'Figma 组件映射文档（有 Figma 设计稿时产出，将 Figma 视觉规范翻译为开发规范）', contract: false, optional: true, requiredWhen: 'hasFigmaDesign' }
     ]
   },
   2: { artifacts: [{ fileName: null, description: '代码变更（git diff）', contract: false }] },
@@ -526,18 +527,25 @@ function getPhaseName (phaseNum) {
 /**
  * 检查指定 Phase 的产出物文件是否存在
  * 新版支持每个 Phase 多个产出物（含契约 JSON），任意**必需** artifact 不存在即返回 exists=false。
- * `optional: true` 的产出物按条件产出（原型/Figma），不参与门控判定。
+ * `optional: true` 的产出物按条件产出（原型/Figma），不参与门控判定；
+ * 但若同时声明了 `requiredWhen: 'hasFigmaDesign'` 且传入了 state，则该条件成立时升级为必需。
  * @param {string} storyId - Story ID
  * @param {number} phaseNum - Phase 编号
+ * @param {Object} [state] - e2e-state 对象，用于判定 requiredWhen 条件；不传则条件产出物一律按可选处理
  * @returns {{ exists: boolean, missing: Array<{path:string, description:string}>, description: string }}
  */
-function checkPhaseArtifact (storyId, phaseNum) {
+function checkPhaseArtifact (storyId, phaseNum, state) {
   const phaseDef = PHASE_ARTIFACTS[phaseNum]
   if (!phaseDef || !phaseDef.artifacts) {
     return { exists: true, missing: [], description: '无' }
   }
 
-  const required = phaseDef.artifacts.filter(a => a.fileName && !a.optional)
+  const required = phaseDef.artifacts.filter(a => {
+    if (!a.fileName) return false
+    if (!a.optional) return true
+    // 条件必需：仅当传入 state 且条件成立时参与门控
+    return Boolean(state) && a.requiredWhen === 'hasFigmaDesign' && hasFigmaDesign(state)
+  })
   const missing = []
   for (const artifact of required) {
     const filePath = path.join(getStoryDir(storyId), artifact.fileName)
