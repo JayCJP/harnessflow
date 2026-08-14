@@ -56,6 +56,22 @@
         },
         "additionalProperties": false
       }
+    },
+    "mustCheck": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fingerprint", "failureType"],
+        "properties": {
+          "fingerprint": { "type": "string", "minLength": 1 },
+          "failureType": { "type": "string", "minLength": 1 },
+          "lesson": { "type": "string" },
+          "check": { "type": "string" },
+          "occurrences": { "type": "integer", "minimum": 1 },
+          "consumed": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

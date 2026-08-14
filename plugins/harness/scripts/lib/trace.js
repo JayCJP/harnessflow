@@ -72,6 +72,69 @@ function traceAgentResult (storyId, agentName, status, details = {}) {
 }
 
 /**
+ * 记录一次工具 / Skill / MCP 调用 —— 资源消费证据链的核心节点
+ *
+ * 时间戳 `ts` 由 appendTrace 自动写入，是「时间戳前置校验」（Temporal Check）
+ * 的依据：一次有效的资源消费，其 ts 必须早于产物落盘时间。
+ * `resourceHash` 是「特征指纹」（Artifact Fingerprint）的依据，用于把
+ * 注入的教训/设计与产物侧做 AST 级对应，判断是否真正「影响了」产物。
+ *
+ * @param {string} storyId - Story ID
+ * @param {Object} opts - 调用参数
+ * @param {string} opts.tool - 工具名（use_skill / mcp_call_tool / graphify 等）
+ * @param {string} [opts.skill] - Skill 名（kb-query / graphify / figma-to-component-map）
+ * @param {string} [opts.mcp] - MCP 名（figma / playwright / tapd）
+ * @param {string} [opts.mcpTool] - MCP 工具名（get_design_context / get_screenshot）
+ * @param {number} [opts.phase] - Phase 编号
+ * @param {string} [opts.agent] - 发起调用的 Agent 名
+ * @param {string} [opts.resourceHash] - 资源指纹（教训/设计的 hash）
+ * @param {string} [opts.result] - 结果: success / failed
+ * @param {Object} [opts.details] - 附加信息
+ */
+function traceToolCall (storyId, opts = {}) {
+  appendTrace(storyId, {
+    type: 'tool_call',
+    tool: opts.tool || null,
+    skill: opts.skill || null,
+    mcp: opts.mcp || null,
+    mcpTool: opts.mcpTool || null,
+    phase: opts.phase != null ? String(opts.phase) : null,
+    agent: opts.agent || null,
+    resourceHash: opts.resourceHash || null,
+    result: opts.result || 'success',
+    details: opts.details || {}
+  })
+}
+
+/**
+ * 记录 Agent 间消息 —— 用于追踪产物 / 知识库的「产出」与「消费」关系
+ *
+ * 与 tool_call 互补：tool_call 记录「调了什么工具」，
+ * agent_message 记录「这个 Agent 产出/消费了哪些产物、命中了哪些知识库域」。
+ * 两者结合才能还原完整的资源消费证据链。
+ *
+ * @param {string} storyId - Story ID
+ * @param {Object} opts - 消息参数
+ * @param {number} opts.phase - Phase 编号
+ * @param {string} opts.agent - Agent 名
+ * @param {'produce'|'consume'} opts.kind - 产出 or 消费
+ * @param {string[]} [opts.artifacts] - 引用的产物文件名
+ * @param {string[]} [opts.kbDomains] - 命中的知识库域
+ * @param {Object} [opts.details] - 附加信息
+ */
+function traceAgentMessage (storyId, opts = {}) {
+  appendTrace(storyId, {
+    type: 'agent_message',
+    phase: opts.phase != null ? String(opts.phase) : null,
+    agent: opts.agent || null,
+    kind: opts.kind || 'produce',
+    artifacts: opts.artifacts || [],
+    kbDomains: opts.kbDomains || [],
+    details: opts.details || {}
+  })
+}
+
+/**
  * 记录门控决策
  * @param {string} storyId
  * @param {number} phase - Phase 编号
@@ -160,6 +223,8 @@ module.exports = {
   appendTrace,
   traceAgentSpawn,
   traceAgentResult,
+  traceToolCall,
+  traceAgentMessage,
   traceGitEvent,
   traceGateDecision,
   tracePhaseTransition,

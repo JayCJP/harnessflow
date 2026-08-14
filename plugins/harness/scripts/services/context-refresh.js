@@ -17,6 +17,7 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
 const { getStoryDir, readJsonArtifact, readStateFile, getPhaseName, PHASE_SLUGS, PHASE_ARTIFACTS, loadRepos } = require('../lib/state')
+const experience = require('./experience')
 
 /**
  * 生成 Phase 完成后的上下文摘要
@@ -97,7 +98,51 @@ function generatePhaseSummary (storyId, phase) {
   const content = summaryLines.join('\n') + '\n'
   const summaryPath = path.join(storyDir, `phase-${phase}-summary.md`)
   fs.writeFileSync(summaryPath, content, 'utf-8')
+
+  // Phase 1（任务规划）完成时，把历史教训转成 mustCheck 清单写进 task-dag.json
+  // 这是「声明-消费一致性」在教训维度的落地：教训被结构化注入，供检查层确定性验证
+  if (phase === 1) {
+    injectMustCheck(storyId)
+  }
+
   return summaryPath
+}
+
+/**
+ * 将历史教训转成 mustCheck 清单，注入 task-dag.json
+ *
+ * 目的：让「注入的教训是否被规避」可被确定性检查（而非靠 LLM 自我诊断）。
+ * 从 experience 读取已确认的失败模式（覆盖开发 Phase 2 + 审查 Phase 3 的教训），
+ * 转成 { fingerprint, failureType, lesson, check } 结构，写进 task-dag.json 的 mustCheck。
+ * 检查层（S3 阶段）遍历 mustCheck，判断每条 check 是否在代码产物中体现。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {boolean} 是否成功注入
+ */
+function injectMustCheck (storyId) {
+  const storyDir = getStoryDir(storyId)
+  const taskDagPath = path.join(storyDir, 'task-dag.json')
+  if (!fs.existsSync(taskDagPath)) return false
+
+  try {
+    const lessons = experience.getLessonsAsChecklist(2)
+    if (lessons.length === 0) return false
+
+    const dag = JSON.parse(fs.readFileSync(taskDagPath, 'utf-8'))
+    // 合并：保留已有 mustCheck（避免覆盖手工/已有项），按 fingerprint 去重追加
+    const existing = Array.isArray(dag.mustCheck) ? dag.mustCheck : []
+    const existingFps = new Set(existing.map(m => m.fingerprint))
+    const toAdd = lessons.filter(l => !existingFps.has(l.fingerprint))
+
+    if (toAdd.length === 0) return false
+
+    dag.mustCheck = [...existing, ...toAdd]
+    fs.writeFileSync(taskDagPath, JSON.stringify(dag, null, 2), 'utf-8')
+    return true
+  } catch (e) {
+    // 注入失败不阻断主流程，仅静默返回 false
+    return false
+  }
 }
 
 /**
@@ -454,6 +499,7 @@ function loadLatestSummary (storyId, currentPhase = Infinity, maxLines = 200) {
 
 module.exports = {
   generatePhaseSummary,
+  injectMustCheck,
   getPhaseArtifacts,
   getContractFiles,
   loadLatestSummary,

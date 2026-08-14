@@ -32,6 +32,7 @@ const {
   checkFigmaFrameInventory,
   validateTaskFigmaReferences,
   hasFigmaDesign,
+  detectFigmaSource,
   readJsonArtifact,
   getStoryDir,
   getPhaseName,
@@ -408,6 +409,11 @@ function runGateCheck (storyId, phaseNum, state) {
     checkPhase4Gate(storyId, result)
   }
 
+  // 2.5. 🆕 资源完整性检查（声明了外部依赖但未有效消费）
+  // 检查时机：Phase 2 开发完成后（进入 Phase 3 审查前），验证开发阶段是否真的消费了
+  // 声明的 Figma 设计稿 / 知识库等资源。这是「声明-消费一致性」在门控层的落地。
+  checkResourceIntegrity(storyId, phaseNum, state, result)
+
   // 3. 为未匹配恢复建议的 blocker 补充兜底 recoveries
   for (const blocker of result.blockers) {
     const existingRecovery = result.recoveries.find(r =>
@@ -426,6 +432,71 @@ function runGateCheck (storyId, phaseNum, state) {
   }
 
   return result
+}
+
+/**
+ * 资源完整性检查 —— 声明了外部依赖但未有效消费
+ *
+ * 这是「声明-消费一致性」在门控层的落地。检查声明了 Figma 设计稿的 Story，
+ * 在开发阶段（Phase 2）是否真的通过 Figma MCP 拉取了设计内容。
+ *
+ * 判定依据（v2 证据链）：
+ *   - 读 trace.jsonl 里 type='tool_call' 且 mcp='figma' 的事件
+ *   - 声明了 figmaUrls 但 0 次 Figma MCP 调用 → BLOCKER（不进入下一 Phase，强制重试）
+ *   - kb-query / graphify 调用为 0 → WARNING（放行但记 debt，Evo Score 扣分）
+ *
+ * 检查时机：仅当 phaseNum === 3（Phase 2 开发完成，进入代码审查前）时执行。
+ * 早期阶段（phaseNum < 3）尚未开发，不检查；后期阶段（phaseNum > 3）已过审查，无需重复。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} phaseNum - 要推进到的 Phase 编号
+ * @param {Object} state - e2e-state.json 状态对象
+ * @param {Object} result - 门控结果对象（会原地写入 blockers / warnings）
+ * @returns {void}
+ */
+function checkResourceIntegrity (storyId, phaseNum, state, result) {
+  // 只在 Phase 2 开发完成（即将进入 Phase 3）时检查 Figma 消费
+  if (phaseNum !== 3) return
+
+  // 读 trace.jsonl 里的 tool_call 事件
+  const traceFile = path.join(getStoryDir(storyId), 'trace.jsonl')
+  let toolCalls = []
+  if (fs.existsSync(traceFile)) {
+    try {
+      const lines = fs.readFileSync(traceFile, 'utf-8').split('\n')
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const e = JSON.parse(line)
+          if (e.type === 'tool_call') toolCalls.push(e)
+        } catch (_) { /* 单行损坏，跳过 */ }
+      }
+    } catch (_) { /* 读取失败按无记录处理 */ }
+  }
+
+  // 1. Figma MCP 消费检查（硬性依赖 → BLOCKER）
+  const figma = detectFigmaSource(storyId)
+  if (figma.hasFigma) {
+    const figmaCalls = toolCalls.filter(e => e.mcp === 'figma')
+    if (figmaCalls.length === 0) {
+      result.blockers.push(structuredError(
+        'figma_not_consumed',
+        `本 Story 声明了 ${figma.urls.length} 个 Figma 设计稿链接，但开发阶段未调用 Figma MCP 拉取设计内容`,
+        2,
+        `执行修复回路: advance-phase.js ${storyId} 2 --fix-loop，前端开发必须先用 Figma MCP(get_design_context/get_screenshot) 拉取完整设计再实现`
+      ))
+      result.passed = false
+      result._meta = result._meta || {}
+      result._meta.fixLoopAvailable = true
+      result._meta.fixLoopSource = 'resource-integrity'
+    }
+  }
+
+  // 2. 知识库消费检查（软性资源 → WARNING，放行但记 debt）
+  const kbCalls = toolCalls.filter(e => e.skill === 'kb-query' || e.skill === 'graphify')
+  if (kbCalls.length === 0) {
+    result.warnings.push('本 Story 开发阶段未调用 kb-query / graphify 做知识库检索，注入的历史教训可能未被查证（记 debt，Evo Score 扣分）')
+  }
 }
 
 /**

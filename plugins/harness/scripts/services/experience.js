@@ -156,6 +156,49 @@ function getLessonsForPhase (phase) {
 }
 
 /**
+ * 获取针对指定 Phase 的历史教训，转为结构化 Check List（供 task-dag.json 的 mustCheck 使用）
+ *
+ * 与 getLessonsForPhase 的区别：
+ *   - getLessonsForPhase 返回 markdown 文本，注入 prompt 供 Agent 阅读
+ *   - getLessonsAsChecklist 返回结构化数组，写进 task-dag.json 的 mustCheck，
+ *     供检查层做「确定性验证」——教训是否真的在产物中体现了（而非靠 LLM 自我诊断）
+ *
+ * 指纹 fingerprint 由 phase + failureType 生成稳定 hash，供产物侧 AST 扫描比对。
+ * check 字段是对策的可验证表述（如「组件中存在 onBeforeUnmount 清理逻辑」），
+ * 由检查层遍历验证，而非解析 prompt 语义。
+ *
+ * @param {number} phase - Phase 编号（取该 phase 及其后置 phase 的教训，覆盖开发+审查阶段）
+ * @returns {Array<{fingerprint: string, lesson: string, check: string, failureType: string, occurrences: number}>}
+ */
+function getLessonsAsChecklist (phase) {
+  const data = readFailurePatterns()
+  // 覆盖当前 phase 与后置 phase（开发 2 + 审查 3 的教训都应在开发前注入）
+  const relevant = data.patterns.filter(p => {
+    // 只取已确认的教训，pending（unknown 待补录）不转 check
+    const confirmed = !p.needsManualReview || p.reviewStatus === 'confirmed'
+    return confirmed && p.phase >= phase && p.phase <= phase + 1
+  })
+
+  return relevant.map(p => {
+    // 稳定指纹：phase + failureType + rootCause 前 32 字符
+    const key = `${p.phase}:${p.failureType}:${(p.rootCause || '').slice(0, 32)}`
+    let hash = 0
+    for (let i = 0; i < key.length; i++) {
+      hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0
+    }
+    const fingerprint = 'fp-' + Math.abs(hash).toString(36)
+
+    return {
+      fingerprint,
+      failureType: p.failureType,
+      lesson: p.rootCause || p.failureType,
+      check: p.resolution || '',
+      occurrences: p.occurrences || 1
+    }
+  })
+}
+
+/**
  * 归档失败案例（工作流失败时调用）
  * @param {string} storyId - Story ID
  * @param {Object} state - 最终状态快照
@@ -381,6 +424,7 @@ module.exports = {
   readFailurePatterns,
   recordFailurePattern,
   getLessonsForPhase,
+  getLessonsAsChecklist,
   archiveFailureCase,
   getFailureStats,
   confirmUnknownPattern,

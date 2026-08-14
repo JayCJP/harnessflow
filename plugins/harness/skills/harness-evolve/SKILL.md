@@ -31,6 +31,9 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/harness-audit.js --json
 **采集数据**:
 - settings.json 是否存在且有效
 - hooks/ 目录完整性 + 语法检查
+- **核心脚本语法体检**（services/lib/audit/commands 全量 .js/.cjs 的 node --check）
+- **引用完整性检查**（调用但未定义/未导出的悬空引用，抓 ReferenceError 元凶）
+- **声明-消费一致性检查**（story-input 声明了 figmaUrl 但未产出 frame 清单）
 - .harness-active 活跃 Story 状态
 - dev-pass 有效性 + 限域精度
 - 所有 Story 产出物完整性 (AC/task-dag/verification)
@@ -65,6 +68,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/metrics-aggregator.js --json
 | fix-loop 成功率 | <80% | 修复回路是否有效 |
 | dev-pass 限域精度 | <70% | task-dag 文件声明是否精确 |
 | BLOCKER 类型趋势 | 环比增长 | 哪种 BLOCKER 在恶化 |
+| 资源使用（S3 新增） | — | skill/kb/mcp 调用统计（resourceUsage 字段） |
 
 **输出到报告**:
 ```
@@ -103,6 +107,13 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/metrics-aggregator.js --json
 **2.5 Schema 校验失败统计**
 - policy.js 门控中 schema_validation_failed 次数
 - 哪种产出物格式错误最多 → 对应 Agent 需要加强约束
+
+**2.6 资源利用效率（S3 新增）**
+- 从 metrics.resourceUsage 读取 skill/kb/mcp 调用统计
+- skill 使用效率：每个 Phase 该用的 skill 是否真的被调用（对照 PHASE_SKILLS 单一信源）
+- 知识库空转：kb-query/graphify 调用为 0 → 注入的历史教训从未被查证
+- MCP 消费：声明 figmaUrl 但 Figma MCP 调用为 0 → 静默降级（与上次 Figma 断裂同源）
+- 产物利用率：task-dag.json 的 mustCheck 清单是否在代码产物中体现（教训是否真的被规避）
 
 ## Step 3: 治疗 (Harness Proposal)
 

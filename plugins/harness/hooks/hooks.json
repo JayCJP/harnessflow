@@ -38,7 +38,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "execute_command",
+        "matcher": "execute_command|Skill|use_skill|mcp__",
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/trace-command.js",
