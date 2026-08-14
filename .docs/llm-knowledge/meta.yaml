@@ -1,0 +1,55 @@
+# Harness 插件知识库索引
+
+git:
+  hash: "db8562744be086322fe93e343aa859b651687c1b"
+  updated_at: "2026-08-14"
+
+doc_stats:
+  domains: 8
+  docs: 8
+  last_generated: "2026-08-14"
+
+domains:
+  - id: "agents"
+    path: "business/agents/"
+    entry_files: ["plugins/harness/agents/*.md"]
+    description: "6 个角色 Agent 定义（需求分析师/任务规划师/前端开发/代码审查/测试/发布助手）"
+
+  - id: "commands"
+    path: "business/commands/"
+    entry_files: ["plugins/harness/commands/*.md"]
+    description: "命令入口文档（run/fixbugs/archive/evolve）"
+
+  - id: "scripts-core"
+    path: "business/scripts-core/"
+    entry_files:
+      - "plugins/harness/scripts/lib/*.js"
+      - "plugins/harness/scripts/services/*.js"
+    description: "核心逻辑：状态管理、trace、prompt 构建、上下文刷新、策略、schema 校验、门控校验"
+
+  - id: "scripts-commands"
+    path: "business/scripts-commands/"
+    entry_files: ["plugins/harness/scripts/commands/*.js"]
+    description: "命令实现：advance-phase/create-workflow/dispatch/harness-workflow/archive-story"
+
+  - id: "scripts-hooks"
+    path: "business/scripts-hooks/"
+    entry_files: ["plugins/harness/scripts/hooks/*.js"]
+    description: "钩子脚本：enforce-*/session-*/trace-command"
+
+  - id: "schemas"
+    path: "business/schemas/"
+    entry_files: ["plugins/harness/scripts/schemas/*.json"]
+    description: "JSON Schema 契约定义（AC/task-dag/code-review/验收等）"
+
+  - id: "skills"
+    path: "business/skills/"
+    entry_files: ["plugins/harness/skills/*/SKILL.md"]
+    description: "10 个 Skill（figma/kb-query/kb-update/kb-init/gen-project-docs/api-generator 等）"
+
+  - id: "experience"
+    path: "business/experience/"
+    entry_files:
+      - "plugins/harness/scripts/experience/failure-patterns.json"
+      - "plugins/harness/scripts/experience/metrics-insights.json"
+    description: "失败模式与度量洞察沉淀"
