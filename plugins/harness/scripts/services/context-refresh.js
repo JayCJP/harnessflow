@@ -348,8 +348,12 @@ function evidenceKbRefresh (storyId) {
   for (const [repoName, root] of Object.entries(repos.repos)) {
     try {
       if (!root || !fs.existsSync(root)) continue
-      const metaPath = path.join(root, '.docs', 'llm-knowledge', 'frontend', 'meta.yaml')
-      if (!fs.existsSync(metaPath)) continue
+      // 知识库根已从 .docs/llm-knowledge/frontend 改为 .docs/llm-knowledge（去掉 frontend 硬编码层）
+      // 向后兼容：先找新路径，找不到回退旧 frontend 路径
+      const newMetaPath = path.join(root, '.docs', 'llm-knowledge', 'meta.yaml')
+      const legacyMetaPath = path.join(root, '.docs', 'llm-knowledge', 'frontend', 'meta.yaml')
+      const metaPath = fs.existsSync(newMetaPath) ? newMetaPath : (fs.existsSync(legacyMetaPath) ? legacyMetaPath : null)
+      if (!metaPath) continue
       foundAny = true
       let recordedHash = ''
       try {
@@ -366,7 +370,7 @@ function evidenceKbRefresh (storyId) {
     } catch (e) { /* 单仓库失败跳过 */ }
   }
   if (!foundAny) {
-    lines.push('- 未找到知识库 meta.yaml（`.docs/llm-knowledge/frontend/meta.yaml`）')
+    lines.push('- 未找到知识库 meta.yaml（`.docs/llm-knowledge/meta.yaml`）')
   }
   return lines
 }
