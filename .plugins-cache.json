@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1786679390180,
+  "createdAt": 1786811889095,
   "plugins": [
     {
       "name": "harness",
@@ -134,7 +134,7 @@
         ],
         "PostToolUse": [
           {
-            "matcher": "execute_command",
+            "matcher": "execute_command|Skill|use_skill|mcp__",
             "hooks": [
               {
                 "type": "command",
@@ -176,7 +176,7 @@
         },
         {
           "name": "gen-project-docs",
-          "description": "自动生成项目结构化知识库文档。按业务域扫描源码，生成 8 类标准化文档（overview/pages/api/store/architecture/config/pitfalls/custom），支持增量更新、手工批注保留与新鲜度检测。触发词：生成知识库文档、更新项目文档、gen-docs、文档生成、增量更新知识库、新鲜度检测",
+          "description": "自动生成项目结构化知识库文档。按项目画像（project_type）动态确定文档类型，扫描源码生成文档（通用 5 类 + 项目类型特有切面），支持增量更新、手工批注保留与新鲜度检测。触发词：生成知识库文档、更新项目文档、gen-docs、文档生成、增量更新知识库、新鲜度检测",
           "path": "skills/gen-project-docs"
         },
         {
@@ -191,7 +191,7 @@
         },
         {
           "name": "kb-init",
-          "description": "初始化项目知识库目录结构和规范。自动创建 llm-knowledge/ 标准化目录骨架（overview/meta.yaml/7域/8类文档模板/common/），扫描 src/ 识别业务域、提取入口文件和依赖关系。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录",
+          "description": "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录",
           "path": "skills/kb-init"
         },
         {

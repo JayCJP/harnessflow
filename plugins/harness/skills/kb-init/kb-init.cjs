@@ -188,7 +188,7 @@ function discoverDomains (projectType, sourceRoot) {
  */
 function selectTemplates (projectType) {
   // 通用切面：所有项目类型共有
-  const common = ['overview', 'architecture', 'config', 'pitfalls', 'log']
+  const common = ['overview', 'architecture', 'config', 'conventions', 'pitfalls', 'log']
 
   // 项目类型特有切面
   const specific = {
@@ -199,6 +199,75 @@ function selectTemplates (projectType) {
   }
 
   return [...common, ...(specific[projectType] || [])]
+}
+
+/**
+ * 扫描项目中的编码规范来源文件
+ * 规范来源可能藏在多个位置：.editorconfig、.eslintrc*、.prettierrc*、
+ * CODEBUDDY.md（项目根 + 全局）、rules/*.md、package.json 的 lint 字段等。
+ * 本函数只做「扫描 + 列清单」（确定性操作），真正的「总结规范」由 AI 完成。
+ * @returns {Array<{path: string, type: string}>} 规范来源文件清单
+ */
+function discoverConventionSources () {
+  const sources = []
+
+  // 1. 编辑器配置
+  const editorconfig = path.join(PROJECT_ROOT, '.editorconfig')
+  if (fs.existsSync(editorconfig)) sources.push({ path: '.editorconfig', type: 'editor' })
+
+  // 2. ESLint 配置（多种文件名）
+  for (const name of ['.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc', 'eslint.config.js', 'eslint.config.mjs']) {
+    const p = path.join(PROJECT_ROOT, name)
+    if (fs.existsSync(p)) { sources.push({ path: name, type: 'lint' }); break }
+  }
+
+  // 3. Prettier 配置
+  for (const name of ['.prettierrc', '.prettierrc.js', '.prettierrc.json', 'prettier.config.js']) {
+    const p = path.join(PROJECT_ROOT, name)
+    if (fs.existsSync(p)) { sources.push({ path: name, type: 'format' }); break }
+  }
+
+  // 4. Stylelint / commitlint 等
+  for (const name of ['.stylelintrc', '.stylelintrc.json', 'commitlint.config.js']) {
+    const p = path.join(PROJECT_ROOT, name)
+    if (fs.existsSync(p)) sources.push({ path: name, type: 'lint' })
+  }
+
+  // 5. CODEBUDDY.md（项目根 + 全局）
+  const projectCodebuddy = path.join(PROJECT_ROOT, 'CODEBUDDY.md')
+  if (fs.existsSync(projectCodebuddy)) sources.push({ path: 'CODEBUDDY.md', type: 'rules' })
+  const globalCodebuddy = path.join(process.env.HOME || process.env.USERPROFILE || '', '.codebuddy', 'CODEBUDDY.md')
+  if (fs.existsSync(globalCodebuddy)) sources.push({ path: '~/.codebuddy/CODEBUDDY.md', type: 'rules' })
+
+  // 6. rules/ 目录下的 .md / .mdc 规则文件（项目 rules + 全局 ~/.codebuddy/rules）
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  const rulesDirs = [
+    path.join(PROJECT_ROOT, 'rules'),
+    path.join(PROJECT_ROOT, '.codebuddy', 'rules'),
+    path.join(home, '.codebuddy', 'rules')  // 全局规则目录
+  ]
+  for (const rulesDir of rulesDirs) {
+    if (!fs.existsSync(rulesDir)) continue
+    try {
+      const files = fs.readdirSync(rulesDir).filter(f => f.endsWith('.md') || f.endsWith('.mdc'))
+      for (const f of files) {
+        const abs = path.join(rulesDir, f)
+        // 全局路径显示为 ~/ 前缀，项目内路径显示相对路径
+        const isGlobal = rulesDir.startsWith(home)
+        const display = isGlobal ? '~/.codebuddy/rules/' + f : path.relative(PROJECT_ROOT, abs).replace(/\\/g, '/')
+        sources.push({ path: display, type: 'rules' })
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // 7. package.json 里的 lint/format 字段（间接信号）
+  const pkg = readJson(path.join(PROJECT_ROOT, 'package.json'))
+  if (pkg && pkg.scripts) {
+    const hasLint = pkg.scripts.lint || pkg.scripts['lint:fix']
+    if (hasLint) sources.push({ path: 'package.json#scripts.lint', type: 'lint' })
+  }
+
+  return sources
 }
 
 // ─── 主逻辑 ──────────────────────────────────────────────────
@@ -217,6 +286,8 @@ const profile = { project_type: projectType, source_root: sourceRoot, domain_axi
 
 // 2. 扫描真实域
 const domains = discoverDomains(projectType, sourceRoot)
+// 2.5 扫描编码规范来源
+const conventionSources = discoverConventionSources()
 
 let created = 0, skipped = 0
 const errors = []
@@ -224,7 +295,8 @@ const errors = []
 console.log('kb-init v2 — 知识库目录骨架初始化（项目画像 + 动态域扫描）')
 console.log(`项目: ${PROJECT_ROOT}`)
 console.log(`画像: project_type=${projectType}, source_root=${sourceRoot}, domain_axis=${domainAxis}`)
-console.log(`识别到 ${domains.length} 个域: ${domains.join(', ') || '(空)'}\n`)
+console.log(`识别到 ${domains.length} 个域: ${domains.join(', ') || '(空)'}`)
+console.log(`识别到 ${conventionSources.length} 个编码规范来源: ${conventionSources.map(s => s.path).join(', ') || '(无)'}\n`)
 
 // dry-run 模式：只输出候选域清单，不落盘（供 AI/用户确认后正式初始化）
 if (dryRun) {
@@ -233,6 +305,7 @@ if (dryRun) {
     sourceRoot,
     domainAxis,
     domains,
+    conventionSources,
     templates: selectTemplates(projectType),
     kbRoot: '.docs/llm-knowledge'
   }, null, 2))
@@ -286,9 +359,51 @@ if (!fs.existsSync(commonReadme) || force) {
   catch (e) { errors.push(`写入失败: ${commonReadme}`) }
 }
 
+// 6.5 生成编码规范文档骨架（common/conventions.md）
+// 脚本只做「扫描来源 + 生成骨架」，真正的「总结规范」由 AI（kb-init SKILL）完成
+const conventionsPath = path.join(KB_ROOT, 'common', 'conventions.md')
+if (!fs.existsSync(conventionsPath) || force) {
+  const sourceRows = conventionSources.length > 0
+    ? conventionSources.map(s => `| ${s.path} | ${s.type} | |`).join('\n')
+    : '| （未检测到规范来源文件，请人工补充） | — | |'
+  const conventionsDoc = [
+    '# 编码规范',
+    '',
+    '> 本文档由 kb-init 初始化时生成骨架，规范来源由脚本扫描，具体内容需 AI 总结或人工补充。',
+    '',
+    '## 规范来源',
+    '',
+    '| 来源 | 类型 | 说明 |',
+    '|------|------|------|',
+    sourceRows,
+    '',
+    '## 编码规范清单',
+    '',
+    '<!-- CUSTOM:START -->',
+    '### 命名规范',
+    '<TODO>',
+    '',
+    '### 代码风格',
+    '<TODO>',
+    '',
+    '### 注释规范',
+    '<TODO>',
+    '',
+    '### 目录结构规范',
+    '<TODO>',
+    '',
+    '### 其他约定',
+    '<TODO>',
+    '<!-- CUSTOM:END -->',
+    ''
+  ].join('\n')
+  try { fs.writeFileSync(conventionsPath, conventionsDoc, 'utf-8'); created++; console.log(`  ✅ common/conventions.md`) }
+  catch (e) { errors.push(`写入失败: ${conventionsPath}`) }
+}
+
 // 7. 复制模板（common + 本项目类型的特有模板，Skill 捆绑 → 项目）
 const selectedTemplates = selectTemplates(projectType)
-const commonTemplates = ['overview', 'architecture', 'config', 'pitfalls', 'log']
+const commonTemplates = ['overview', 'architecture', 'config', 'conventions', 'pitfalls', 'log']
 // 先复制 common 通用模板
 if (fs.existsSync(TMPL_COMMON)) {
   for (const f of fs.readdirSync(TMPL_COMMON).filter(f => f.endsWith('.template.md'))) {
@@ -320,6 +435,7 @@ console.log('\n' + JSON.stringify({
   sourceRoot,
   domainAxis,
   domains,
+  conventionSources,
   templates: selectedTemplates,
   kbRoot: '.docs/llm-knowledge'
 }, null, 2))

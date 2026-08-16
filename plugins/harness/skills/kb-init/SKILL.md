@@ -1,6 +1,6 @@
 ---
 name: "kb-init"
-description: "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录"
+description: "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录"
 location: "user"
 ---
 
@@ -11,10 +11,10 @@ location: "user"
 > 本 Skill 自包含：模板从 `./templates/`（分套：common + 各项目类型）读取，脚本执行 `./kb-init.cjs`。
 > 不依赖项目中的任何文件，可跨项目复用。
 
-**v2 核心变化**：不再硬编码客服业务域。改为「项目画像 + 动态域扫描」——根据目标项目的实际类型（前端/插件/后端/库），自动推断域列表和文档模板。
+**v2 核心变化**：不再硬编码客服业务域。改为「项目画像 + 动态域扫描」——根据目标项目的实际类型（前端/插件/后端/库），自动推断域列表和文档模板。**新增编码规范总结**：扫描项目规范来源，生成 `common/conventions.md`。
 
 与 `gen-project-docs` 的关系：
-- **kb-init**: 创建**目录骨架 + 项目画像 + meta.yaml 索引 + 模板**（本 Skill）
+- **kb-init**: 创建**目录骨架 + 项目画像 + meta.yaml 索引 + 模板 + 编码规范**（本 Skill）
 - **gen-project-docs**: 填充**具体文档内容**（扫描源码生成）
 
 ---
@@ -23,9 +23,9 @@ location: "user"
 
 | 资源 | 路径 | 说明 |
 |------|------|------|
-| 通用文档模板 | `./templates/common/*.template.md` | 5 类通用切面（overview/architecture/config/pitfalls/log） |
+| 通用文档模板 | `./templates/common/*.template.md` | 6 类通用切面（overview/architecture/config/conventions/pitfalls/log） |
 | 类型特有模板 | `./templates/{frontend,plugin,backend,library}/*.template.md` | 各项目类型的特有切面 |
-| 执行脚本 | `./kb-init.cjs` | 推断画像 + 扫描域 + 创建目录 + 复制模板 |
+| 执行脚本 | `./kb-init.cjs` | 推断画像 + 扫描域 + 扫描规范来源 + 创建目录 + 复制模板 |
 
 ---
 
@@ -73,17 +73,29 @@ node "<skill_dir>/kb-init.cjs" --force   # 重建（覆盖）
 - 技术栈表
 - **域地图**（关键词 → 域文档入口）
 
-### Step 4: 生成 meta.yaml（AI 认知操作）
+### Step 4: 总结编码规范（AI 认知操作）
+
+脚本已扫描出编码规范来源（dry-run 输出的 `conventionSources`），并生成 `common/conventions.md` 骨架。
+
+AI 需**读取这些来源文件，总结编码规范**，填充 `common/conventions.md` 的「编码规范清单」：
+
+- 读取 `conventionSources` 里列出的每个来源（`.editorconfig` / `.eslintrc*` / `.prettierrc*` / `CODEBUDDY.md` / `rules/*.md`）
+- 提炼成结构化规范：命名规范、代码风格、注释规范、目录结构规范、其他约定
+- 保留 `<!-- CUSTOM:START -->` 手工批注区，供后续人工补充
+- 若来源是规则文件（如 `rules/*.mdc`），直接提炼其中的编码规范条目
+
+### Step 5: 生成 meta.yaml（AI 认知操作）
 
 基于扫描到的域，填充 `meta.yaml` 的 `domains[]`（每个域含 `id/path/entry_files/description`）和 `git.hash`。
 
-### Step 5: 输出报告
+### Step 6: 输出报告
 
 ```
 知识库初始化完成 ✅
 - 目录: .docs/llm-knowledge/
 - 项目画像: project_type=<type>
 - 业务域: N 个 | 模板: common + <type> 特有
+- 编码规范: 已从 M 个来源总结 (common/conventions.md)
 - meta.yaml: git.hash = <current HEAD>
 - 下一步: gen-project-docs 填充内容
 ```
