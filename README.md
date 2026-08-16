@@ -116,10 +116,22 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 - 已安装 **Claude Code** 或 **CodeBuddy Code**（两者任一即可）
 - 可访问 GitHub 仓库：`https://github.com/JayCJP/harnessflow.git`
 - **无需 `npm install`**：插件的 JSON Schema 校验依赖（ajv）已单文件内置
-- 按需配置外部 MCP 服务（可选，仅使用对应能力时才需要）：
-  - TAPD MCP → Bug 分析 / 缺陷修复
-  - Figma MCP → 设计稿协作
-  - DevOps MCP → 云端部署
+
+### 前置 MCP 服务配置
+
+插件市场本身**不携带**外部 MCP 服务，以下 MCP 需你在工具（Claude Code / CodeBuddy Code）中自行配置。**按需启用**——只装你实际会用到的能力对应的 MCP：
+
+| MCP 服务 | 使用场景 | 用到它的 Agent / Skill | 必需程度 |
+|---------|---------|----------------------|---------|
+| **TAPD MCP** | Bug 分析、缺陷修复、需求详情拉取 | 需求分析师（fixbugs）、`tapd-bug-analyzer` | fixbugs 模式必需 |
+| **Figma MCP** | 设计稿读取、frame 清单、组件映射 | 需求分析师、前端开发工程师、`figma` / `figma-to-component-map` | 有 Figma 设计稿时必需 |
+| **Playwright MCP** | 原型抓取（墨刀/Axure）、UI 自动化测试、接口验证 | 需求分析师（原型）、测试工程师（验证） | 有原型链接 / 需 UI 测试时必需 |
+| **GitLab MCP** | 创建 Merge Request | 发布助手（②创建 MR） | 需走 MR 流程时必需 |
+| **DevOps MCP** | 云端构建、部署 | 发布助手（⑤构建发布） | 需云端部署时必需 |
+| **Sequential Thinking MCP** | 任务拆解时的结构化推理 | 任务规划师 | 建议启用 |
+
+> **提示**：以上 MCP 服务名（如 `TAPD MCP Server`、`Figma`、`Playwright`、`GitLab`、`devops`）需与工具配置中的 MCP 名称一致，Agent 通过 `mcp_call_tool(serverName, ...)` 调用。
+> 未配置对应 MCP 时，涉及该能力的环节会失败并如实告知，不会静默跳过。
 
 ---
 
