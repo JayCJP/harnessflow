@@ -39,9 +39,9 @@
 | 2 | 代码开发 | 前端开发工程师 | 代码变更（dev-pass 限域保护） |
 | 3 | 代码审查 | 代码审查师 | code-review.json |
 | 4 | 功能测试 | 测试工程师 | test-report.md、acceptance-verification.json |
-| 5 | Git 提交 | 发布助手 | commit + push + MR |
-| 6 | 知识库更新 | 发布助手 | 增量知识库文档 |
-| 7 | 云端部署 | 发布助手 | 部署 URL + 构建号 |
+| 5 | Git 提交 + MR | 发布助手 | 提交开发分支 + 创建 MR（→ dev）+ 确认已合并 |
+| 6 | 知识库更新 | 发布助手 | 增量知识库文档（kb-update） |
+| 7 | 云端部署 | 发布助手 | dev 分支构建（env=dev, build_other=dev）+ 部署 URL |
 
 #### 8 Phase 横向流转
 
@@ -51,9 +51,9 @@ flowchart LR
     P1 -->|"门控通过<br/>签发 dev-pass"| P2["Phase 2<br/>代码开发"]
     P2 -->|"增量 lint + 编译<br/>撤销 dev-pass"| P3["Phase 3<br/>代码审查"]
     P3 -->|"无 BLOCKER"| P4["Phase 4<br/>功能测试"]
-    P4 -->|"AC 全通过"| P5["Phase 5<br/>Git 提交"]
-    P5 -->|"提交完成"| P6["Phase 6<br/>知识库更新"]
-    P6 -->|"kb-update"| P7["Phase 7<br/>云端部署"]
+    P4 -->|"AC 全通过"| P5["Phase 5<br/>提交 + MR → dev"]
+    P5 -->|"确认 MR 已合并"| P6["Phase 6<br/>知识库更新"]
+    P6 -->|"kb-update"| P7["Phase 7<br/>dev 分支构建发布"]
 
     P3 -.->|"有 BLOCKER → fix-loop 回退"| P2
     P4 -.->|"验收失败 → fix-loop 回退"| P2
