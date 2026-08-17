@@ -23,15 +23,16 @@ location: "user"
 
 ## 前置条件
 
-项目需有 `meta.yaml`（kb-init 或手动创建），每个 domain 配置了 `entry_files/stores/apis/components`。
+项目需有 `meta.yaml`（kb-init 或手动创建），每个 domain 配置了文件字段（字段名按项目类型，如 `entry_files` / `files`，不再是固定的 `stores/apis/components`）。
 
 ```yaml
 domains:
   - id: "settings"
     path: "business/settings/"
-    entry_files: ["src/views/pc/Settings.vue"]
-    stores: ["sysConfig.store.js"]
-    apis: ["pc.request.js"]
+    entry_files: ["src/views/pc/Settings.vue"]   # 前端项目示例
+  - id: "scripts-core"
+    path: "business/scripts-core/"
+    entry_files: ["plugins/harness/scripts/lib/*.js"]   # 插件项目示例
 ```
 
 ---
@@ -66,7 +67,7 @@ node "<skill_dir>/kb-update.cjs"
 }
 ```
 
-匹配算法（脚本内）：对每个变更文件，遍历 meta.yaml 所有域，检查是否命中该域的 `entry_files | stores | apis | components` 前缀。
+匹配算法（脚本内）：对每个变更文件，遍历 meta.yaml 所有域，检查是否命中该域的文件字段（`entry_files` / `files` 等，支持通配符 `*`）前缀。
 
 ### Step 2: AI 增量更新文档
 

@@ -5,6 +5,23 @@
   "type": "object",
   "required": ["criteria"],
   "properties": {
+    "featurePoints": {
+      "type": "array",
+      "minItems": 1,
+      "description": "需求文档/原型中枚举出的功能点 → AC 覆盖映射。run 模式必填，用于门控校验 PRD 功能点是否全部落到 AC 上（防止功能整条漏配）",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "coverage"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^FP-\\d+$" },
+          "source": { "type": "string", "minLength": 1, "description": "该功能点在需求文档/原型中的定位（章节标题、页面名或原文摘录）" },
+          "coverage": { "type": "string", "enum": ["covered", "deferred"] },
+          "acIds": { "type": "array", "items": { "type": "string", "pattern": "^AC-\\d+$" }, "description": "coverage=covered 时必填且非空" },
+          "deferredReason": { "type": "string", "minLength": 1, "description": "coverage=deferred 时必填，说明本次不做的原因" }
+        },
+        "additionalProperties": false
+      }
+    },
     "criteria": {
       "type": "array",
       "minItems": 1,

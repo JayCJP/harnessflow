@@ -30,9 +30,18 @@ process.stdin.on('end', () => {
     return
   }
 
-  // 只追踪 harness 相关命令
+  // 判定事件类型：harness 命令 / Skill 调用 / MCP 调用
+  const toolName = event.tool_name || ''
   const cmd = event.tool_input?.command || ''
-  if (!cmd.includes('advance-phase') && !cmd.includes('harness-workflow') && !cmd.includes('archive-story')) {
+
+  // 1. harness 命令（advance-phase / harness-workflow / archive-story）
+  const isHarnessCmd = cmd.includes('advance-phase') || cmd.includes('harness-workflow') || cmd.includes('archive-story')
+  // 2. Skill 调用（CodeBuddy 中 tool_name 为 Skill，input 里带 skill 名）
+  const isSkill = toolName === 'Skill' || toolName === 'use_skill'
+  // 3. MCP 调用（tool_name 形如 mcp__<server>__<tool>）
+  const isMcp = /^mcp__/.test(toolName)
+
+  if (!isHarnessCmd && !isSkill && !isMcp) {
     console.log(JSON.stringify({ continue: true }))
     return
   }
@@ -54,13 +63,43 @@ process.stdin.on('end', () => {
       const state = JSON.parse(fs.readFileSync(e2ePath, 'utf-8'))
       if (state.status === 'running') {
         const tracePath = path.join(plansDir, storyId, 'trace.jsonl')
-        const entry = JSON.stringify({
-          timestamp: new Date().toISOString(),
-          type: 'tool_executed',
-          tool: event.tool_name,
-          command: cmd.substring(0, 200),
-          storyId
-        })
+        // 根据事件类型构造不同的事件记录
+        let entry
+        if (isSkill) {
+          // Skill 调用：提取 skill 名
+          const skillName = event.tool_input?.skill || event.tool_input?.command || ''
+          entry = JSON.stringify({
+            ts: new Date().toISOString(),
+            type: 'tool_call',
+            tool: toolName,
+            skill: skillName.substring(0, 100),
+            phase: state.phase != null ? String(state.phase) : null,
+            result: 'success',
+            storyId
+          })
+        } else if (isMcp) {
+          // MCP 调用：tool_name = mcp__<server>__<tool>，拆出 server 与 tool
+          const parts = toolName.split('__')
+          entry = JSON.stringify({
+            ts: new Date().toISOString(),
+            type: 'tool_call',
+            tool: toolName,
+            mcp: parts[1] || null,
+            mcpTool: parts.slice(2).join('__') || null,
+            phase: state.phase != null ? String(state.phase) : null,
+            result: 'success',
+            storyId
+          })
+        } else {
+          // harness 命令（保留原有 tool_executed 语义，兼容既有消费方）
+          entry = JSON.stringify({
+            timestamp: new Date().toISOString(),
+            type: 'tool_executed',
+            tool: toolName,
+            command: cmd.substring(0, 200),
+            storyId
+          })
+        }
         fs.appendFileSync(tracePath, entry + '\n')
         break
       }

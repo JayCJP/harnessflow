@@ -14,10 +14,11 @@ const path = require('path')
 const { execSync } = require('child_process')
 
 const PROJECT_ROOT = process.cwd()
-const KB_ROOT = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge', 'frontend')
+// v2：去掉 frontend 硬编码层，知识库根为 .docs/llm-knowledge/
+const KB_ROOT = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
 const META_PATH = path.join(KB_ROOT, 'meta.yaml')
 
-/** 简化 YAML 解析 — 只提取 domains[] 和 git.hash */
+/** 简化 YAML 解析 — 只提取 domains[] 和 git.hash（v2：文件字段通用化） */
 function parseMetaYaml (content) {
   const result = { git: {}, domains: [] }
   // 只匹配 git: 块下的 hash（避免误匹配 doc_stats.git_hash_at_generation）
@@ -34,39 +35,52 @@ function parseMetaYaml (content) {
   const idRe = /^  - id:\s*"([^"]+)"/gm
   let m
   while ((m = idRe.exec(domainsBlock[1])) !== null) {
-    result.domains.push({ id: m[1], path: '', entry_files: [], stores: [], apis: [], components: [] })
+    result.domains.push({ id: m[1], path: '', files: [] })
   }
 
-  // 补齐每个 domain 的 path 和其他字段
+  // 补齐每个 domain 的 path 和文件字段（v2：不再假设前端字段名）
+  // 文件字段名可能因项目类型而异：entry_files / stores / apis / components / files / ...
   for (const domain of result.domains) {
-    // 按 id 搜索对应的 path
     const pathRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"[\s\S]*?path:\s*"([^"]+)"`)
     const pathMatch = domainsBlock[1].match(pathRe)
     if (pathMatch) domain.path = pathMatch[1]
 
-    // 提取 entry_files
-    const entryRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"[\s\S]*?entry_files:\s*\[(.*?)\]`)
-    const entryMatch = domainsBlock[1].match(entryRe)
-    if (entryMatch) domain.entry_files = entryMatch[1].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean)
+    // 提取该 domain 块的所有「文件类」字段值，统一归入 files[]
+    const domainBlockRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"([\s\S]*?)(?=\n  - id:\s*"|\n\S|$)`)
+    const blockMatch = domainsBlock[1].match(domainBlockRe)
+    if (!blockMatch) continue
+    const block = blockMatch[1]
 
-    // 提取 stores
-    const storeRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"[\s\S]*?stores:\s*\[(.*?)\]`)
-    const storeMatch = domainsBlock[1].match(storeRe)
-    if (storeMatch) domain.stores = storeMatch[1].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean)
-
-    // 提取 apis
-    const apiRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"[\s\S]*?apis:\s*\[(.*?)\]`)
-    const apiMatch = domainsBlock[1].match(apiRe)
-    if (apiMatch) domain.apis = apiMatch[1].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean)
+    // 匹配任意 *_files / stores / apis / components / files 等字段
+    const fileFieldRe = /\b(\w*(?:files|stores|apis|components|entries))\s*:\s*(\[[\s\S]*?\]|\n\s*- "[\s\S]*?(?=\n\s{4}\w|\n  -|\n\s*$))/g
+    let fm
+    const collected = []
+    while ((fm = fileFieldRe.exec(block)) !== null) {
+      const raw = fm[2]
+      // 提取所有被引号包裹的字符串
+      const strs = raw.match(/"([^"]+)"/g)
+      if (strs) collected.push(...strs.map(s => s.replace(/"/g, '')))
+    }
+    // 兜底：匹配内联数组形式的 entry_files: ["a", "b"]
+    const inlineRe = /entry_files\s*:\s*\[([^\]]+)\]/g
+    let im
+    while ((im = inlineRe.exec(block)) !== null) {
+      collected.push(...im[1].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean))
+    }
+    domain.files = [...new Set(collected)]
   }
 
   return result
 }
 
-/** 判断变更文件是否属于指定域（前缀匹配 meta.yaml 中的 entry_files/stores/apis/components） */
+/** 判断变更文件是否属于指定域（前缀匹配 meta.yaml 中的文件字段，v2：字段通用化） */
 function matchFileToDomain (file, domain) {
-  const sources = [...domain.entry_files, ...domain.stores, ...domain.apis, ...domain.components]
-  return sources.some(s => file.startsWith(s) || file.includes(s))
+  const sources = domain.files || []
+  // 通配符支持：entry_files 里的 "plugins/harness/agents/*.md" 去掉 *.md 后做前缀匹配
+  return sources.some(s => {
+    const normalized = s.replace(/\*/g, '')  // 去掉通配符
+    return file.startsWith(normalized) || file.includes(normalized.replace(/\/$/, ''))
+  })
 }
 
 // ─── 主逻辑 ──────────────────────────────────────────────────

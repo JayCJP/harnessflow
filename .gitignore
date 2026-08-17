@@ -1,2 +1,5 @@
 plugins/harness/node_modules
 graphify-out/
+
+# 知识库模板副本（kb-init 运行时从 skill 模板复制，与 skill 源重复，不入库）
+.docs/llm-knowledge/templates/

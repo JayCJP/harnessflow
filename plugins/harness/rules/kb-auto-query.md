@@ -25,10 +25,10 @@ provider:
 ## 执行流程
 
 ```
-Step 1: read_file .docs/llm-knowledge/frontend/overview.md (定位域)
-Step 2: read_file .docs/llm-knowledge/frontend/meta.yaml   (获取文件配置)
-Step 3: load business/<domain>/overview.md                  (加载域文档)
-Step 4: 按需加载 api.md / store.md / architecture.md 等
+Step 1: read_file .docs/llm-knowledge/overview.md (定位域)
+Step 2: read_file .docs/llm-knowledge/meta.yaml   (获取文件配置)
+Step 3: load business/<domain>/overview.md        (加载域文档)
+Step 4: 按需加载域文档（文档类型由项目画像决定：前端 pages/api/store，插件 entry-files/schemas/commands 等）
 ```
 
 ## 只加载必要的

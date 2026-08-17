@@ -294,6 +294,31 @@ if (rollbackFlag) {
     revokeDevPass(storyId)
   }
 
+  // 修复预算重置：回退到 Phase 2 或更早 = 开发重来一遍，修复轮次不应继承上一轮的计数。
+  // fix-request.json 的 round 是 fix-loop 的唯一计数源（见下方 --fix-loop 分支），
+  // 手工 --rollback 后若不重置，剩余预算会被上一轮吃掉，甚至直接撞 fix_loop_exhausted。
+  let fixBudgetReset = null
+  if (targetPhase <= 2) {
+    const fixRequestPath = path.join(PLANS_DIR, storyId, 'fix-request.json')
+    if (fs.existsSync(fixRequestPath)) {
+      let prevRound = 0
+      try {
+        prevRound = JSON.parse(fs.readFileSync(fixRequestPath, 'utf-8')).round || 0
+      } catch (e) { /* 解析失败按 0 处理 */ }
+      fs.renameSync(fixRequestPath, path.join(archiveDir, `fix-request.json.rollback-${targetPhase}.archived`))
+      fixBudgetReset = { previousRound: prevRound }
+      trace.appendTrace(storyId, {
+        type: 'fix_budget_reset',
+        phase: String(targetPhase),
+        from: String(currentPhase),
+        to: String(targetPhase),
+        previousRound: String(prevRound),
+        reason: 'manual_rollback'
+      })
+      console.log(`  ✓ 修复预算已重置（上一轮 round=${prevRound}，fix-request.json 已归档）`)
+    }
+  }
+
   // 记录 trace
   trace.tracePhaseTransition(storyId, currentPhase, targetPhase)
   trace.appendTrace(storyId, {
@@ -315,6 +340,7 @@ if (rollbackFlag) {
     toPhaseName: getPhaseName(targetPhase),
     archivedPhases: `${targetPhase + 1}-${currentPhase}`,
     archiveDir: path.relative(PROJECT_ROOT, archiveDir),
+    fixBudgetReset,
     note: '已归档产出物到 archive/ 目录，dev-pass 已处理'
   }, null, 2))
   process.exit(0)

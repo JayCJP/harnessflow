@@ -2,18 +2,33 @@
 /**
  * 端到端工作流门控验证脚本
  *
- * 用途：在 Phase 推进前检查是否满足门控条件，防止跳过关键步骤。
- * 被主 Agent 在每次 Phase 推进前强制调用。
+ * ⚠️ 已废弃（DEPRECATED，2026-08-14）—— 本文件不在生效路径上。
  *
- * 使用方式：
- *   node .codebuddy/scripts/validate-phase-gate.js <storyId> <targetPhase>
+ * 真正生效的门控是 `services/policy.js` 的 `runGateCheck`，由
+ * `advance-phase.js` 在每次 Phase 推进时调用。本文件全仓无任何 .js 调用方，
+ * 仅可作为人工诊断工具手动执行。
+ *
+ * 两者的 phase 编号语义不同，切勿混用：
+ *   - policy.runGateCheck(storyId, phaseNum, state) → phaseNum 是**来源** phase（检查 phaseNum → phaseNum+1）
+ *   - 本文件 validateGate(storyId, targetPhase)     → targetPhase 是**目标** phase
+ *
+ * 已迁入 policy.js 的检查（此处保留仅为对照）：
+ *   - hasFigmaMapIfDesign      → PHASE_ARTIFACTS[1] 的 requiredWhen: 'hasFigmaDesign'
+ *   - contractReferencesValid  → checkPhase1Gate / validateContractReferences
+ *   - noLintErrors             → checkPhase2Gate（且修正了语义：原本 key 在 target=2，
+ *                                意为"代码还没写就 lint"；现改为 Phase 2→3 增量 lint）
+ *   - validateTaskFigmaReferences → checkPhase1Gate（invalidRefs→BLOCKER, unmatched→WARNING）
+ *
+ * 尚未迁入 policy.js 的检查（保留本文件的唯一价值，勿删）：
+ *   - checkPrototypeConfirmation（userConfirmedPrototype 原型确认）
+ *   - checkStateConsistency（state 与产出物一致性）
+ *   - checkBugAnalysisReport（Bug 类 Story 的分析报告）
+ *
+ * 使用方式（仅人工诊断）：
+ *   node validate-phase-gate.js <storyId> <targetPhase>
  *
  * 输出：JSON 格式的验证结果
  *   { pass: boolean, blockers: string[], warnings: string[] }
- *
- * 示例：
- *   node .codebuddy/scripts/validate-phase-gate.js 1138260062001029063 1
- *   → 检查 Phase 0 是否完成，open-questions.json 是否已全部 resolved
  */
 
 const fs = require('fs')
@@ -571,6 +586,12 @@ if (!storyId || isNaN(targetPhase)) {
   console.error('示例: node validate-phase-gate.js 1138260062001029063 1')
   process.exit(1)
 }
+
+console.error('⚠️  DEPRECATED: 本脚本不在生效路径上，结果仅供人工诊断参考。')
+console.error('   生效门控 = services/policy.js runGateCheck（由 advance-phase.js 调用）。')
+console.error('   注意 phase 语义差异: 本脚本参数是【目标】phase，policy.js 是【来源】phase。')
+console.error('   仅以下检查尚未迁入 policy.js: 原型确认 / state 一致性 / Bug 分析报告。')
+console.error('')
 
 const result = validateGate(storyId, targetPhase)
 console.log(JSON.stringify(result, null, 2))

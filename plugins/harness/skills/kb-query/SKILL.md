@@ -38,17 +38,17 @@ location: "user"
 
 ### L1: 全局总览匹配（始终执行）
 
-加载 `.docs/llm-knowledge/frontend/overview.md` 的「业务域地图」表。
+加载 `.docs/llm-knowledge/overview.md` 的「域地图」表。
 
 - 提取用户问题关键词
-- 与业务域地图的关键词列匹配 → 收敛到 1-2 个域
+- 与域地图的关键词列匹配 → 收敛到 1-2 个域
 - 无法匹配 → 返回概述，询问补充上下文
 
 ### L2: meta.yaml 精确筛选
 
-加载 `.docs/llm-knowledge/frontend/meta.yaml`。
+加载 `.docs/llm-knowledge/meta.yaml`。
 
-- 在匹配到的域配置中获取 `entry_files / stores / apis / components`
+- 在匹配到的域配置中获取文件字段（`entry_files / files / stores / apis / components`，按项目类型而异）
 - 根据查询模式确定需加载的文档类型
 
 ### L3: 按需加载

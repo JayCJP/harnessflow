@@ -117,6 +117,12 @@ function aggregateMetrics () {
   let preciseDevPass = 0
   let completedStories = 0
   let totalStories = 0
+  // 资源使用统计（S3：skill / 知识库 / MCP 消费情况）
+  let totalSkillCalls = 0
+  let totalKbCalls = 0
+  let totalMcpCalls = 0
+  const skillCounts = {}   // { skillName: count }
+  const mcpCounts = {}     // { mcpServer: count }
 
   for (const storyId of storyDirs) {
     const state = readStateFile(storyId)
@@ -194,6 +200,22 @@ function aggregateMetrics () {
           preciseDevPass++
         }
       }
+
+      // 资源调用统计（S3：tool_call 事件，来自 trace-command.js 的旁路采集）
+      if (evt.type === 'tool_call') {
+        if (evt.skill) {
+          totalSkillCalls++
+          skillCounts[evt.skill] = (skillCounts[evt.skill] || 0) + 1
+          // 知识库检索（kb-query / graphify 双源）
+          if (evt.skill === 'kb-query' || evt.skill === 'graphify') {
+            totalKbCalls++
+          }
+        }
+        if (evt.mcp) {
+          totalMcpCalls++
+          mcpCounts[evt.mcp] = (mcpCounts[evt.mcp] || 0) + 1
+        }
+      }
     }
 
     // 仅统计「有真实修复」的有效 fix-loop（与 fixLoopCount 的口径一致，扣除误报空转）
@@ -234,7 +256,15 @@ function aggregateMetrics () {
     fixLoopSuccessRate: fixLoopCount > 0 ? fixLoopSucceeded / fixLoopCount : 1,
     blockerCount: totalBlockers,
     devPassPrecision: totalDevPass > 0 ? preciseDevPass / totalDevPass : 1,
-    storyCompletionRate: totalStories > 0 ? completedStories / totalStories : 0
+    storyCompletionRate: totalStories > 0 ? completedStories / totalStories : 0,
+    // 资源使用（S3）
+    resourceUsage: {
+      skillCalls: totalSkillCalls,
+      kbCalls: totalKbCalls,
+      mcpCalls: totalMcpCalls,
+      skillCounts,
+      mcpCounts
+    }
   }
 }
 
@@ -338,6 +368,21 @@ function generateInsights (metrics) {
     })
   }
 
+  // 规则 7: 知识库检索空转（S3 资源利用）
+  const ru = metrics.resourceUsage || {}
+  if (metrics.storyCount >= 1 && ru.kbCalls === 0 && ru.skillCalls > 0) {
+    insights.push({
+      id: `INSIGHT-${String(insights.length + 1).padStart(3, '0')}`,
+      targetPhase: 0,
+      type: 'kb_not_consumed',
+      severity: 'warning',
+      title: '知识库检索（kb-query/graphify）调用为 0 次',
+      description: '有 skill 调用但从未做知识库检索，注入的历史教训可能未被查证',
+      recommendation: '需求分析/任务规划/代码审查阶段必须调用 kb-query ∥ graphify 双源检索',
+      evidence: `skill 调用 ${ru.skillCalls} 次，kb 检索 0 次`
+    })
+  }
+
   return insights
 }
 
@@ -412,6 +457,16 @@ console.log(`   门控一次通过率: ${Math.round(metrics.gateFirstTryRate * 1
 console.log(`   Fix-loop 触发率: ${Math.round(metrics.fixLoopTriggerRate * 100)}%`)
 console.log(`   Fix-loop 成功率: ${Math.round(metrics.fixLoopSuccessRate * 100)}%`)
 console.log(`   dev-pass 限域精度: ${Math.round(metrics.devPassPrecision * 100)}%`)
+const ru = metrics.resourceUsage || {}
+console.log(`\n🔧 资源使用:`)
+console.log(`   Skill 调用: ${ru.skillCalls || 0} 次 (kb-query/graphify: ${ru.kbCalls || 0} 次)`)
+console.log(`   MCP 调用: ${ru.mcpCalls || 0} 次`)
+if (ru.skillCounts && Object.keys(ru.skillCounts).length > 0) {
+  for (const [s, c] of Object.entries(ru.skillCounts)) console.log(`     - ${s}: ${c} 次`)
+}
+if (ru.mcpCounts && Object.keys(ru.mcpCounts).length > 0) {
+  for (const [m, c] of Object.entries(ru.mcpCounts)) console.log(`     - ${m}: ${c} 次`)
+}
 
 console.log(`\n💡 生成 ${insights.length} 条洞察:`)
 for (const i of insights) {

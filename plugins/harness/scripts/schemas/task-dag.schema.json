@@ -31,6 +31,7 @@
               { "type": "array", "items": { "type": "string" } }
             ]
           },
+          "figmaNodeId": { "type": ["string", "null"] },
           "parallelizable": { "type": "boolean" },
           "complexity": { "type": "string", "enum": ["low", "medium", "high"] },
           "estimate": { "type": "integer", "minimum": 1 },
@@ -53,6 +54,22 @@
             "items": { "type": "string", "pattern": "^task-\\d+$" }
           },
           "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "mustCheck": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fingerprint", "failureType"],
+        "properties": {
+          "fingerprint": { "type": "string", "minLength": 1 },
+          "failureType": { "type": "string", "minLength": 1 },
+          "lesson": { "type": "string" },
+          "check": { "type": "string" },
+          "occurrences": { "type": "integer", "minimum": 1 },
+          "consumed": { "type": "boolean" }
         },
         "additionalProperties": false
       }

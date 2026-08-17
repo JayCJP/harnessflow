@@ -15,7 +15,9 @@
 
 const fs = require('fs')
 const path = require('path')
-const { getStoryDir, readJsonArtifact, readStateFile, getPhaseName, PHASE_SLUGS, PHASE_ARTIFACTS } = require('../lib/state')
+const { execSync } = require('child_process')
+const { getStoryDir, readJsonArtifact, readStateFile, getPhaseName, PHASE_SLUGS, PHASE_ARTIFACTS, loadRepos } = require('../lib/state')
+const experience = require('./experience')
 
 /**
  * 生成 Phase 完成后的上下文摘要
@@ -45,6 +47,10 @@ function generatePhaseSummary (storyId, phase) {
   for (const a of artifacts) {
     summaryLines.push(`- **${a.name}**: \`${a.path}\``)
     if (a.summary) summaryLines.push(`  - ${a.summary}`)
+  }
+  // 无落盘文件的 Phase（2/5/6/7）改从运行时真相源取证，否则本段落是空的
+  if (artifacts.length === 0) {
+    summaryLines.push(...getRuntimeEvidence(storyId, phase))
   }
 
   // 关键决策（从 e2e-state 中提取）
@@ -92,7 +98,51 @@ function generatePhaseSummary (storyId, phase) {
   const content = summaryLines.join('\n') + '\n'
   const summaryPath = path.join(storyDir, `phase-${phase}-summary.md`)
   fs.writeFileSync(summaryPath, content, 'utf-8')
+
+  // Phase 1（任务规划）完成时，把历史教训转成 mustCheck 清单写进 task-dag.json
+  // 这是「声明-消费一致性」在教训维度的落地：教训被结构化注入，供检查层确定性验证
+  if (phase === 1) {
+    injectMustCheck(storyId)
+  }
+
   return summaryPath
+}
+
+/**
+ * 将历史教训转成 mustCheck 清单，注入 task-dag.json
+ *
+ * 目的：让「注入的教训是否被规避」可被确定性检查（而非靠 LLM 自我诊断）。
+ * 从 experience 读取已确认的失败模式（覆盖开发 Phase 2 + 审查 Phase 3 的教训），
+ * 转成 { fingerprint, failureType, lesson, check } 结构，写进 task-dag.json 的 mustCheck。
+ * 检查层（S3 阶段）遍历 mustCheck，判断每条 check 是否在代码产物中体现。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {boolean} 是否成功注入
+ */
+function injectMustCheck (storyId) {
+  const storyDir = getStoryDir(storyId)
+  const taskDagPath = path.join(storyDir, 'task-dag.json')
+  if (!fs.existsSync(taskDagPath)) return false
+
+  try {
+    const lessons = experience.getLessonsAsChecklist(2)
+    if (lessons.length === 0) return false
+
+    const dag = JSON.parse(fs.readFileSync(taskDagPath, 'utf-8'))
+    // 合并：保留已有 mustCheck（避免覆盖手工/已有项），按 fingerprint 去重追加
+    const existing = Array.isArray(dag.mustCheck) ? dag.mustCheck : []
+    const existingFps = new Set(existing.map(m => m.fingerprint))
+    const toAdd = lessons.filter(l => !existingFps.has(l.fingerprint))
+
+    if (toAdd.length === 0) return false
+
+    dag.mustCheck = [...existing, ...toAdd]
+    fs.writeFileSync(taskDagPath, JSON.stringify(dag, null, 2), 'utf-8')
+    return true
+  } catch (e) {
+    // 注入失败不阻断主流程，仅静默返回 false
+    return false
+  }
 }
 
 /**
@@ -143,6 +193,226 @@ function getPhaseArtifacts (storyId, phase) {
   }
 
   return artifacts
+}
+
+// ─── 运行时取证（Phase 2/5/6/7 无落盘文件，从真相源提取产出物）────
+
+/** 改动文件列表封顶条数 */
+const CAP_LIMIT = 15
+
+/** 取列表前 N 条，超出时追加「…还有 M 项」提示行 */
+function capList (list, limit = CAP_LIMIT) {
+  if (!Array.isArray(list)) return []
+  if (list.length <= limit) return list.slice()
+  return [...list.slice(0, limit), `…还有 ${list.length - limit} 项`]
+}
+
+/**
+ * 逐行读取并解析 trace.jsonl，容错跳过坏行
+ * @param {string} storyId - Story ID
+ * @returns {Array<Object>} 解析成功的 trace 条目数组
+ */
+function readTrace (storyId) {
+  const storyDir = getStoryDir(storyId)
+  const traceFile = path.join(storyDir, 'trace.jsonl')
+  if (!fs.existsSync(traceFile)) return []
+  const entries = []
+  let raw = ''
+  try {
+    raw = fs.readFileSync(traceFile, 'utf-8')
+  } catch (e) {
+    return []
+  }
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      entries.push(JSON.parse(trimmed))
+    } catch (e) { /* 跳过坏行 */ }
+  }
+  return entries
+}
+
+/**
+ * 安全执行 git 命令：带 timeout / maxBuffer / stderr 屏蔽，失败返回空串
+ * @param {string} repoRoot - 仓库根路径
+ * @param {string} args - git 子命令及参数
+ * @returns {string} stdout 文本，失败时返回空串
+ */
+function safeGit (repoRoot, args) {
+  try {
+    return execSync(`git ${args}`, {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      timeout: 8000,
+      maxBuffer: 1024 * 1024, // 1MB
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim()
+  } catch (e) {
+    return ''
+  }
+}
+
+/**
+ * Phase 2 取证：列出多仓库的未提交改动文件
+ * @param {string} storyId - Story ID
+ * @returns {string[]} summary 段落行
+ */
+function evidenceCodeChanges (storyId) {
+  const repos = loadRepos(storyId)
+  const lines = []
+  for (const [repoName, root] of Object.entries(repos.repos)) {
+    // 逐仓库 try/catch：单仓库失败不连累其它仓库
+    try {
+      if (!root || !fs.existsSync(root)) {
+        lines.push(`- \`${repoName}\`: 仓库目录不存在，跳过`)
+        continue
+      }
+      const porcelain = safeGit(root, '-c core.quotepath=false status --porcelain')
+      const shortstat = safeGit(root, 'diff --shortstat')
+      if (!porcelain) {
+        lines.push(`- \`${repoName}\`: 无未提交改动`)
+        continue
+      }
+      // porcelain 前两字符是状态码（XY），其后可能是空格或路径；统一截掉前 3 字符再 trim
+      const changed = porcelain.split('\n').map(l => l.slice(3).trim()).filter(Boolean)
+      lines.push(`- \`${repoName}\`: ${changed.length} 个文件变更${shortstat ? ` (${shortstat})` : ''}`)
+      for (const f of capList(changed)) {
+        lines.push(`  - ${f}`)
+      }
+    } catch (e) {
+      lines.push(`- \`${repoName}\`: 取证失败 (${e.message})`)
+    }
+  }
+  return lines
+}
+
+/**
+ * Phase 5 取证：从 trace 读 commit 事件，空则回退 git log -1
+ * @param {string} storyId - Story ID
+ * @returns {string[]} summary 段落行
+ */
+function evidenceGitCommits (storyId) {
+  const lines = []
+  const entries = readTrace(storyId)
+  const gitEntries = entries.filter(e => e.type === 'git' && e.action === 'commit' && e.result === 'success')
+  const commitDetails = gitEntries.map(e => e.details || {}).filter(d => d.hash)
+
+  if (commitDetails.length > 0) {
+    for (const d of capList(commitDetails)) {
+      const hash = d.hash ? d.hash.slice(0, 8) : ''
+      lines.push(`- commit \`${hash}\`${d.message ? ` — ${d.message}` : ''}${d.url ? ` (${d.url})` : ''}`)
+    }
+    return lines
+  }
+
+  // 回退：trace 无 commit 记录，用 git log 兜底并标注
+  const repos = loadRepos(storyId)
+  for (const [repoName, root] of Object.entries(repos.repos)) {
+    try {
+      if (!root || !fs.existsSync(root)) continue
+      const log = safeGit(root, 'log -1 --oneline')
+      if (log) {
+        lines.push(`- \`${repoName}\`: ${log}（git log 回退，trace 无 commit 记录）`)
+      }
+    } catch (e) { /* 单仓库失败跳过 */ }
+  }
+  if (lines.length === 0) {
+    lines.push('- 未找到 commit 记录（trace 与 git log 均无）')
+  }
+  return lines
+}
+
+/**
+ * 简化解析 meta.yaml 的 git.hash 字段（仅匹配 git: 块下的 hash）
+ * @param {string} content - meta.yaml 文本
+ * @returns {string} hash 值，未找到返回空串
+ */
+function parseMetaHash (content) {
+  const gitBlock = content.match(/git:\s*\n([\s\S]*?)(?=\n\S|$)/)
+  if (!gitBlock) return ''
+  const hashMatch = gitBlock[1].match(/hash:\s*"([^"]+)"/)
+  return hashMatch ? hashMatch[1] : ''
+}
+
+/**
+ * Phase 6 取证：陈述式比对 meta.yaml 记录 hash vs 当前 HEAD
+ * 只陈述事实，不把 hash 不一致断言为失败（Phase 6 时序陷阱）。
+ * @param {string} storyId - Story ID
+ * @returns {string[]} summary 段落行
+ */
+function evidenceKbRefresh (storyId) {
+  const lines = []
+  const repos = loadRepos(storyId)
+  let foundAny = false
+  for (const [repoName, root] of Object.entries(repos.repos)) {
+    try {
+      if (!root || !fs.existsSync(root)) continue
+      // 知识库根已从 .docs/llm-knowledge/frontend 改为 .docs/llm-knowledge（去掉 frontend 硬编码层）
+      // 向后兼容：先找新路径，找不到回退旧 frontend 路径
+      const newMetaPath = path.join(root, '.docs', 'llm-knowledge', 'meta.yaml')
+      const legacyMetaPath = path.join(root, '.docs', 'llm-knowledge', 'frontend', 'meta.yaml')
+      const metaPath = fs.existsSync(newMetaPath) ? newMetaPath : (fs.existsSync(legacyMetaPath) ? legacyMetaPath : null)
+      if (!metaPath) continue
+      foundAny = true
+      let recordedHash = ''
+      try {
+        recordedHash = parseMetaHash(fs.readFileSync(metaPath, 'utf-8'))
+      } catch (e) { /* 解析失败按空处理 */ }
+      const head = safeGit(root, 'rev-parse HEAD')
+      const stat = fs.statSync(metaPath)
+      lines.push(`- \`${repoName}\`: 记录 hash \`${recordedHash ? recordedHash.slice(0, 8) : 'N/A'}\``)
+      lines.push(`  - 当前 HEAD \`${head ? head.slice(0, 8) : 'N/A'}\``)
+      lines.push(`  - 最后更新 ${stat.mtime.toISOString()}`)
+      if (recordedHash && head && recordedHash !== head) {
+        lines.push(`  - ⚠️ 记录 hash 与当前 HEAD 不一致（陈述事实，不判失败）`)
+      }
+    } catch (e) { /* 单仓库失败跳过 */ }
+  }
+  if (!foundAny) {
+    lines.push('- 未找到知识库 meta.yaml（`.docs/llm-knowledge/meta.yaml`）')
+  }
+  return lines
+}
+
+/**
+ * Phase 7 取证：从 trace 读部署事件，无则显式声明缺失
+ * @param {string} storyId - Story ID
+ * @returns {string[]} summary 段落行
+ */
+function evidenceDeploy (storyId) {
+  const lines = []
+  const entries = readTrace(storyId)
+  // 部署证据可能记录为 git/deploy 事件或 agent_result，宽松匹配 details 含 env/buildNumber
+  const deployEntries = entries.filter(e => {
+    const d = e.details || {}
+    return d.env || d.buildNumber || d.deployUrl || e.type === 'deploy'
+  })
+  if (deployEntries.length === 0) {
+    lines.push('- ⚠️ 未记录部署证据（trace 中无 env/buildNumber/deployUrl）')
+    return lines
+  }
+  for (const e of capList(deployEntries)) {
+    const d = e.details || {}
+    lines.push(`- 环境 \`${d.env || 'N/A'}\`${d.buildNumber ? ` 构建号 \`${d.buildNumber}\`` : ''}${d.deployUrl ? ` URL ${d.deployUrl}` : ''}`)
+  }
+  return lines
+}
+
+/**
+ * 按 Phase 分发运行时取证，返回 summary 段落行
+ * @param {string} storyId - Story ID
+ * @param {number} phase - Phase 编号（2/5/6/7）
+ * @returns {string[]} summary 段落行
+ */
+function getRuntimeEvidence (storyId, phase) {
+  switch (phase) {
+    case 2: return evidenceCodeChanges(storyId)
+    case 5: return evidenceGitCommits(storyId)
+    case 6: return evidenceKbRefresh(storyId)
+    case 7: return evidenceDeploy(storyId)
+    default: return []
+  }
 }
 
 /**
@@ -233,7 +503,10 @@ function loadLatestSummary (storyId, currentPhase = Infinity, maxLines = 200) {
 
 module.exports = {
   generatePhaseSummary,
+  injectMustCheck,
   getPhaseArtifacts,
   getContractFiles,
-  loadLatestSummary
+  loadLatestSummary,
+  getRuntimeEvidence,
+  readTrace
 }

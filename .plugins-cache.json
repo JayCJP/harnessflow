@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1785719296201,
+  "createdAt": 1786930082480,
   "plugins": [
     {
       "name": "harness",
@@ -28,22 +28,60 @@
       "marketplaceName": "harness-marketplace",
       "installedPath": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness",
       "_capabilitiesLoaded": true,
-      "commands": [
-        {
-          "name": "commands",
-          "path": "commands"
-        }
-      ],
+      "sourcePath": "./plugins/harness",
+      "configPath": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness\\.claude-plugin\\plugin.json",
       "agents": [
         {
-          "name": "agents",
-          "path": "agents"
+          "name": "code-reviewer",
+          "description": "Frontend code quality reviewer covering Vue/React/MiniProgram. Combines project coding standards, ESLint rules, and knowledge base best practices for static incremental code review. Outputs graded issue list (BLOCKER/WARNING/SUGGESTION). Review only, no code changes.",
+          "path": "agents\\代码审查师.md"
+        },
+        {
+          "name": "task-planner",
+          "description": "Decompose technical plans into parallelizable task DAGs. Orchestrate execution order, identify file dependencies and conflict risks. Support Fork-Join parallel mode, dispatch independent tasks to multiple frontend developers.",
+          "path": "agents\\任务规划师.md"
+        },
+        {
+          "name": "frontend-developer",
+          "description": "Senior frontend engineer skilled in Web/H5/MiniProgram multi-platform development across Vue/React/MiniProgram frameworks. Receives dev tasks from task planner, writes code following project standards, collaborates with test engineer for verification.",
+          "path": "agents\\前端开发工程师.md"
+        },
+        {
+          "name": "release-assistant",
+          "description": "Handles Git commits, knowledge base updates, and cloud deployment. After receiving test engineer approval, commits code, updates knowledge base, triggers cloud build and release via devops MCP, creates Merge Requests. No local npm build.",
+          "path": "agents\\发布助手.md"
+        },
+        {
+          "name": "test-engineer",
+          "description": "Senior frontend QA architect. Designs test cases, validates APIs, reviews code, and verifies fixes in Agent Team. Ensures new features and fixes work correctly without regressions. Supports Playwright MCP automated verification.",
+          "path": "agents\\测试工程师.md"
+        },
+        {
+          "name": "requirement-analyst",
+          "description": "Product requirements analyst and technical solution architect. Unifies multiple input types (prototype URLs, TAPD links, bug analysis reports, requirements docs, text) into executable technical plans. Outputs affected domains, files, APIs, changes, and risk items. Uses kb-query + graphify for deep project context understanding. Delivers structured solution docs to the task planner.",
+          "path": "agents\\需求分析师.md"
         }
       ],
-      "skills": [
+      "commands": [
         {
-          "name": "skills",
-          "path": "skills"
+          "name": "archive",
+          "description": "归档 Story 全部文件 / 复档恢复 / 查看归档历史，归档后 root 目录清空",
+          "path": "commands/archive.md"
+        },
+        {
+          "name": "evolve",
+          "description": "Harness 自进化分析 — 体检(audit) → 度量(metrics) → 诊断(mining) → 治疗(proposal) → 验证(validation) 五步闭环",
+          "path": "commands/evolve.md"
+        },
+        {
+          "name": "fixbugs",
+          "description": "Harness Bug 修复流水线 — 以 fixbugs 模式启动标准 8 Phase 流程，Bug 分析由需求分析师在 Phase 0 内完成",
+          "path": "commands/fixbugs.md"
+        },
+        {
+          "name": "run",
+          "description": "激活 / 关闭 Harness Engineering 端到端工作流，控制 src/ 编辑权限与 8 Phase 流程编排",
+          "path": "commands/run.md"
         }
       ],
       "hooks": {
@@ -96,7 +134,7 @@
         ],
         "PostToolUse": [
           {
-            "matcher": "execute_command",
+            "matcher": "execute_command|Skill|use_skill|mcp__",
             "hooks": [
               {
                 "type": "command",
@@ -120,9 +158,64 @@
           }
         ]
       },
-      "sourcePath": "./plugins/harness",
-      "configPath": "C:\\Users\\Intel\\.codebuddy\\harness-marketplace\\plugins\\harness\\.claude-plugin\\plugin.json",
-      "status": "enabled"
+      "skills": [
+        {
+          "name": "api-generator",
+          "description": "当用户提供 Swagger JSON 文件路径或 URL 或者 api doc 文档，并希望按模块或接口路径生成接口定义、请求函数和 JSDoc 注释时使用。适用于任意项目，不依赖固定业务目录。",
+          "path": "skills/api-generator"
+        },
+        {
+          "name": "figma",
+          "description": "处理 Figma 设计稿的读取和分析。当用户提到 Figma 时立即且优先调用此 skill。",
+          "path": "skills/figma"
+        },
+        {
+          "name": "figma-to-component-map",
+          "description": "Phase 0: produce a complete Figma frame inventory (figma-frame-inventory.json) with precise full node links for every page, dialog, drawer, and component. Phase 1: use task-dag.json figmaNodeId references for zero-guess design spec extraction. Should be used when the user provides a Figma URL.",
+          "path": "skills/figma-to-component-map"
+        },
+        {
+          "name": "gen-project-docs",
+          "description": "自动生成项目结构化知识库文档。按项目画像（project_type）动态确定文档类型，扫描源码生成文档（通用 5 类 + 项目类型特有切面），支持增量更新、手工批注保留与新鲜度检测。触发词：生成知识库文档、更新项目文档、gen-docs、文档生成、增量更新知识库、新鲜度检测",
+          "path": "skills/gen-project-docs"
+        },
+        {
+          "name": "harness-conductor",
+          "description": "Harness 工作流编排器 — 调度 Agent、管理 Phase 推进、错误恢复决策。 当用户使用 /harness 命令时自动加载。包含 Agent prompt 编写规范、 常见失败模式对策、组件边界声明模板。",
+          "path": "skills/harness-conductor"
+        },
+        {
+          "name": "harness-evolve",
+          "description": "Harness 自进化 Skill — 体检(audit) → 度量(metrics) → 诊断(weakness mining) → 治疗(proposal) → 验证(validation)， 五步闭环，基于 Self-Harness 论文设计。分析 Harness 插件运行轨迹和产出物，自动发现失败模式，提出改进建议，验证后采纳。 触发词: 自进化、harness evolve、分析harness产出、优化harness规则",
+          "path": "skills/harness-evolve"
+        },
+        {
+          "name": "kb-init",
+          "description": "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录",
+          "path": "skills/kb-init"
+        },
+        {
+          "name": "kb-query",
+          "description": "渐进式分层知识库检索。三层检索：L1 overview关键词匹配定位域 → L2 meta.yaml精确筛选 → L3 按需加载文档。支持4种模式：需求拆解/技术方案/接口搜索/知识问答。自动触发：代码修改、需求分析、接口查找、技术方案、改bug、新增功能等场景。查找代码时应与 graphify 双源交叉验证（query/explain/path）。",
+          "path": "skills/kb-query"
+        },
+        {
+          "name": "kb-update",
+          "description": "任务完成后自动增量更新知识库。接收 git commit hash，通过 git diff 定位变更文件，基于 meta.yaml 数据驱动受影映射到响业务域，调用 gen-project-docs 增量模式更新文档，保留手工批注。驱动词：更新知识库、kb-update、同步知识库",
+          "path": "skills/kb-update"
+        },
+        {
+          "name": "tapd-bug-analyzer",
+          "description": "TAPD 缺陷分析器 —— 从 TAPD 拉取需求关联的 bugs，按处理人过滤， 逐条记录问题复述、复现步骤、代码定位、根因与责任方分类，产出结构化 Bug 分析报告。 只采集事实，不产出修复方案（修复设计属于开发工程师）。 报告写入 Story 的 plans 目录，由需求分析师在 Harness Phase 0 内部调用产出。 触发：需求分析师在 fixbugs 模式下自行加载；用户提供 TAPD 链接 + 处理人。 不执行代码修改，只产出分析文档。",
+          "path": "skills/tapd-bug-analyzer"
+        }
+      ],
+      "rules": [
+        {
+          "name": "kb-auto-query",
+          "path": "rules\\kb-auto-query.md"
+        }
+      ]
     }
   ]
 }

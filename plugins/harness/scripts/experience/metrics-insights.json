@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "totalProjects": 1,
+  "totalStories": 1,
+  "insights": [
+    {
+      "id": "INSIGHT-001",
+      "targetPhase": 6,
+      "type": "bottleneck",
+      "severity": "warning",
+      "title": "Phase 7(云端部署)平均耗时 30min，最长 56min",
+      "description": "云端部署阶段耗时偏长，可能影响整体交付效率",
+      "recommendation": "部署前确认构建产物完整",
+      "evidence": "2 个 Story 统计: avg=30min, median=56min, max=56min",
+      "sourceProjects": [
+        "userlive"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-08-13T15:15:07.909Z",
+      "lastSeen": "2026-08-13T15:15:07.909Z"
+    },
+    {
+      "id": "INSIGHT-002",
+      "targetPhase": 3,
+      "type": "fix_loop_success",
+      "severity": "warning",
+      "title": "Fix-loop 第 1 轮成功率 50%",
+      "description": "BLOCKER 修复建议的可操作性不足，导致需要多轮修复",
+      "recommendation": "代码审查师在 FIX_DATA 块中给出代码级建议（含具体行号和替换方案），而非泛泛描述问题",
+      "evidence": "成功率 50%",
+      "sourceProjects": [
+        "userlive"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-08-13T15:15:07.909Z",
+      "lastSeen": "2026-08-13T15:15:07.909Z"
+    },
+    {
+      "id": "INSIGHT-003",
+      "targetPhase": 0,
+      "type": "completion_rate",
+      "severity": "warning",
+      "title": "Story 完成率 67%",
+      "description": "部分 Story 未完成，可能存在需求不清晰或阻塞未解决",
+      "recommendation": "需求分析阶段确保 open-questions 全部 resolved，需求边界明确后再进入开发",
+      "evidence": "2/3 完成",
+      "sourceProjects": [
+        "userlive"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-08-13T15:15:07.909Z",
+      "lastSeen": "2026-08-13T15:15:07.909Z"
+    }
+  ],
+  "lastUpdated": "2026-08-13T15:15:07.909Z",
+  "_knownProjects": [
+    "userlive"
+  ]
+}

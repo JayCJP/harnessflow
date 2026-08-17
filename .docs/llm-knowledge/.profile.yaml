@@ -1,0 +1,5 @@
+# 项目画像 — 知识库动态生成的输入
+# 由 kb-init 自动推断，可手动修改后重建
+project_type: "plugin"
+source_root: "plugins/harness"
+domain_axis: "feature"

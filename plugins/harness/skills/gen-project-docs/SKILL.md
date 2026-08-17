@@ -1,14 +1,14 @@
 ---
 name: "gen-project-docs"
-description: "自动生成项目结构化知识库文档。按业务域扫描源码，生成 8 类标准化文档（overview/pages/api/store/architecture/config/pitfalls/custom），支持增量更新、手工批注保留与新鲜度检测。触发词：生成知识库文档、更新项目文档、gen-docs、文档生成、增量更新知识库、新鲜度检测"
+description: "自动生成项目结构化知识库文档。按项目画像（project_type）动态确定文档类型，扫描源码生成文档（通用 5 类 + 项目类型特有切面），支持增量更新、手工批注保留与新鲜度检测。触发词：生成知识库文档、更新项目文档、gen-docs、文档生成、增量更新知识库、新鲜度检测"
 location: "user"
 ---
 
 # gen-project-docs — 项目文档生成（全局 Skill）
 
-自动扫描前端项目源码，按业务域生成符合规范的 8 类结构化文档。
+自动扫描项目源码，按项目类型生成符合规范的结构化文档。
 
-> 框架无关：不限定 Vue/React/Angular。数据驱动：从 `meta.yaml` 获取每个域的扫描目标。  
+> 框架无关：不限定 Vue/React/Angular，也不限定前端项目。数据驱动：从 `.profile.yaml`（项目画像）确定文档类型，从 `meta.yaml` 获取每个域的扫描目标。
 > 本 Skill 自包含：脚本 `./gen-docs.cjs` 收集文件路径（确定操作），AI 生成文档内容（认知操作）。
 
 ---
@@ -17,15 +17,15 @@ location: "user"
 
 | 资源 | 路径 | 说明 |
 |------|------|------|
-| 执行脚本 | `./gen-docs.cjs` | 读 meta.yaml → 输出每域需扫描的文件清单 JSON |
+| 执行脚本 | `./gen-docs.cjs` | 读 meta.yaml + .profile.yaml → 输出每域需扫描的文件清单 JSON |
 
 ---
 
 ## 前置条件
 
-- 项目已通过 `kb-init` 初始化知识库骨架
-- `meta.yaml` 各域已配置 `entry_files / stores / apis / components`
-- 源码在 `src/` 下
+- 项目已通过 `kb-init` 初始化知识库骨架（含 `.profile.yaml`）
+- `meta.yaml` 各域已配置文件字段（`entry_files` 等，字段名按项目类型）
+- 源码根由 `.profile.yaml` 的 `source_root` 指定
 
 ---
 
@@ -40,20 +40,24 @@ location: "user"
 
 ---
 
-## 8 类文档生成规范
+## 文档类型（按项目画像动态确定）
 
-对每个域，AI 按以下顺序生成：
+文档类型**不再固定 8 类**，而是由 `.profile.yaml` 的 `project_type` 决定：
 
-| # | 文档 | 数据来源 | 内容 |
-|---|------|---------|------|
-| 1 | `overview.md` | 汇总 | 域定位、入口文件、核心流程、设计决策 |
-| 2 | `pages.md` | `entry_files` | 路由配置、页面组件列表 |
-| 3 | `api.md` | `apis` | 接口签名、参数、返回值 |
-| 4 | `store.md` | `stores` | State/Getters/Actions、数据流 |
-| 5 | `architecture.md` | 组件+store | 依赖图、数据流、设计模式 |
-| 6 | `config.md` | 配置文件 | 环境变量、编译/运行时配置 |
-| 7 | `pitfalls.md` | lint+经验 | 已知问题、避坑建议 |
-| 8 | `log.md` | 自动追加 | 变更历史（不可覆盖） |
+| 切面 | 通用 | frontend | plugin | backend | library |
+|------|------|----------|--------|---------|---------|
+| 总览 | overview.md | ✓ | ✓ | ✓ | ✓ |
+| 架构 | architecture.md | ✓ | ✓ | ✓ | ✓ |
+| 配置 | config.md | ✓ | ✓ | ✓ | ✓ |
+| 踩坑 | pitfalls.md | ✓ | ✓ | ✓ | ✓ |
+| 变更日志 | log.md | ✓ | ✓ | ✓ | ✓ |
+| 页面/结构 | — | pages.md | entry-files.md | routes.md | public-api.md |
+| 接口/能力 | — | api.md | commands.md | api.md | usage.md |
+| 数据/契约 | — | store.md | schemas.md | models.md | — |
+
+**通用 5 类**（overview/architecture/config/pitfalls/log）所有项目类型都生成；**特有切面**按 project_type 选择。
+
+---
 
 ## 手工批注保留
 
@@ -68,7 +72,7 @@ location: "user"
 
 | Skill | 关系 |
 |-------|------|
-| `kb-init` | 先驱—创建骨架 |
+| `kb-init` | 先驱—创建骨架 + 项目画像 |
 | `kb-update` | 触发方—定位变更域后调用 |
 | `kb-query` | 消费方—开发时检索 |
 
