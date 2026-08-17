@@ -301,9 +301,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 582,
+      "occurrences": 678,
       "firstSeen": "2026-08-05T02:36:44.009Z",
-      "lastSeen": "2026-08-14T02:20:15.927Z",
+      "lastSeen": "2026-08-16T09:32:38.292Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -329,9 +329,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 96,
+      "occurrences": 118,
       "firstSeen": "2026-08-13T02:02:22.944Z",
-      "lastSeen": "2026-08-14T02:20:15.873Z",
+      "lastSeen": "2026-08-16T09:32:38.316Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -342,13 +342,13 @@
       "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 48,
+      "occurrences": 56,
       "firstSeen": "2026-08-13T02:02:23.008Z",
-      "lastSeen": "2026-08-14T02:20:15.934Z",
+      "lastSeen": "2026-08-16T09:32:38.300Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     }
   ],
   "version": "2.1",
-  "lastUpdated": "2026-08-14T02:20:15.934Z"
+  "lastUpdated": "2026-08-16T09:32:38.316Z"
 }
