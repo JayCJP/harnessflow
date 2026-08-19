@@ -50,11 +50,15 @@ try {
 
 const toolName = inputData.tool_name || ''
 const toolInput = inputData.tool_input || {}
-const filePath = toolInput.filePath || toolInput.file_path || ''
-const fileContent = toolInput.content || toolInput.new_str || ''
+const patchText = toolName === 'apply_patch' ? String(toolInput.command || '') : ''
+const patchPaths = patchText
+  ? [...patchText.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map(m => m[1].trim())
+  : []
+const filePath = patchPaths.find(isStateFile) || toolInput.filePath || toolInput.file_path || ''
+const fileContent = patchText || toolInput.content || toolInput.new_str || ''
 
 // 只处理文件写入/编辑工具
-const writeTools = ['write_to_file', 'replace_in_file', 'Write', 'Edit']
+const writeTools = ['write_to_file', 'replace_in_file', 'apply_patch', 'Write', 'Edit']
 if (!writeTools.includes(toolName)) {
   console.log(JSON.stringify({ continue: true }))
   process.exit(0)
@@ -95,7 +99,7 @@ if (fileContent) {
 // 策略2: 如果无法从内容中解析，读取现有文件的 phase 值
 if (targetPhase === null) {
   try {
-    const existingPath = path.join(PLANS_DIR, fileName)
+    const existingPath = filePath
     if (fs.existsSync(existingPath)) {
       const existing = JSON.parse(fs.readFileSync(existingPath, 'utf-8'))
       // 如果内容中包含 "phase" 字样，说明在修改 phase

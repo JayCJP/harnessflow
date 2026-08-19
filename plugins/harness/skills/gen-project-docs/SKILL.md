@@ -1,7 +1,6 @@
 ---
 name: "gen-project-docs"
 description: "自动生成项目结构化知识库文档。按项目画像（project_type）动态确定文档类型，扫描源码生成文档（通用 5 类 + 项目类型特有切面），支持增量更新、手工批注保留与新鲜度检测。触发词：生成知识库文档、更新项目文档、gen-docs、文档生成、增量更新知识库、新鲜度检测"
-location: "user"
 ---
 
 # gen-project-docs — 项目文档生成（全局 Skill）

@@ -1,7 +1,6 @@
 ---
 name: "kb-init"
 description: "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录"
-location: "user"
 ---
 
 # kb-init — 知识库初始化（全局 Skill）

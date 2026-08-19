@@ -1,8 +1,6 @@
 ---
 name: api-generator
 description: 当用户提供 Swagger JSON 文件路径或 URL 或者 api doc 文档，并希望按模块或接口路径生成接口定义、请求函数和 JSDoc 注释时使用。适用于任意项目，不依赖固定业务目录。
-allowed-tools: 
-disable: false
 ---
 
 # API Generator
