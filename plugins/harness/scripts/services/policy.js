@@ -29,7 +29,6 @@ const {
   checkTaskDagJson,
   checkAcceptanceVerification,
   validateContractReferences,
-  checkFigmaFrameInventory,
   validateTaskFigmaReferences,
   hasFigmaDesign,
   readJsonArtifact,
@@ -543,33 +542,8 @@ function checkPhase0Gate (storyId, state, result) {
     result.warnings.push(`${oqUnresolved} 项待确认问题未解决但无阻塞级`)
   }
 
-  // Figma frame inventory — 将 errors 转为结构化 blocker
-  if (hasFigmaDesign(state)) {
-    const figmaCheck = checkFigmaFrameInventory(storyId)
-    if (!figmaCheck.valid) {
-      for (const e of figmaCheck.errors) {
-        const lower = String(e).toLowerCase()
-        let type = 'figma_frame_incomplete'
-        let level = 2
-        let resolution = '每个 Figma frame 必须有 id、name、link 字段'
-
-        if (lower.includes('不存在') || lower.includes('缺少')) {
-          type = 'figma_frame_incomplete'
-          level = 4
-          resolution = '如有 Figma 设计稿，Phase 0 必须产出 figma-frame-inventory.json'
-        } else if (lower.includes('缺少 id')) {
-          type = 'figma_frame_incomplete'
-          resolution = '每个 frame 必须有 Figma node ID（如 "3020:83533"）'
-        } else if (lower.includes('缺少 link')) {
-          type = 'figma_frame_incomplete'
-          resolution = '每个 frame 必须有完整 Figma node URL'
-        }
-
-        result.blockers.push(structuredError(type, String(e), level, resolution))
-        result.passed = false
-      }
-    }
-  }
+  // Figma frame inventory 不在 Phase 0→1 校验 —— frame-inventory 由 Phase 1 任务规划师拆 task 时产出，
+  // 完整性在 Phase 1→2 门控（checkPhase1Gate 的 validateTaskFigmaReferences + 产出物存在性）校验。
 
   // PRD 功能点 → AC 覆盖率校验（run 模式）
   checkPrdCoverage(storyId, result)

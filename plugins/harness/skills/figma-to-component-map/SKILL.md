@@ -1,9 +1,9 @@
 ---
 name: figma-to-component-map
 description: >
-  Phase 0: produce a complete Figma frame inventory (figma-frame-inventory.json) with precise full
-  node links for every page, dialog, drawer, and component. Phase 1: use task-dag.json figmaNodeId
-  references for zero-guess design spec extraction. Should be used when the user provides a Figma URL.
+  Produce a complete Figma frame inventory (figma-frame-inventory.json) with precise full node links
+  for the pages/dialogs/drawers/components a task touches, then bind each UI task to precise
+  figmaRefs (nodeId+link). Used by the Phase 1 task planner when a Story has Figma design URLs.
 ---
 
 # Figma Design → Component Map (v3 — 单一产出物 + 精确 Node 绑定)
@@ -27,11 +27,11 @@ description: >
    - `get_metadata` — 遍历页面/帧结构
 5. 确保在尝试失败后不要继续执行依赖于设计稿的任务。
 
-## Phase 0: Produce Frame Inventory (`figma-frame-inventory.json`)
+## 步骤 A: Produce Frame Inventory (`figma-frame-inventory.json`)
 
-> **按需分析**：本 skill 应在需求分析文档（`requirement-analysis.md`）产出之后调用。
-> 根据需求分析文档**只针对涉及的组件**生成 frame 清单，**不要全量扫描设计稿的所有页面**——
-> 需求不涉及的组件不必进清单，避免重复分析浪费 token。
+> **按需分析（任务规划阶段）**：本 skill 由 **Phase 1 任务规划师**在拆 task 时调用（需求分析阶段不处理 Figma）。
+> 只针对**要拆分的 task 涉及的文件/组件**生成 frame 清单，**不要全量扫描设计稿的所有页面**——
+> 拆到哪些组件就拉哪些，避免重复分析浪费 token。
 > 设计稿完整内容（布局/样式/文案/交互细节）不在此转译给下游，由开发 Agent 通过 Figma MCP 自行拉取。
 
 ### Step 1: List all pages
@@ -109,7 +109,7 @@ Write to: `.codebuddy/plans/<storyId>/figma-frame-inventory.json`
 
 ---
 
-## Phase 1: Task → Frame Precise Mapping (via task-dag.json)
+## 步骤 B: Task → Frame Precise Mapping (via task-dag.json)
 
 > Only run when `task-dag.json` exists and contains `figmaRefs` / `figmaNodeId` fields.
 > `figmaRefs` 为**精确配对数组**（每个元素含 nodeId + link），一个 task 处理多个组件时有多个元素；

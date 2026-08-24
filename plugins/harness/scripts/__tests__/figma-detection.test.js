@@ -144,25 +144,30 @@ ok('多链接全部保留', detected.urls.length === 2, JSON.stringify(detected.
 ok('多链接 -> hasFigma=true', detected.hasFigma === true)
 
 // ════════════════════════════════════════════════════════════
-section('7. prompt 注入 figma-to-component-map（两种模式都注入）')
+section('7. prompt 注入 figma-to-component-map（Phase 1 任务规划阶段注入）')
 
-const runPrompt = buildAgentPrompt({ storyId: 'FG-RUN', targetPhase: 0 }).agentPrompt
-ok('run P0 点名 figma-to-component-map', runPrompt.includes('figma-to-component-map'))
-ok('run P0 含 Figma 链接原文', runPrompt.includes(FIGMA_URL))
-ok('run P0 要求产出 frame 清单', runPrompt.includes('figma-frame-inventory.json'))
-ok('run P0 标注门控已开启', /已开启 Figma 门控/.test(runPrompt))
-ok('run P0 声明桌面端前置条件', /桌面端/.test(runPrompt))
+// Figma 处理从 Phase 0 移到 Phase 1（需求分析师只做需求分析，任务规划师拆 task 时处理设计稿）
+const runPrompt0 = buildAgentPrompt({ storyId: 'FG-RUN', targetPhase: 0 }).agentPrompt
+ok('run P0 不注入 figma 指令', !runPrompt0.includes('figma-to-component-map'))
 
-const fixPrompt = buildAgentPrompt({ storyId: 'FG-FIX', targetPhase: 0 }).agentPrompt
-ok('fixbugs P0 同样点名 skill', fixPrompt.includes('figma-to-component-map'))
-ok('fixbugs P0 标注未开强制门控', /未开启 Figma 强制门控/.test(fixPrompt))
-ok('fixbugs P0 不误报门控开启', !/已开启 Figma 门控/.test(fixPrompt))
+const runPrompt = buildAgentPrompt({ storyId: 'FG-RUN', targetPhase: 1 }).agentPrompt
+ok('run P1 点名 figma-to-component-map', runPrompt.includes('figma-to-component-map'))
+ok('run P1 含 Figma 链接原文', runPrompt.includes(FIGMA_URL))
+ok('run P1 要求产出 frame 清单', runPrompt.includes('figma-frame-inventory.json'))
+ok('run P1 标注门控已开启', /已开启 Figma 门控/.test(runPrompt))
+ok('run P1 声明桌面端前置条件', /桌面端/.test(runPrompt))
+ok('run P1 要求绑定 figmaRefs', runPrompt.includes('figmaRefs'))
 
-const noFigmaPrompt = buildAgentPrompt({ storyId: 'FG-RUN-NONE', targetPhase: 0 }).agentPrompt
+const fixPrompt = buildAgentPrompt({ storyId: 'FG-FIX', targetPhase: 1 }).agentPrompt
+ok('fixbugs P1 同样点名 skill', fixPrompt.includes('figma-to-component-map'))
+ok('fixbugs P1 标注未开强制门控', /未开启 Figma 强制门控/.test(fixPrompt))
+ok('fixbugs P1 不误报门控开启', !/已开启 Figma 门控/.test(fixPrompt))
+
+const noFigmaPrompt = buildAgentPrompt({ storyId: 'FG-RUN-NONE', targetPhase: 1 }).agentPrompt
 ok('无链接 -> 不注入 Figma 段落', !noFigmaPrompt.includes('figma-to-component-map'))
 
 // --figma 手工开门控但 story-input 无链接: 不该凭空注入解析指令
-const flagOnlyPrompt = buildAgentPrompt({ storyId: 'FG-FLAG-RUN', targetPhase: 0 }).agentPrompt
+const flagOnlyPrompt = buildAgentPrompt({ storyId: 'FG-FLAG-RUN', targetPhase: 1 }).agentPrompt
 ok('--figma 但无链接 -> 仍不注入解析指令', !flagOnlyPrompt.includes('figma-to-component-map'))
 
 // ════════════════════════════════════════════════════════════

@@ -256,14 +256,14 @@ const PHASE_ARTIFACTS = {
       { fileName: 'requirement-analysis.md', description: '需求分析文档', contract: false },
       { fileName: 'acceptance-criteria.json', description: '验收标准契约', contract: true },
       { fileName: 'open-questions.json', description: '待确认项契约', contract: true },
-      { fileName: 'prototype-analysis.md', description: '原型分析文档（有原型链接时产出）', contract: false, optional: true },
-      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出，每个 frame 含 id/name/link/type/rect 及可选 designSpec 设计规格摘要）', contract: true, optional: true }
+      { fileName: 'prototype-analysis.md', description: '原型分析文档（有原型链接时产出）', contract: false, optional: true }
     ]
   },
   1: {
     artifacts: [
       { fileName: 'task-dag.md', description: '任务 DAG 文档', contract: false },
-      { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true }
+      { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true },
+      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出，任务规划师拆 task 时只针对相关组件拉取，每个 frame 含 id/name/link/type/rect 及可选 designSpec 设计规格摘要）', contract: true, optional: true }
     ]
   },
   2: { artifacts: [{ fileName: null, description: '代码变更（git diff）', contract: false }] },

@@ -65,14 +65,15 @@ const PHASE_GATE_CONDITIONS = {
       'noPendingConfirmations',
       'userConfirmedPrototype'
     ],
-    conditionalChecks: ['hasFigmaFrameInventoryIfDesign']
+    conditionalChecks: []
   },
   1: {
     name: '任务规划',
     description: 'Phase 1 开始前需要 Phase 0 完成',
     prerequisites: ['phase0Completed'],
     completionChecks: ['hasTaskDAG', 'hasTaskDagJson', 'contractReferencesValid'],
-    conditionalChecks: ['figmaNodeIdsValidIfDesign']
+    // frame-inventory 在 Phase 1 产出（任务规划师拆 task 时拉取），与 task 的 figmaNodeId 有效性一并校验
+    conditionalChecks: ['hasFigmaFrameInventoryIfDesign', 'figmaNodeIdsValidIfDesign']
   },
   2: {
     name: '代码开发',

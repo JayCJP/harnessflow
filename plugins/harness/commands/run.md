@@ -182,19 +182,22 @@ node $HARNESS/create-workflow.js <storyId> --refresh-input
 
 | 通道 | 开关 | run | fixbugs | 作用 |
 |------|------|-----|---------|------|
-| **解析指引**（软） | 只看 `figmaUrls` 非空 | ✅ 注入 | ✅ 注入 | Phase 0 prompt 里显式点名 `use_skill("figma-to-component-map")`，禁止凭链接猜 UI 结构 |
-| **硬门控**（阻断） | `state.hasFigmaDesign` | ✅ 开启 | ❌ 关闭 | Phase 0→1 校验 `figma-frame-inventory.json` 完整性；Phase 1→2 校验 task 的 `figmaNodeId`/`figmaRefs` 必须命中清单内的 frame |
+| **解析指引**（软） | 只看 `figmaUrls` 非空 | ✅ 注入 | ✅ 注入 | Phase 1 prompt 里显式点名 `use_skill("figma-to-component-map")`，要求任务规划师拆 task 时产出 frame-inventory，禁止凭链接猜 UI 结构 |
+| **硬门控**（阻断） | `state.hasFigmaDesign` | ✅ 开启 | ❌ 关闭 | Phase 1→2 校验 `figma-frame-inventory.json` 完整性 + task 的 `figmaNodeId`/`figmaRefs` 必须命中清单内的 frame |
 
 门控分级（`services/policy.js` 实现，`advance-phase.js` 调用）：
 
 | 检查 | 级别 |
 |------|------|
-| `figma-frame-inventory.json` 缺失/不完整 | BLOCKER |
+| `figma-frame-inventory.json` 缺失/不完整（Phase 1 产出） | BLOCKER |
 | task 的 `figmaNodeId`/`figmaRefs` 不在 frame 清单中 | BLOCKER |
 | 含 `.vue` 的 task 完全没写 `figmaNodeId`/`figmaRefs` | WARNING（可能是纯逻辑改动，不阻断） |
 
-为什么 fixbugs 不开硬门控：Bug 修复只碰个别页面，要求全量 frame 清单会直接把修复流程卡死；
-但"有设计稿就该去解析"两种模式都成立，所以解析指引不分模式注入。
+Figma 处理在 Phase 1（任务规划）：需求分析师只做需求分析不拉设计稿，任务规划师拆 task 时才处理
+（只针对要拆的组件精确拉取，并绑定 figmaRefs）——真正"按需拉稿"，避免需求阶段猜测性全量拉取。
+
+为什么 fixbugs 不开硬门控：Bug 修复只碰个别页面，要求 frame 清单会直接把修复流程卡死；
+但"有设计稿就该去解析"两种模式都成立，所以解析指引不分模式注入（Phase 1）。
 
 ```bash
 # 任何模式强制开启硬门控（覆盖自动推导）
@@ -202,7 +205,7 @@ node $HARNESS/create-workflow.js <storyId> --refresh-input --figma
 ```
 
 前置条件：Figma 桌面端需处于运行状态并已打开该文件。未运行时子 Agent 应如实告知并停止，
-不得退回缓存数据 —— 这条已写进 Phase 0 的 `agentPrompt`。
+不得退回缓存数据 —— 这条已写进 Phase 1 任务规划师的 `agentPrompt`。
 
 ---
 
@@ -251,7 +254,7 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，�
 | 6 | 知识库更新 | 发布助手 | meta.yaml 刷新 | `use_skill("kb-update")` 调用成功（保留手工批注） |
 | 7 | 云端部署 | 发布助手 | 部署 URL + 构建号 | devops 构建+发布成功 |
 
-> 有 Figma 时 Phase 0 额外产出 `figma-frame-inventory.json`（唯一 Figma 产出物，frame 可含可选 `designSpec`）
+> 有 Figma 时 Phase 1（任务规划）额外产出 `figma-frame-inventory.json`（唯一 Figma 产出物，frame 可含可选 `designSpec`），需求分析阶段不处理设计稿
 > 每个 Phase 完成后 `advance-phase.js` 自动生成 `phase-N-summary.md`
 
 ### Phase 2→3 的 lint / 编译门控

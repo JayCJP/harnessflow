@@ -242,10 +242,8 @@ function buildStoryInputSection (storyId, targetPhase) {
     )
   }
 
-  // Figma 解析指令 —— 不分模式注入。
-  // 门控开关（state.hasFigmaDesign）只管「是否强制校验清单完整性」，run 开 fixbugs 关；
-  // 而「有 Figma 链接就要去解析」两种模式都成立，所以这里直接看 figmaUrls 而非门控开关。
-  lines.push(...buildFigmaInstruction(storyId, input))
+  // Figma 处理不在 Phase 0（需求分析阶段）——frame-inventory 由 Phase 1 任务规划师拆 task 时产出。
+  // 见 buildTaskPlannerFigmaInstruction（Phase 1 注入）。
 
   return lines.join('\n')
 }
@@ -260,7 +258,18 @@ function buildStoryInputSection (storyId, targetPhase) {
  * @param {Object} input - 已解析的 story-input.json
  * @returns {string[]} markdown 行，无 Figma 链接时返回空数组
  */
-function buildFigmaInstruction (storyId, input) {
+/**
+ * 构造「任务规划阶段处理 Figma」指令片段（Phase 1 注入）。
+ *
+ * Figma 处理从 Phase 0 移到 Phase 1：需求分析师只做需求分析（不拉设计稿），
+ * 任务规划师拆 task 时才处理 Figma——只针对要拆的组件精确拉取，产出
+ * figma-frame-inventory.json，并为每个 UI task 绑定 figmaRefs。这样真正"按需拉稿"，
+ * 避免需求阶段猜测性全量/半量拉取（省 token + 更精确）。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {string[]} markdown 行，无 Figma 链接时返回空数组
+ */
+function buildTaskPlannerFigmaInstruction (storyId) {
   const detected = detectFigmaSource(storyId)
   if (!detected.hasFigma) return []
 
@@ -268,14 +277,15 @@ function buildFigmaInstruction (storyId, input) {
   const gateEnabled = state?.hasFigmaDesign === true
 
   return [
-    `**🌐 检测到 ${detected.urls.length} 个 Figma 设计稿链接**`,
+    `**🌐 检测到 ${detected.urls.length} 个 Figma 设计稿链接（任务规划阶段处理）**`,
     '',
-    '- **先产出 `requirement-analysis.md`**（需求分析文档），再调用 `use_skill("figma-to-component-map")` 解析设计稿，**禁止凭链接猜测 UI 结构**。',
+    '- 拆 task 前调用 `use_skill("figma-to-component-map")` 处理设计稿，**禁止凭链接猜测 UI 结构**。',
     '- 前置条件: Figma 桌面端需处于运行状态并已打开该文件；未运行则如实告知用户并停止，不要退回缓存数据。',
-    `- 根据需求分析文档**只针对涉及的组件**产出 \`figma-frame-inventory.json\`（覆盖每个相关 page / dialog / drawer 的完整 node 链接），**不要全量扫描所有页面**——需求不涉及的组件不必进清单，避免重复分析浪费 token。`,
-    '- Figma 设计稿的完整内容（布局/样式/文案/交互细节）不在此阶段转译给下游——由开发 Agent 通过 Figma MCP 自行拉取。',
+    `- 只针对**要拆分的 task 涉及的文件/组件**产出 \`figma-frame-inventory.json\`（覆盖每个相关 page / dialog / drawer 的完整 node 链接），**不要全量扫描所有页面**——拆到哪些组件就拉哪些，避免重复分析浪费 token。`,
+    '- 为每个 UI task 绑定 `figmaRefs: [{ nodeId, link }]` 精确配对（nodeId 用 `:`，link 用 `-`），前端开发工程师据此一次精准拉取设计稿。',
+    '- Figma 设计稿的完整内容（布局/样式/文案/交互细节）不在此转译给下游——由开发 Agent 通过 Figma MCP 自行拉取。',
     gateEnabled
-      ? '- ⚠️ 本 Story 已开启 Figma 门控，Phase 0→1 会校验该清单完整性，缺失或不完整将阻断推进。'
+      ? '- ⚠️ 本 Story 已开启 Figma 门控，Phase 1→2 会校验 frame-inventory 完整性及 task 的 figmaNodeId 命中清单，缺失或不完整将阻断推进。'
       : '- 本 Story 未开启 Figma 强制门控（fixbugs 模式），但涉及 UI 的改动仍应按清单核对设计规范。',
     ...detected.urls.map(u => `  - ${u}`),
     ''
@@ -371,6 +381,8 @@ function buildAgentPrompt (opts) {
   const figmaDesignSpec = readFigmaDesignSpec(storyId)
   // Figma 对齐指令（Phase 2 前端开发时强制要求按设计稿实现）
   const figmaAlignInstruction = buildFigmaAlignInstruction(storyId, targetPhase)
+  // Figma 任务规划指令（Phase 1 任务规划师拆 task 时处理 Figma，产出 frame-inventory + 绑定 figmaRefs）
+  const taskPlannerFigmaInstruction = buildTaskPlannerFigmaInstruction(storyId)
 
   // 修复回路上下文
   const fixLoopContext = buildFixLoopContext(storyId, targetPhase)
@@ -401,6 +413,7 @@ function buildAgentPrompt (opts) {
     '',
     storyInputSection,
     storyContext.length > 0 ? `## Story 背景资料\n${storyContext.join('\n\n')}\n` : '',
+    (targetPhase === 1 && taskPlannerFigmaInstruction.length > 0) ? taskPlannerFigmaInstruction.join('\n') : '',
     figmaAlignInstruction.length > 0 ? figmaAlignInstruction.join('\n') : '',
     figmaDesignSpec.length > 0 ? figmaDesignSpec.join('\n') : '',
     '## 上一 Phase 摘要',
@@ -452,5 +465,6 @@ module.exports = {
   readStoryContext,
   readFigmaDesignSpec,
   buildFigmaAlignInstruction,
+  buildTaskPlannerFigmaInstruction,
   AGENT_CONSTRAINTS
 }
