@@ -36,7 +36,21 @@
               { "type": "null" },
               { "type": "string", "minLength": 1 },
               { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "一个 task 可关联多个 Figma 节点（处理多个组件时），每个元素是图一 node ID 如 '3020:83533'" }
-            ]
+            ],
+            "description": "门控校验用：引用的 Figma node ID（单值或数组），必须存在于 figma-frame-inventory.json 中"
+          },
+          "figmaRefs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["nodeId", "link"],
+              "properties": {
+                "nodeId": { "type": "string", "minLength": 1, "description": "Figma node ID，如 '3020:83533'" },
+                "link": { "type": "string", "minLength": 1, "description": "该 node 的完整 Figma 链接（含 ?node-id=...&m=dev），供开发 agent 直接拉取，避免从 nodeId 自行拼装" }
+              },
+              "additionalProperties": false
+            },
+            "description": "开发用精确绑定：task 要拉取的每个 Figma node 的 nodeId + 完整链接配对。一个 task 处理多个组件时有多个元素"
           },
           "parallelizable": { "type": "boolean" },
           "complexity": { "type": "string", "enum": ["low", "medium", "high"] },

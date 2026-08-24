@@ -28,7 +28,8 @@ const {
   detectFigmaSource,
   readStateFile,
   getMaxFixRounds,
-  hasTaskRequiringFigma
+  getTasksRequiringFigma,
+  readJsonArtifact
 } = require('../lib/state')
 
 const contextRefresh = require('./context-refresh')
@@ -103,24 +104,36 @@ function readStoryContext (storyId) {
 }
 
 /**
- * 读取 Phase 1 产出的 Figma 组件映射文档（figma-component-map.md），在 Phase 2 注入 prompt。
+ * 读取 Figma Frame 清单中的 designSpec（每个 frame 的设计规格摘要），在 Phase 2 注入 prompt。
  *
- * v2（需求10）：不再内联映射全文（可能很长且含设计规格明细），改为给文件路径，
- * Agent 结合 Figma MCP 完整拉取为准，映射文档仅作辅助参考。
+ * 合并后（figma-component-map.md 已删除）：frame-inventory.json 的每个 frame 含可选 designSpec
+ * 字段（色值/间距/字体/布局等设计规格摘要）。开发 agent 以 Figma MCP 完整拉取为准，
+ * designSpec 仅作辅助参考，避免全量探索设计稿。
  *
  * @param {string} storyId - Story ID
- * @returns {string[]} 已格式化的 markdown 片段，无组件映射时返回空数组
+ * @returns {string[]} 已格式化的 markdown 片段，无 designSpec 时返回空数组
  */
-function readFigmaDesignMap (storyId) {
-  const mapPath = path.join(PLANS_DIR, storyId, 'figma-component-map.md')
-  if (!fs.existsSync(mapPath)) return []
-  return [
-    '## Figma 组件映射（Phase 1 产出，开发必须遵循）',
-    '',
-    '> 以下映射把 Figma 设计稿的视觉规范翻译为开发规范，**严格按此实现样式**，不要使用默认/直觉样式。',
-    '> 请读取完整映射文件（路径: ' + mapPath + '）获取全部设计规格。',
-    ''
-  ]
+function readFigmaDesignSpec (storyId) {
+  const invPath = path.join(PLANS_DIR, storyId, 'figma-frame-inventory.json')
+  if (!fs.existsSync(invPath)) return []
+  try {
+    const inv = JSON.parse(fs.readFileSync(invPath, 'utf-8'))
+    const withSpec = (inv.frames || []).filter(f => f.designSpec)
+    if (withSpec.length === 0) return []
+    const lines = [
+      '## Figma 设计规格摘要（frame-inventory 中的 designSpec，辅助参考）',
+      '',
+      '> 设计稿完整内容以你通过 Figma MCP 拉取为准；以下仅列出 Phase 0 已提取的关键规格，减少全量探索。',
+      ''
+    ]
+    for (const f of withSpec) {
+      lines.push(`- **${f.name}** (node ${f.id}): ${f.designSpec}`)
+    }
+    lines.push('')
+    return lines
+  } catch (e) {
+    return [`## Figma 设计规格摘要\n(读取失败: ${e.message})\n`]
+  }
 }
 
 /**
@@ -141,7 +154,28 @@ function buildFigmaAlignInstruction (storyId, targetPhase) {
   const detected = detectFigmaSource(storyId)
   if (!detected.hasFigma) return []
   // 需求要求 Figma，但本 Story 没有任何需要 Figma 的 task（纯逻辑改动，无 UI）→ 不强求对齐
-  if (!hasTaskRequiringFigma(storyId)) return []
+  const figmaTasks = getTasksRequiringFigma(storyId)
+  if (figmaTasks.length === 0) return []
+
+  // 从 task-dag 读取精确的 node 拉取清单（figmaRefs 优先，其次 figmaNodeId）
+  // 每个 UI task 列出它要拉取的精确 node-id + 完整链接，开发 agent 一次精准拉取，不做全量探索
+  const dag = readJsonArtifact(storyId, 'task-dag.json')
+  const taskNodeLines = []
+  if (dag && !dag._parseError && Array.isArray(dag.tasks)) {
+    for (const task of dag.tasks) {
+      const refs = task.figmaRefs || []
+      const nodes = refs.length > 0
+        ? refs.filter(r => r && r.nodeId).map(r => ({ nodeId: r.nodeId, link: r.link }))
+        : (Array.isArray(task.figmaNodeId)
+            ? task.figmaNodeId.filter(Boolean).map(n => ({ nodeId: n, link: '' }))
+            : (typeof task.figmaNodeId === 'string' && task.figmaNodeId.trim()
+                ? [{ nodeId: task.figmaNodeId.trim(), link: '' }]
+                : []))
+      for (const n of nodes) {
+        taskNodeLines.push(`  - Task ${task.id} (${task.title || ''}) → node ${n.nodeId}${n.link ? ' | ' + n.link : ''}`)
+      }
+    }
+  }
 
   return [
     '## 🎨 Figma 设计稿对齐（强制）',
@@ -149,8 +183,9 @@ function buildFigmaAlignInstruction (storyId, targetPhase) {
     '- UI 必须严格对齐设计稿，禁止使用默认/直觉样式。',
     '- 每个 UI 任务**自行调用 Figma MCP** 拉取该节点的完整设计上下文（`get_design_context` 为主，`get_screenshot` 为辅）——设计稿内容以 MCP 返回为准，不要凭截图/摘要推测。',
     '- **开工前先校验 Figma MCP 可用性**；若无法使用（工具不可用 / Figma 桌面端未运行 / 返回错误）——**立即停下当前任务并上报主 Agent，禁止硬做**（设计稿未对齐就开发会导致大量返工）。',
-    '- 设计稿链接（node-id 从 task 的 `figmaLink` 提取，支持多个 `figmaNodeId`）：',
-    ...detected.urls.map(u => `  - ${u}`),
+    '- **本 Story 涉及的精确 Figma 节点（按 task 绑定，逐个拉取，不要全量探索）：**',
+    ...taskNodeLines,
+    ...(detected.urls.length > 0 ? ['- 设计稿文件链接：', ...detected.urls.map(u => `  - ${u}`)] : []),
     ''
   ]
 }
@@ -332,8 +367,8 @@ function buildAgentPrompt (opts) {
   const storyInputSection = buildStoryInputSection(storyId, targetPhase)
   const storyMode = getStoryMode(storyId)
 
-  // Figma 组件映射（Phase 2 前端开发时注入 Phase 1 产出的设计规范）
-  const figmaDesignMap = readFigmaDesignMap(storyId)
+  // Figma 设计规格摘要（frame-inventory 的 designSpec，Phase 2 前端开发注入，辅助参考）
+  const figmaDesignSpec = readFigmaDesignSpec(storyId)
   // Figma 对齐指令（Phase 2 前端开发时强制要求按设计稿实现）
   const figmaAlignInstruction = buildFigmaAlignInstruction(storyId, targetPhase)
 
@@ -367,7 +402,7 @@ function buildAgentPrompt (opts) {
     storyInputSection,
     storyContext.length > 0 ? `## Story 背景资料\n${storyContext.join('\n\n')}\n` : '',
     figmaAlignInstruction.length > 0 ? figmaAlignInstruction.join('\n') : '',
-    figmaDesignMap.length > 0 ? figmaDesignMap.join('\n') : '',
+    figmaDesignSpec.length > 0 ? figmaDesignSpec.join('\n') : '',
     '## 上一 Phase 摘要',
     summaryInfo ? `请读取上轮摘要文件获取完整信息（路径: ${summaryInfo.path}）` : '(无摘要)',
     '',
@@ -415,7 +450,7 @@ module.exports = {
   buildStoryInputSection,
   readContractContents,
   readStoryContext,
-  readFigmaDesignMap,
+  readFigmaDesignSpec,
   buildFigmaAlignInstruction,
   AGENT_CONSTRAINTS
 }

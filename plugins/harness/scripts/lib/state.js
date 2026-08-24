@@ -257,14 +257,13 @@ const PHASE_ARTIFACTS = {
       { fileName: 'acceptance-criteria.json', description: '验收标准契约', contract: true },
       { fileName: 'open-questions.json', description: '待确认项契约', contract: true },
       { fileName: 'prototype-analysis.md', description: '原型分析文档（有原型链接时产出）', contract: false, optional: true },
-      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出）', contract: true, optional: true }
+      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出，每个 frame 含 id/name/link/type/rect 及可选 designSpec 设计规格摘要）', contract: true, optional: true }
     ]
   },
   1: {
     artifacts: [
       { fileName: 'task-dag.md', description: '任务 DAG 文档', contract: false },
-      { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true },
-      { fileName: 'figma-component-map.md', description: 'Figma 组件映射文档（有 Figma 设计稿时产出，将 Figma 视觉规范翻译为开发规范）', contract: false, optional: true, requiredWhen: 'hasFigmaDesign' }
+      { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true }
     ]
   },
   2: { artifacts: [{ fileName: null, description: '代码变更（git diff）', contract: false }] },
@@ -738,20 +737,6 @@ function checkTaskDAGDoc (storyId) {
 }
 
 /**
- * 🌐 检查 Figma 组件映射文档是否存在
- * Phase 1 完成后、Phase 2 开始前，如果用户提供了 Figma 设计稿，必须输出此文档
- * @param {string} storyId - Story ID
- * @returns {{ exists: boolean, path: string }}
- */
-function checkFigmaComponentMap (storyId) {
-  const filePath = path.join(getStoryDir(storyId), 'figma-component-map.md')
-  return {
-    exists: fs.existsSync(filePath),
-    path: filePath
-  }
-}
-
-/**
  * 🌐 检查工作流是否指定了 Figma 设计稿
  * @param {Object} state - 状态对象
  * @returns {boolean}
@@ -838,11 +823,14 @@ function validateTaskFigmaReferences (storyId) {
     ? new Set(figmaCheck.frames.map(f => f.id))
     : new Set()
 
-  // 检查每个 task 是否引用了 figmaNodeId（支持单值 string 或多值 array）
+  // 检查每个 task 是否引用了 figmaNodeId（单值 string / 多值 array / figmaRefs 精确配对）
   for (const task of tdjCheck.tasks) {
     // 归一化 figmaNodeId 为数组：null/undefined/空数组 → 未绑定；string → 单元素
     let nodeIds = []
-    if (Array.isArray(task.figmaNodeId)) {
+    if (Array.isArray(task.figmaRefs)) {
+      // 优先用精确配对 figmaRefs（nodeId + link），nodeIds 取自其 nodeId
+      nodeIds = task.figmaRefs.map(r => r && r.nodeId).filter(Boolean)
+    } else if (Array.isArray(task.figmaNodeId)) {
       nodeIds = task.figmaNodeId.filter(Boolean)
     } else if (typeof task.figmaNodeId === 'string' && task.figmaNodeId.trim()) {
       nodeIds = [task.figmaNodeId.trim()]
@@ -854,7 +842,7 @@ function validateTaskFigmaReferences (storyId) {
         result.unmatched.push({
           taskId: task.id,
           title: task.title,
-          reason: 'Vue 组件缺少 figmaNodeId 引用，请在 task-dag.json 中为 ' + (task.title || task.id) + ' 添加 figmaNodeId 字段'
+          reason: 'Vue 组件缺少 figmaNodeId/figmaRefs 引用，请在 task-dag.json 中为 ' + (task.title || task.id) + ' 添加 figmaNodeId 或 figmaRefs 字段'
         })
       }
     } else if (figmaFrameIds.size > 0) {
@@ -898,16 +886,18 @@ function getTasksRequiringFigma (storyId) {
 
   const result = []
   for (const task of taskData.tasks) {
-    // 归一化 figmaNodeId（单值 string 或多值 array）
+    // 归一化 figmaRefs / figmaNodeId（figmaRefs 优先，其次单值 string 或多值 array）
     let nodeIds = []
-    if (Array.isArray(task.figmaNodeId)) {
+    if (Array.isArray(task.figmaRefs)) {
+      nodeIds = task.figmaRefs.map(r => r && r.nodeId).filter(Boolean)
+    } else if (Array.isArray(task.figmaNodeId)) {
       nodeIds = task.figmaNodeId.filter(Boolean)
     } else if (typeof task.figmaNodeId === 'string' && task.figmaNodeId.trim()) {
       nodeIds = [task.figmaNodeId.trim()]
     }
 
     // 涉及 UI 的判定：
-    //   1) 显式声明了 figmaNodeId
+    //   1) 显式声明了 figmaNodeId/figmaRefs
     //   2) files 含 .vue 文件
     //   3) files 是目录级 glob（如 src/views/pc/modules/** 或纯目录）——可能涵盖 .vue 组件，保守视为需 Figma
     const hasVueFile = Array.isArray(task.files) && task.files.some(f => {
@@ -1566,7 +1556,6 @@ module.exports = {
   findBugAnalysisReports,
   checkRequirementDoc,
   checkTaskDAGDoc,
-  checkFigmaComponentMap,
   hasFigmaDesign,
   checkFigmaFrameInventory,
   validateTaskFigmaReferences,

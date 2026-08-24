@@ -76,10 +76,10 @@ const PHASE_GATE_CONDITIONS = {
   },
   2: {
     name: '代码开发',
-    description: 'Phase 2 开始前需要 Phase 1 完成 + Figma映射（如有）',
+    description: 'Phase 2 开始前需要 Phase 1 完成',
     prerequisites: ['phase0Completed', 'phase1Completed'],
     completionChecks: ['noLintErrors'],
-    conditionalChecks: ['hasFigmaMapIfDesign']
+    conditionalChecks: []
   },
   3: {
     name: '代码审查',
@@ -520,21 +520,6 @@ function validateGate (storyId, targetPhase) {
         )
       }
     }
-  }
-
-  // 🌐 Figma 组件映射检查（条件性：仅当 hasFigmaDesign=true 时要求）
-  if (gateDef.conditionalChecks?.includes('hasFigmaMapIfDesign')) {
-    if (state?.hasFigmaDesign === true) {
-      const figmaMapPath = path.join(PLANS_DIR, storyId, 'figma-component-map.md')
-      if (!fs.existsSync(figmaMapPath)) {
-        blockers.push(
-          'Figma 组件映射文档 (figma-component-map.md) 不存在。' +
-          '当前 Story 标注了 Figma 设计稿 (hasFigmaDesign=true)，' +
-          '必须在 Phase 2 开始前执行 figma-to-component-map skill 生成映射表。'
-        )
-      }
-    }
-    // hasFigmaDesign !== true 时不阻断，跳过
   }
 
   // 🌐 Figma Frame 清单检查（Phase 0→1，条件性：仅当 hasFigmaDesign=true）

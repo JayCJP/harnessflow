@@ -359,7 +359,7 @@ function runGateCheck (storyId, phaseNum, state) {
 
   if (phaseNum < 0) return result // Phase 0 无前置
 
-  // 1. 产出物存在性检查（传入 state 以启用条件必需产出物，如 hasFigmaDesign 时的 figma-component-map.md）
+  // 1. 产出物存在性检查（传入 state 以启用条件必需产出物，如 hasFigmaDesign 时的 figma-frame-inventory.json）
   const artifact = checkPhaseArtifact(storyId, phaseNum, state)
   if (!artifact.exists) {
     for (const m of artifact.missing) {
