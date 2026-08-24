@@ -1190,11 +1190,21 @@ function checkAcceptanceVerification (storyId) {
   }
 
   // 门控通过条件：failed=0 且 errors=0（unverifiable 不阻塞，降级为 warning）
-  // 边界保护：unverifiable 超过 50% 时升级为阻塞
+  // 边界保护：unverifiable 超过阈值时升级为阻塞
+  // 阈值可配置（进化点 P-001）：默认 0.5（run 模式）；
+  // fixbugs 模式默认放宽为 1.0（Bug 修复多依赖授权态/联调环境，ui 型 AC 难以运行时
+  // 验证，静态代码级验证即可放行，避免每次 fixbugs 都需人工改源码绕过阈值）。
+  // 均可用 HARNESS_UNVERIFIABLE_RATIO 显式覆盖（如 "0.8"）。
   const total = data.results.length || 1
   const unverifiableRatio = result.unverifiable.length / total
-  if (unverifiableRatio > 0.5) {
-    result.errors.push(`unverifiable 比例 ${Math.round(unverifiableRatio * 100)}% 超过 50% 阈值，需补充验证`)
+  const storyMode = getStoryMode(storyId)
+  let unverifiableThreshold = storyMode === 'fixbugs' ? 1.0 : 0.5
+  const envRatio = Number(process.env.HARNESS_UNVERIFIABLE_RATIO)
+  if (Number.isFinite(envRatio) && envRatio >= 0) {
+    unverifiableThreshold = envRatio
+  }
+  if (unverifiableRatio > unverifiableThreshold) {
+    result.errors.push(`unverifiable 比例 ${Math.round(unverifiableRatio * 100)}% 超过阈值 ${Math.round(unverifiableThreshold * 100)}%（${storyMode} 模式），需补充验证`)
   }
 
   result.allPassed = result.failed.length === 0 && result.errors.length === 0

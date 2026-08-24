@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1786930082480,
+  "createdAt": 1787545580407,
   "plugins": [
     {
       "name": "harness",
@@ -99,7 +99,7 @@
         ],
         "PreToolUse": [
           {
-            "matcher": "write_to_file|replace_in_file|Write|Edit|execute_command|Bash",
+            "matcher": "write_to_file|replace_in_file|apply_patch|Write|Edit|execute_command|Bash",
             "hooks": [
               {
                 "type": "command",
@@ -110,7 +110,7 @@
             ]
           },
           {
-            "matcher": "write_to_file|replace_in_file",
+            "matcher": "write_to_file|replace_in_file|apply_patch|Write|Edit",
             "hooks": [
               {
                 "type": "command",
@@ -121,7 +121,7 @@
             ]
           },
           {
-            "matcher": "write_to_file|replace_in_file",
+            "matcher": "write_to_file|replace_in_file|apply_patch|Write|Edit",
             "hooks": [
               {
                 "type": "command",
@@ -134,7 +134,7 @@
         ],
         "PostToolUse": [
           {
-            "matcher": "execute_command|Skill|use_skill|mcp__",
+            "matcher": "execute_command|Bash|Agent|Skill|use_skill|mcp__",
             "hooks": [
               {
                 "type": "command",
@@ -190,6 +190,16 @@
           "path": "skills/harness-evolve"
         },
         {
+          "name": "harness-fixbugs",
+          "description": "Start or resume the Harness Engineering bug-fix workflow from TAPD or supplied defect context. Use when the user invokes $harness-fixbugs or requests the gated Harness fixbugs lifecycle.",
+          "path": "skills/harness-fixbugs"
+        },
+        {
+          "name": "harness-run",
+          "description": "Start, resume, inspect, or end the Harness Engineering feature-development workflow. Use when the user invokes $harness-run or asks to run the gated Harness lifecycle for a Story.",
+          "path": "skills/harness-run"
+        },
+        {
           "name": "kb-init",
           "description": "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录",
           "path": "skills/kb-init"
@@ -215,7 +225,8 @@
           "name": "kb-auto-query",
           "path": "rules\\kb-auto-query.md"
         }
-      ]
+      ],
+      "status": "enabled"
     }
   ]
 }
