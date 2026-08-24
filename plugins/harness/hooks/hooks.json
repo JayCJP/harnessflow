@@ -12,7 +12,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "write_to_file|replace_in_file|Write|Edit|execute_command|Bash",
+        "matcher": "write_to_file|replace_in_file|apply_patch|Write|Edit|execute_command|Bash",
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/enforce-state-file.js",
@@ -20,7 +20,7 @@
         }]
       },
       {
-        "matcher": "write_to_file|replace_in_file",
+        "matcher": "write_to_file|replace_in_file|apply_patch|Write|Edit",
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/enforce-dev-pass.js",
@@ -28,7 +28,7 @@
         }]
       },
       {
-        "matcher": "write_to_file|replace_in_file",
+        "matcher": "write_to_file|replace_in_file|apply_patch|Write|Edit",
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/enforce-artifact.js",
@@ -38,7 +38,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "execute_command|Skill|use_skill|mcp__",
+        "matcher": "execute_command|Bash|Agent|Skill|use_skill|mcp__",
         "hooks": [{
           "type": "command",
           "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/trace-command.js",

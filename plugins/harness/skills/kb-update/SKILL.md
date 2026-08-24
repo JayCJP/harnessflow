@@ -1,7 +1,6 @@
 ---
 name: "kb-update"
 description: "任务完成后自动增量更新知识库。接收 git commit hash，通过 git diff 定位变更文件，基于 meta.yaml 数据驱动受影映射到响业务域，调用 gen-project-docs 增量模式更新文档，保留手工批注。驱动词：更新知识库、kb-update、同步知识库"
-location: "user"
 ---
 
 # kb-update — 任务完成后自动更新知识库（全局 Skill）

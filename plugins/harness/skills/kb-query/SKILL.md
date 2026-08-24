@@ -1,7 +1,6 @@
 ---
 name: "kb-query"
 description: "渐进式分层知识库检索。三层检索：L1 overview关键词匹配定位域 → L2 meta.yaml精确筛选 → L3 按需加载文档。支持4种模式：需求拆解/技术方案/接口搜索/知识问答。自动触发：代码修改、需求分析、接口查找、技术方案、改bug、新增功能等场景。查找代码时应与 graphify 双源交叉验证（query/explain/path）。"
-location: "user"
 ---
 
 # kb-query — 渐进式分层知识库检索（全局 Skill）

@@ -1,0 +1,41 @@
+{
+  "name": "harness",
+  "version": "2.0.0+codex.20260819073356",
+  "description": "Harness Engineering end-to-end workflow for requirements, planning, development, review, testing, and delivery.",
+  "author": {
+    "name": "Harness Team",
+    "url": "https://github.com/JayCJP/harnessflow"
+  },
+  "homepage": "https://github.com/JayCJP/harnessflow",
+  "repository": "https://github.com/JayCJP/harnessflow",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "cicd",
+    "bug-fix",
+    "code-review",
+    "testing",
+    "deployment",
+    "phase-management"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Harness Engineering",
+    "shortDescription": "End-to-end engineering workflow orchestration",
+    "longDescription": "Orchestrates requirements analysis, task planning, implementation, code review, testing, and delivery through a gated engineering workflow.",
+    "developerName": "Harness Team",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/JayCJP/harnessflow",
+    "defaultPrompt": [
+      "Use $harness-run to plan and implement this feature.",
+      "Use $harness-fixbugs to investigate and fix these bugs.",
+      "Audit the current Harness workflow and suggest improvements."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

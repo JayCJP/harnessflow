@@ -26,11 +26,18 @@ try { inputData = JSON.parse(stdinData) } catch { console.log(JSON.stringify({ c
 
 const toolName = inputData.tool_name || ''
 const toolInput = inputData.tool_input || {}
-const filePath = toolInput.filePath || toolInput.file_path || ''
+const patchPaths = toolName === 'apply_patch'
+  ? [...String(toolInput.command || '').matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map(m => m[1].trim())
+  : []
+const filePaths = patchPaths.length > 0
+  ? patchPaths
+  : [toolInput.filePath || toolInput.file_path || ''].filter(Boolean)
+const srcFilePaths = filePaths.filter(isSrcFile)
+const filePath = srcFilePaths[0] || ''
 
-const writeTools = ['write_to_file', 'replace_in_file', 'Write', 'Edit']
+const writeTools = ['write_to_file', 'replace_in_file', 'apply_patch', 'Write', 'Edit']
 if (!writeTools.includes(toolName)) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
-if (!isSrcFile(filePath)) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
+if (srcFilePaths.length === 0) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
 
 const harnessFlag = path.join(PLANS_DIR, '.harness-active')
 let harnessActive = false
@@ -184,7 +191,8 @@ try {
 } catch {}
 
 if (passFile && Array.isArray(passFile.allowedPaths) && passFile.allowedPaths.length > 0) {
-  if (!isFileInAllowedPaths(filePath, passFile.allowedPaths, devPass.storyId)) {
+  const deniedFile = srcFilePaths.find(target => !isFileInAllowedPaths(target, passFile.allowedPaths, devPass.storyId))
+  if (deniedFile) {
     // 写入 trace 记录 Hook 拒绝事件
     trace.appendTrace(devPass.storyId || null, {
       type: 'hook_rejection',
@@ -193,21 +201,21 @@ if (passFile && Array.isArray(passFile.allowedPaths) && passFile.allowedPaths.le
       phase: '2',
       recordFailure: {
         failureType: 'dev_pass_scope_violation',
-        rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + filePath,
+        rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + deniedFile,
         resolution: '只允许编辑 task-dag.json 中声明的文件，请检查 files 列表'
       }
     })
 
     console.log(JSON.stringify({
       continue: false,
-      stopReason: "File " + filePath + " not in dev-pass scope. Allowed: " + passFile.allowedPaths.join(", "),
+      stopReason: "File " + deniedFile + " not in dev-pass scope. Allowed: " + passFile.allowedPaths.join(", "),
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
         permissionDecisionReason: 'File not in dev-pass scope',
         recordFailure: {
           failureType: 'dev_pass_scope_violation',
-          rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + filePath,
+          rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + deniedFile,
           resolution: '只允许编辑 task-dag.json 中声明的文件，请检查 files 列表'
         }
       }

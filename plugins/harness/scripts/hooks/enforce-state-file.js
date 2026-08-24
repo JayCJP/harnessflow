@@ -66,6 +66,24 @@ const AUTHORIZED_SCRIPTS = [
 // 文件工具之外，shell 也能写状态文件（node -e fs.writeFileSync / 重定向 / sed -i 等）。
 // 若不拦截，"状态文件单写者" 只在文件工具这一条通道上成立，等于形同虚设。
 const bashTools = ['Bash', 'execute_command']
+const patchTools = ['apply_patch']
+if (patchTools.includes(toolName)) {
+  const patch = toolInput.command || ''
+  const mentioned = PROTECTED_FILES.find(pf => patch.includes(pf))
+  if (mentioned) {
+    console.log(JSON.stringify({
+      continue: false,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `State file protection: patch cannot modify ${mentioned}; use the authorized workflow script`
+      }
+    }))
+    process.exit(2)
+  }
+  console.log(JSON.stringify({ continue: true }))
+  process.exit(0)
+}
 if (bashTools.includes(toolName)) {
   const command = toolInput.command || ''
 
