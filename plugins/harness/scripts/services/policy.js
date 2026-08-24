@@ -1119,7 +1119,15 @@ function checkContractRegression (storyId) {
 function getChangedFiles (repoRoot) {
   try {
     const out = execSync('git status --porcelain', {
-      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 30000,
+      // maxBuffer 必须显式放大：Node 默认 1MB。正常仓库远达不到，但 .gitignore 一旦失效
+      // 就会被轻易打满（本项目实测发生过两次：构建产物未忽略、.eslintrc-auto-import.json 被跟踪）。
+      // 溢出抛 ENOBUFS → 旧实现静默 return [] → 门控认为「没有变更文件」从而完全跳过增量 lint，
+      // 这是比误报更危险的静默放行。
+      maxBuffer: 64 * 1024 * 1024
     })
     return out.split('\n')
       .map(l => l.trim())
@@ -1132,6 +1140,12 @@ function getChangedFiles (repoRoot) {
       .map(p => p.replace(/^"|"$/g, ''))
       .filter(p => !p.endsWith('/'))
   } catch (e) {
+    // 「非 git 仓库」是预期情况，静默即可；其余异常必须可见 ——
+    // 否则采集失败与「确实没有变更」不可区分，门控会静默退化为放行。
+    const msg = String((e && e.message) || '')
+    if (!/not a git repository/i.test(msg)) {
+      console.error(`[policy] getChangedFiles 失败，增量 lint 将被跳过 (${repoRoot}): ${msg.split('\n')[0]}`)
+    }
     return []
   }
 }
@@ -1150,10 +1164,28 @@ function runIncrementalLint (repoRoot, files) {
   let output = ''
   try {
     output = execSync(`npx eslint ${args} --format compact`, {
-      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 180000
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 180000,
+      // maxBuffer 必须显式放大，且此处比 build 更隐蔽：eslint 有 error 时以非 0 退出，
+      // 所以下方 catch 是「正常路径」，1MB 溢出不会引起任何怀疑 —— e.stdout 只剩被截断的
+      // 前 1MB，超出部分的 Error 被静默丢弃，门控就会放行带 lint error 的代码。
+      // compact 格式约 80~150 B/行，1MB ≈ 7000~12000 条消息。
+      maxBuffer: 64 * 1024 * 1024
     })
   } catch (e) {
     output = String(e.stdout || e.stderr || e.message || '')
+    // ENOBUFS 表示输出被截断，此时「没扫到 Error」的结论不成立（缺证据，而非有反证）。
+    // 与 runBuildCheck 相反，这里必须 fail-closed：build 的溢出有 exit 0 作为成功证据，
+    // lint 的溢出什么证据都没有，静默放行的代价远高于让人手动复核一次。
+    if (e && (e.code === 'ENOBUFS' || /maxBuffer/i.test(String(e.message || '')))) {
+      return {
+        hasErrors: true,
+        details: `eslint 输出超过 maxBuffer(64MB)，结果不完整，无法确认是否存在 error。\n仓库: ${repoRoot}\n请手动复核: npx eslint <变更文件> --format compact`,
+        skipped: false
+      }
+    }
   }
   const errorLines = output.split('\n').filter(l => /:\s*line\s+\d+,\s*col\s+\d+,\s*Error\s+-/i.test(l))
   return {
@@ -1185,10 +1217,29 @@ function runBuildCheck (repoRoot) {
   const command = `npm run ${name}`
   try {
     execSync(command, {
-      cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 900000
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 900000,
+      // maxBuffer 必须显式放大：Node 默认 1MB，而中大型前端项目的构建日志轻易超过它
+      // （实测 userlive `vue-cli-service build --mode production` 输出 5.33MB / 35487 行，
+      //   其中 7778 条是 mini-css-extract-plugin 的 chunk order 警告 —— 构建 exit 0 完全成功）。
+      // 溢出时 execSync 抛 ENOBUFS 被下方 catch 捕获，会把「构建成功」误判成「编译失败」，
+      // 且 details 只取末尾 25 行，呈现出的是无害警告，导致排查方向被完全带偏。
+      maxBuffer: 64 * 1024 * 1024
     })
     return { ok: true, details: '', command, skipped: false }
   } catch (e) {
+    // ENOBUFS 单独识别：它表示输出超限而非编译失败，不应判定为 build 失败
+    if (e && (e.code === 'ENOBUFS' || /maxBuffer/i.test(String(e.message || '')))) {
+      return {
+        ok: true,
+        details: '',
+        command,
+        skipped: false,
+        bufferOverflow: true
+      }
+    }
     const output = String(e.stdout || '') + '\n' + String(e.stderr || e.message || '')
     const lines = output.split('\n').filter(l => l.trim())
     return { ok: false, details: lines.slice(-25).join('\n'), command, skipped: false }

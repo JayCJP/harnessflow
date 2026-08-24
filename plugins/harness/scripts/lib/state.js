@@ -1376,7 +1376,7 @@ function renewDevPass (storyId, ttl = DEV_PASS_TTL) {
 // ─── 修复回路配置 ───────────────────────────────────────────────
 
 /** 默认最大修复轮次 */
-const DEFAULT_MAX_FIX_ROUNDS = 2
+const DEFAULT_MAX_FIX_ROUNDS = 4
 
 /**
  * 获取修复回路最大轮次配置
