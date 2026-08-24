@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1787545580407,
+  "createdAt": 1787560427776,
   "plugins": [
     {
       "name": "harness",
@@ -225,8 +225,7 @@
           "name": "kb-auto-query",
           "path": "rules\\kb-auto-query.md"
         }
-      ],
-      "status": "enabled"
+      ]
     }
   ]
 }

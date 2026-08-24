@@ -130,7 +130,7 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 | **DevOps MCP** | 云端构建、部署 | 发布助手（⑤构建发布） | 需云端部署时必需 |
 | **Sequential Thinking MCP** | 任务拆解时的结构化推理 | 任务规划师 | 建议启用 |
 
-> **提示**：以上 MCP 服务名（如 `TAPD MCP Server`、`Figma`、`Playwright`、`GitLab`、`devops`）需与工具配置中的 MCP 名称一致，Agent 通过 `mcp_call_tool(serverName, ...)` 调用。
+> **提示**：以上 MCP 服务名（如 `TAPD_MCP_Server`、`Figma_MCP`、`Playwright`、`GitLab`、`Devops`、`Sequential_Thinking`）需与工具配置中的 MCP 名称一致，Agent 通过 `mcp_call_tool(serverName, ...)` 调用。
 > 未配置对应 MCP 时，涉及该能力的环节会失败并如实告知，不会静默跳过。
 
 ---
