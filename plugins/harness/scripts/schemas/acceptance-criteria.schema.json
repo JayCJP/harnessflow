@@ -34,7 +34,11 @@
           "description": { "type": "string", "minLength": 1 },
           "project": { "type": ["string", "null"] },
           "repoPath": { "type": ["string", "null"] },
-          "testType": { "type": "string", "enum": ["ui", "api", "integration"] },
+          "testType": {
+            "type": "string",
+            "enum": ["ui", "ui-static", "api", "integration"],
+            "description": "验收类型。ui=需运行时交互断言（点击/禁用态/视觉，需 Playwright/人工点验）；ui-static=静态可验证的 UI 断言（纯文案/样式/无状态逻辑，代码级验证即可，不计入 unverifiable 死锁）；api=接口；integration=跨项目联调"
+          },
           "given": { "type": "string" },
           "when": { "type": "string" },
           "then": { "type": "string" },
