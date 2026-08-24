@@ -29,8 +29,6 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/harness-audit.js --json
 ```
 
 **采集数据**:
-- settings.json 是否存在且有效
-- hooks/ 目录完整性 + 语法检查
 - **核心脚本语法体检**（services/lib/audit/commands 全量 .js/.cjs 的 node --check）
 - **引用完整性检查**（调用但未定义/未导出的悬空引用，抓 ReferenceError 元凶）
 - **声明-消费一致性检查**（story-input 声明了 figmaUrl 但未产出 frame 清单）
@@ -44,8 +42,6 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/harness-audit.js --json
 ## 体检结果
 | 检查项 | 状态 | 说明 |
 |--------|------|------|
-| settings.json | ✅ | 有效 |
-| hooks/ | ✅ | 7个hook全部通过 |
 | 活跃Story | ✅ | STORY-001 (Phase 4) |
 | 产出物完整性 | ⚠ | 2个Story缺少code-review.json |
 ```
@@ -181,8 +177,6 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/metrics-aggregator.js --json
 ### 0. 体检结果 (audit)
 | 检查项 | 状态 | 说明 |
 |--------|------|------|
-| settings.json | ✅ | 有效 |
-| hooks/ | ✅ | 7个hook通过 |
 | 活跃Story | ✅ | STORY-001 Phase 4 |
 | 产出物 | ⚠ | 2个Story缺code-review.json |
 

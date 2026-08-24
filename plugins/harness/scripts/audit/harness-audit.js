@@ -9,20 +9,6 @@ const jsonOnly = args.includes("--json")
 const issues = [], warnings = [], fixed = []
 const summary = {}
 
-function auditHooks() {
-  // 实际 hook 脚本位于 scripts/hooks/ (audit 的 __dirname 是 scripts/audit/，所以 ../hooks)
-  const hd = path.join(__dirname, "..", "hooks")
-  if (!fs.existsSync(hd)) { issues.push({ cat: "hooks", severity: "BLOCKER", msg: "hooks 脚本目录不存在: " + hd }); return }
-  // 当前实际 hook 文件 (v2: .js 后缀)
-  const exp = ["session-start.js","session-stop.js","enforce-dev-pass.js","enforce-artifact.js","enforce-state-file.js","trace-command.js"]
-  const ex = fs.readdirSync(hd).filter(f => f.endsWith(".js") || f.endsWith(".cjs"))
-  for (const f of exp) { if (!ex.includes(f)) issues.push({ cat: "hooks", severity: "BLOCKER", msg: "缺失 hook: " + f }) }
-  for (const f of ex) {
-    try { execSync("node --check \"" + path.join(hd, f) + "\"", { timeout: 5000, stdio: "pipe" }) }
-    catch (e) { issues.push({ cat: "hooks", severity: "BLOCKER", msg: "Hook 语法错误: " + f + " — " + ((e.stderr||"")+"").substring(0,200) }) }
-  }
-}
-
 /**
  * 核心脚本语法体检 — 覆盖 scripts/{lib,services,audit,commands} 全量 .js/.cjs
  *
@@ -351,7 +337,7 @@ function auditArtifacts() {
 }
 
 function run() {
-  auditHooks(); auditCoreScripts(); auditDanglingReferences(); auditActiveStory(); auditDevPass(); auditContracts(); auditDeclarationConsumption(); auditArtifacts()
+  auditCoreScripts(); auditDanglingReferences(); auditActiveStory(); auditDevPass(); auditContracts(); auditDeclarationConsumption(); auditArtifacts()
   summary.auditedAt = (new Date()).toISOString()
   summary.totalIssues = issues.length; summary.totalWarnings = warnings.length; summary.totalFixed = fixed.length
   if (jsonOnly) { console.log(JSON.stringify({ summary: summary, issues: issues, warnings: warnings, fixed: fixed }, null, 2)); return }

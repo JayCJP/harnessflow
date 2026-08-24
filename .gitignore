@@ -3,3 +3,6 @@ graphify-out/
 
 # 知识库模板副本（kb-init 运行时从 skill 模板复制，与 skill 源重复，不入库）
 .docs/llm-knowledge/templates/
+
+# Harness 运行时状态目录（Story plans / 激活标记 / 测试残留），不入库
+.codebuddy/

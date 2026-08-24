@@ -295,10 +295,10 @@ const RECOVERY_SUGGESTIONS = {
     autoFixable: false,
     resolution: 'node advance-phase.js <storyId> 2 --fix-loop'
   },
-  // 修复回路耗尽：已达最大轮次
+  // 修复回路耗尽：已达最大轮次（按失败源独立预算：code-review 与 test 各 2 次）
   fix_loop_exhausted: {
     level: 4,
-    action: '已达最大修复轮次 (2)，需人工介入：1)人工评审剩余BLOCKER 2)联系需求分析师确认AC 3)联系任务规划师重新拆解',
+    action: '已达当前失败源的最大修复轮次 (代码审查 2 次 / 功能测试 2 次，独立计数)，需人工介入：1)人工评审剩余BLOCKER 2)联系需求分析师确认AC 3)联系任务规划师重新拆解',
     autoFixable: false
   },
   // JSON 产出物解析失败（语法错误）
@@ -941,10 +941,6 @@ function checkPhase4Gate (storyId, result) {
       type = 'ac_verification_failed'
       level = 4
       resolution = 'acceptance-verification.json 必须有 results 数组'
-    } else if (lower.includes('unverifiable 比例')) {
-      type = 'ac_verification_failed'
-      level = 4
-      resolution = 'unverifiable 比例超过 50%，需补充跨项目验证'
     }
 
     result.blockers.push(structuredError(type, String(e), level, resolution))

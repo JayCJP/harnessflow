@@ -276,11 +276,6 @@ function buildSummary(activeWorkflows, completedWorkflows, changedFiles, harness
       phaseName: getPhaseName(w.state.phase),
       status: w.state.status
     })),
-    completedWorkflows: completedWorkflows.map(w => ({
-      storyId: w.storyId,
-      title: w.state.title || '',
-      completedAt: w.state.completedAt || ''
-    })),
     harness: {
       active: fs.existsSync(HARNESS_ACTIVE_FILE),
       ended: harnessResult.ended,
@@ -324,7 +319,6 @@ function serializeSummary(summary) {
   return JSON.stringify({
     sessionEndedAt: summary.sessionEndedAt,
     activeWorkflows: summary.activeWorkflows.map(w => ({ storyId: w.storyId, phase: w.phase, status: w.status })),
-    completedWorkflows: summary.completedWorkflows.map(w => ({ storyId: w.storyId })),
     harness: summary.harness,
     changedFiles: { total: summary.changedFiles.total, srcTotal: summary.changedFiles.srcTotal, src: [], truncated: true },
     kbUpdateTasks: summary.kbUpdateTasks.map(t => ({ storyId: t.storyId })),

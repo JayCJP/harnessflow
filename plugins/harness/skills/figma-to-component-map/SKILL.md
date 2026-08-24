@@ -15,6 +15,11 @@ description: >
 
 ## Phase 0: Produce Frame Inventory (`figma-frame-inventory.json`)
 
+> **按需分析（v2）**：本 skill 应在需求分析文档（`requirement-analysis.md`）产出之后调用。
+> 根据需求分析文档**只针对涉及的组件**生成 frame 清单，**不要全量扫描设计稿的所有页面**——
+> 需求不涉及的组件不必进清单，避免重复分析浪费 token。
+> 设计稿完整内容（布局/样式/文案/交互细节）不在此转译给下游，由开发 Agent 通过 Figma MCP 自行拉取。
+
 ### Step 1: List all pages
 
 Call `get_metadata` **without a nodeId** to get the top-level page list:
@@ -25,9 +30,9 @@ mcp_call_tool(serverName="Figma", toolName="get_metadata", arguments="{}")
 
 This returns GUID + name for every top-level page (e.g. `0:1` / "设置页", `1:2` / "会话页").
 
-### Step 2: Scan every page for frames
+### Step 2: Scan pages for frames RELEVANT to the requirement
 
-For each page ID, call `get_metadata` to dump the full node tree:
+For each page ID referenced by the requirement-analysis.md, call `get_metadata` to dump the node tree, and focus on frames that correspond to the components/pages the requirement actually touches:
 
 ```
 mcp_call_tool(serverName="Figma", toolName="get_metadata", arguments="{"nodeId":"0:1"}")
@@ -90,6 +95,7 @@ Write to: `.codebuddy/plans/<storyId>/figma-frame-inventory.json`
 ## Phase 1: Task → Frame Precise Mapping (via task-dag.json)
 
 > Only run when `task-dag.json` exists and contains `figmaNodeId` fields.
+> `figmaNodeId` 可为**单值 string** 或 **string 数组**（一个 task 处理多个组件时用数组）。逐个 node 拉取设计上下文。
 
 ### Step 1: Read `task-dag.json` figmaNodeId references
 
@@ -101,7 +107,7 @@ Write to: `.codebuddy/plans/<storyId>/figma-frame-inventory.json`
       "id": "T1",
       "title": "标签面板组件",
       "files": ["src/views/pc/Components/UserTagPanel.vue"],
-      "figmaNodeId": "3:456",
+      "figmaNodeId": ["3:456", "3:789"],
       "acceptanceCriteria": ["AC-001"]
     }
   ]
@@ -110,7 +116,7 @@ Write to: `.codebuddy/plans/<storyId>/figma-frame-inventory.json`
 
 ### Step 2: Direct design spec extraction (zero guessing)
 
-For each task with `figmaNodeId`, call `get_design_context` with THAT node ID:
+For each task with `figmaNodeId`, call `get_design_context` for **EACH node ID** in the array (single value = one node):
 
 ```
 mcp_call_tool(serverName="Figma", toolName="get_design_context",

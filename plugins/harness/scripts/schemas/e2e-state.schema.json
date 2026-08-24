@@ -13,7 +13,8 @@
     "updatedAt": { "type": "string", "format": "date-time" },
     "bypass": { "type": "boolean" },
     "hasFigmaDesign": { "type": "boolean" },
-    "maxFixRounds": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "maxReviewFixRounds": { "type": "integer", "minimum": 1, "maximum": 5, "description": "代码审查(Phase3)失败源的最大修复轮次，独立计数" },
+    "maxTestFixRounds": { "type": "integer", "minimum": 1, "maximum": 5, "description": "功能测试(Phase4)失败源的最大修复轮次，独立计数" },
     "phases": {
       "type": "object",
       "description": "各Phase状态。key为 {phase}_{slug}，value包含status字段。用于检测Agent篡改(phase标记completed但state.phase落后)",

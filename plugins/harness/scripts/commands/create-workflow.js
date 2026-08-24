@@ -33,7 +33,8 @@ const {
   detectFigmaSource,
   issueDevPass,
   ensureReposJson,
-  DEFAULT_MAX_FIX_ROUNDS
+  DEFAULT_MAX_REVIEW_FIX_ROUNDS,
+  DEFAULT_MAX_TEST_FIX_ROUNDS
 } = require('../lib/state')
 
 /**
@@ -126,7 +127,9 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode) {
     bypass: bypass || false,
     hasFigmaDesign: figma.enabled, // 🌐 是否开启 Figma 硬门控（信源: story-input.json figmaUrls / --figma）
     hasFigmaDesignReason: figma.reason, // 判定依据，便于排查门控为何未触发
-    maxFixRounds: DEFAULT_MAX_FIX_ROUNDS, // 修复回路最大轮次（审查/测试失败后回退开发的最大修复次数，可按需修改）
+    // 修复回路最大轮次 —— 按失败源（Phase 3 代码审查 / Phase 4 功能测试）独立预算，各 2 次，用尽转人工
+    maxReviewFixRounds: DEFAULT_MAX_REVIEW_FIX_ROUNDS,
+    maxTestFixRounds: DEFAULT_MAX_TEST_FIX_ROUNDS,
     gateChecks: {
       // 本 Story 是否要求 prototype-analysis.md（false 时 Phase 0→1 门控跳过原型检查）
       prototypeRequired: protoRequired.required,

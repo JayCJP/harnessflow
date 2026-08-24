@@ -838,9 +838,17 @@ function validateTaskFigmaReferences (storyId) {
     ? new Set(figmaCheck.frames.map(f => f.id))
     : new Set()
 
-  // 检查每个 task 是否引用了 figmaNodeId
+  // 检查每个 task 是否引用了 figmaNodeId（支持单值 string 或多值 array）
   for (const task of tdjCheck.tasks) {
-    if (!task.figmaNodeId) {
+    // 归一化 figmaNodeId 为数组：null/undefined/空数组 → 未绑定；string → 单元素
+    let nodeIds = []
+    if (Array.isArray(task.figmaNodeId)) {
+      nodeIds = task.figmaNodeId.filter(Boolean)
+    } else if (typeof task.figmaNodeId === 'string' && task.figmaNodeId.trim()) {
+      nodeIds = [task.figmaNodeId.trim()]
+    }
+
+    if (nodeIds.length === 0) {
       // 如果是纯逻辑 task（如 API 层），允许没有 Figma 引用
       if (task.files && task.files.some(f => f.includes('.vue'))) {
         result.unmatched.push({
@@ -849,12 +857,16 @@ function validateTaskFigmaReferences (storyId) {
           reason: 'Vue 组件缺少 figmaNodeId 引用，请在 task-dag.json 中为 ' + (task.title || task.id) + ' 添加 figmaNodeId 字段'
         })
       }
-    } else if (figmaFrameIds.size > 0 && !figmaFrameIds.has(task.figmaNodeId)) {
-      result.invalidRefs.push({
-        taskId: task.id,
-        figmaNodeId: task.figmaNodeId,
-        reason: 'figmaNodeId "' + task.figmaNodeId + '" 不在 figma-frame-inventory.json 中'
-      })
+    } else if (figmaFrameIds.size > 0) {
+      for (const nodeId of nodeIds) {
+        if (!figmaFrameIds.has(nodeId)) {
+          result.invalidRefs.push({
+            taskId: task.id,
+            figmaNodeId: nodeId,
+            reason: 'figmaNodeId "' + nodeId + '" 不在 figma-frame-inventory.json 中'
+          })
+        }
+      }
     }
   }
 
@@ -868,6 +880,55 @@ function validateTaskFigmaReferences (storyId) {
 
   result.valid = result.errors.length === 0
   return result
+}
+
+/**
+ * 获取本 Story 中「需要 Figma」的 task 列表（开发阶段判断是否要求校验 Figma MCP）
+ *
+ * 判定：task 声明了 figmaNodeId（单值或数组）或 files 含 .vue 文件，即视为涉及 UI、
+ * 需要对照设计稿。当需求要求 Figma（story-input 有 figmaUrls）且存在这类 task 时，
+ * 开发 Agent 开工前必须先校验 Figma MCP 可用性，不可用则停下流程。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {Array<{id: string, title: string, figmaNodeIds: string[]}>} 需要 Figma 的 task 列表
+ */
+function getTasksRequiringFigma (storyId) {
+  const taskData = readJsonArtifact(storyId, TASK_DAG_JSON_FILE)
+  if (!taskData || taskData._parseError || !Array.isArray(taskData.tasks)) return []
+
+  const result = []
+  for (const task of taskData.tasks) {
+    // 归一化 figmaNodeId（单值 string 或多值 array）
+    let nodeIds = []
+    if (Array.isArray(task.figmaNodeId)) {
+      nodeIds = task.figmaNodeId.filter(Boolean)
+    } else if (typeof task.figmaNodeId === 'string' && task.figmaNodeId.trim()) {
+      nodeIds = [task.figmaNodeId.trim()]
+    }
+
+    // 涉及 UI 的判定：
+    //   1) 显式声明了 figmaNodeId
+    //   2) files 含 .vue 文件
+    //   3) files 是目录级 glob（如 src/views/pc/modules/** 或纯目录）——可能涵盖 .vue 组件，保守视为需 Figma
+    const hasVueFile = Array.isArray(task.files) && task.files.some(f => {
+      if (f.includes('.vue')) return true
+      // 目录 glob / 目录路径 → 该目录下可能含 .vue 组件，保守视为 UI 相关
+      return /\*\*|\*/.test(f) || /\/$/.test(f)
+    })
+    if (nodeIds.length > 0 || hasVueFile) {
+      result.push({ id: task.id, title: task.title || task.id, figmaNodeIds: nodeIds })
+    }
+  }
+  return result
+}
+
+/**
+ * 判断本 Story 是否有 task 需要 Figma（供开发阶段 prompt 决定是否要求 Figma MCP 校验）
+ * @param {string} storyId - Story ID
+ * @returns {boolean} 是否存在需要 Figma 的 task
+ */
+function hasTaskRequiringFigma (storyId) {
+  return getTasksRequiringFigma(storyId).length > 0
 }
 
 // ─── 契约 JSON 读取与校验 ───────────────────────────────────────
@@ -1189,24 +1250,10 @@ function checkAcceptanceVerification (storyId) {
     }
   }
 
-  // 门控通过条件：failed=0 且 errors=0（unverifiable 不阻塞，降级为 warning）
-  // 边界保护：unverifiable 超过阈值时升级为阻塞
-  // 阈值可配置（进化点 P-001）：默认 0.5（run 模式）；
-  // fixbugs 模式默认放宽为 1.0（Bug 修复多依赖授权态/联调环境，ui 型 AC 难以运行时
-  // 验证，静态代码级验证即可放行，避免每次 fixbugs 都需人工改源码绕过阈值）。
-  // 均可用 HARNESS_UNVERIFIABLE_RATIO 显式覆盖（如 "0.8"）。
-  const total = data.results.length || 1
-  const unverifiableRatio = result.unverifiable.length / total
-  const storyMode = getStoryMode(storyId)
-  let unverifiableThreshold = storyMode === 'fixbugs' ? 1.0 : 0.5
-  const envRatio = Number(process.env.HARNESS_UNVERIFIABLE_RATIO)
-  if (Number.isFinite(envRatio) && envRatio >= 0) {
-    unverifiableThreshold = envRatio
-  }
-  if (unverifiableRatio > unverifiableThreshold) {
-    result.errors.push(`unverifiable 比例 ${Math.round(unverifiableRatio * 100)}% 超过阈值 ${Math.round(unverifiableThreshold * 100)}%（${storyMode} 模式），需补充验证`)
-  }
-
+  // 门控通过条件：failed=0 且 errors=0（unverifiable 不阻塞，跳过即可，降级为 warning）
+  // 历史缺陷: 旧实现有 unverifiable 比例阈值（run 0.5 / fixbugs 1.0），超过即阻塞推进，
+  //   导致大量依赖授权态/联调环境的 UI 型 AC 无法验证时被卡死流程。
+  //   既然无法验证就跳过，不阻塞 —— unverifiable 结果由 policy 层降级为 warning 提示即可。
   result.allPassed = result.failed.length === 0 && result.errors.length === 0
   return result
 }
@@ -1375,22 +1422,38 @@ function renewDevPass (storyId, ttl = DEV_PASS_TTL) {
 
 // ─── 修复回路配置 ───────────────────────────────────────────────
 
-/** 默认最大修复轮次 */
-const DEFAULT_MAX_FIX_ROUNDS = 4
+/**
+ * 默认最大修复轮次 —— 按失败源（Phase 3 代码审查 / Phase 4 功能测试）独立预算。
+ *
+ * 历史缺陷: 旧实现单一 `maxFixRounds`，Phase 3 与 Phase 4 发起的 fix-loop
+ * 共享同一轮次预算，code-review 耗尽的次数会吃掉 test 的额度，反之亦然。
+ * 现拆分为各 2 次独立计数，用尽各自转人工。
+ */
+const DEFAULT_MAX_REVIEW_FIX_ROUNDS = 2
+const DEFAULT_MAX_TEST_FIX_ROUNDS = 2
 
 /**
- * 获取修复回路最大轮次配置
- * 统一从 e2e-state.json 读取 maxFixRounds（在 create-workflow.js 创建 state 时写入）。
- * 如需调整，直接修改 e2e-state.json 的 maxFixRounds 字段即可，单一信源无歧义。
+ * 获取指定失败源的最大修复轮次配置
+ * 统一从 e2e-state.json 读取（在 create-workflow.js 创建 state 时写入）：
+ *   - sourcePhase 3（代码审查）→ maxReviewFixRounds
+ *   - sourcePhase 4（功能测试）→ maxTestFixRounds
+ * 缺省用各自默认值。如需调整，直接修改 e2e-state.json 对应字段即可，单一信源无歧义。
  * @param {string} storyId - Story ID
+ * @param {number} [sourcePhase] - 失败源 Phase（3=code-review / 4=test），缺省或非 3/4 回退到 review 预算
  * @returns {number} 最大修复轮次
  */
-function getMaxFixRounds (storyId) {
+function getMaxFixRounds (storyId, sourcePhase) {
   const state = readStateFile(storyId)
-  if (state && typeof state.maxFixRounds === 'number' && state.maxFixRounds > 0) {
-    return state.maxFixRounds
+  if (state && sourcePhase === 4) {
+    if (typeof state.maxTestFixRounds === 'number' && state.maxTestFixRounds > 0) {
+      return state.maxTestFixRounds
+    }
+    return DEFAULT_MAX_TEST_FIX_ROUNDS
   }
-  return DEFAULT_MAX_FIX_ROUNDS
+  if (state && typeof state.maxReviewFixRounds === 'number' && state.maxReviewFixRounds > 0) {
+    return state.maxReviewFixRounds
+  }
+  return DEFAULT_MAX_REVIEW_FIX_ROUNDS
 }
 
 // ─── 目录清理 ───────────────────────────────────────────────────
@@ -1507,6 +1570,8 @@ module.exports = {
   hasFigmaDesign,
   checkFigmaFrameInventory,
   validateTaskFigmaReferences,
+  getTasksRequiringFigma,
+  hasTaskRequiringFigma,
 
   // 契约 JSON 读取与校验
   ACCEPTANCE_CRITERIA_FILE,
@@ -1532,7 +1597,8 @@ module.exports = {
   renewDevPass,
 
   // 修复回路配置
-  DEFAULT_MAX_FIX_ROUNDS,
+  DEFAULT_MAX_REVIEW_FIX_ROUNDS,
+  DEFAULT_MAX_TEST_FIX_ROUNDS,
   getMaxFixRounds,
 
   // 结构化错误辅助

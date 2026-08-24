@@ -24,7 +24,11 @@ const path = require('path')
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
 // ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
+// 同时覆盖 CODEBUDDY_PROJECT_DIR 与 CLAUDE_PROJECT_DIR —— state.js 的 PROJECT_ROOT
+// 优先取 CODEBUDDY_PROJECT_DIR（CodeBuddy 宿主会设置该变量），只覆盖 CLAUDE_PROJECT_DIR
+// 会导致沙箱失效、读到真实项目目录。
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-figma-'))
+process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
 process.env.CLAUDE_PROJECT_DIR = SANDBOX
 fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
 

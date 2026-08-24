@@ -177,6 +177,25 @@ function isFileInAllowedPaths(targetFile, allowedPatterns, reposOrStoryId) {
 
     // 精确/glob 匹配：按仓库根解析为绝对路径后正则匹配
     var absAllowed = path.resolve(repoRoot, pattern).replace(/\\/g, "/")
+    // 目录级限域增强：允许 files 声明「模块目录」而非精确文件。
+    //   仅当 pattern 是「无通配符的目录路径」（以 / 结尾，或在磁盘上实际是目录）时，
+    //   才按目录前缀匹配该目录下任意层级文件 —— 这样开发在模块目录内新增/修改
+    //   符合规范的文件（如新增枚举常量文件）不再被误拦截。
+    //   含通配符（** / *）的模式仍走下方 glob 正则转换（如 src/**、src/views/*.vue）。
+    var isPlainDirPattern = /\/$/.test(pattern) || pattern === '.'
+    if (!isPlainDirPattern && absAllowed !== '') {
+      // TOCTOU 保护：existsSync+statSync 间目录可能被删，statSync 失败按非目录降级（走 glob 正则）
+      try {
+        isPlainDirPattern = fs.statSync(absAllowed).isDirectory()
+      } catch (_) { /* 目录不存在或不可访问，非目录模式 */ }
+    }
+    if (isPlainDirPattern) {
+      var dirAbs = /\/$/.test(absAllowed) ? absAllowed : absAllowed + "/"
+      if (absTarget.indexOf(dirAbs) === 0) return true
+      continue
+    }
+
+    // 精确文件或 glob 通配：转换为正则匹配
     var escaped = absAllowed.replace(/[.+^${}()|[\]\\]/g, "\\$&")
     var r = "^" + escaped.replace(/\*\*/g, "__STARSTAR__").replace(/\*/g, "[^/]+").replace(/__STARSTAR__/g, ".*") + "$"
     try { if (new RegExp(r).test(absTarget)) return true } catch {}

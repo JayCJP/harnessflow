@@ -26,17 +26,13 @@ const {
   readStoryInput,
   getStoryMode,
   detectFigmaSource,
-  readStateFile
+  readStateFile,
+  getMaxFixRounds,
+  hasTaskRequiringFigma
 } = require('../lib/state')
 
 const contextRefresh = require('./context-refresh')
 const experience = require('./experience')
-
-/** 单个契约文件注入 prompt 时的最大字符数，超出则截断 */
-const CONTRACT_TRUNCATE_LIMIT = 3000
-
-/** 单份 Story 背景资料（如 bug 分析报告）注入 prompt 时的最大字符数 */
-const STORY_CONTEXT_TRUNCATE_LIMIT = 6000
 
 /**
  * Agent 通用约束（所有 Phase 的 Agent 都必须遵守）
@@ -51,40 +47,37 @@ const AGENT_CONSTRAINTS = [
 ]
 
 /**
- * 读取契约文件内容并格式化为 prompt 片段
+ * 读取契约文件清单并格式化为 prompt 片段。
+ *
+ * v2（需求10）：不再内联截断契约内容 —— 截断会导致关键信息丢失（AC 全表、
+ * task-dag 全量文件、跨仓字段等被砍掉），让下游 Agent 基于残缺信息越做越错。
+ * 改为只给出**完整文件路径**，由 Agent 自行读取完整内容。token 由「内联截断」
+ * 让位给「按需读取」，信息完整性不再受注入上限约束。
+ *
  * @param {string} storyId - Story ID
  * @param {string[]} contractFiles - 契约文件路径列表（形如 .codebuddy/plans/<id>/xxx.json）
- * @returns {string[]} 已格式化的 markdown 片段
+ * @returns {string[]} 已格式化的 markdown 片段（每个文件一条路径提示）
  */
 function readContractContents (storyId, contractFiles) {
-  const contents = []
+  const lines = []
   for (const cf of contractFiles || []) {
     const cfPath = path.join(PLANS_DIR, storyId, cf.replace(/^\.codebuddy\/plans\/[^/]+\//, ''))
     if (!fs.existsSync(cfPath)) continue
-    try {
-      const content = fs.readFileSync(cfPath, 'utf-8')
-      const truncated = content.length > CONTRACT_TRUNCATE_LIMIT
-        ? content.slice(0, CONTRACT_TRUNCATE_LIMIT) + '\n... (内容已截断，完整内容请读取源文件)'
-        : content
-      contents.push(`### ${cf}\n\`\`\`\n${truncated}\n\`\`\``)
-    } catch (e) {
-      contents.push(`### ${cf}\n(读取失败: ${e.message})`)
-    }
+    lines.push(`- \`${cf}\` — 请读取该文件获取完整内容（路径: ${cfPath}）`)
   }
-  return contents
+  return lines
 }
 
 /**
- * 读取 Story 级背景资料，注入到每个 Phase 的 prompt。
+ * 读取 Story 级背景资料文件清单，注入到每个 Phase 的 prompt。
  *
- * 用途: /harness fixbugs 会先产出 `<标题>_bug分析报告.md`，Phase 0→8 的 Agent 都需要它。
- * 若交由主 Agent 逐个 Phase 手动注入，就又回到了"主 Agent 拼 prompt"的老路，
- * 因此改为约定式自动发现: 放进 Story 目录即全程可见，主 Agent 不需要感知。
+ * v2（需求10）：不再内联截断背景资料（如 bug 分析报告可能很长，截断后丢失
+ * 代码定位/根因等关键事实），改为只给文件路径，Agent 自行读取完整内容。
  *
  * 约定文件名: `*bug分析报告.md` 或 `story-context.md`
  *
  * @param {string} storyId - Story ID
- * @returns {string[]} 已格式化的 markdown 片段
+ * @returns {string[]} 已格式化的 markdown 片段（每个文件一条路径提示）
  */
 function readStoryContext (storyId) {
   const storyDir = path.join(PLANS_DIR, storyId)
@@ -103,15 +96,8 @@ function readStoryContext (storyId) {
 
   const contents = []
   for (const name of matched) {
-    try {
-      const raw = fs.readFileSync(path.join(storyDir, name), 'utf-8')
-      const truncated = raw.length > STORY_CONTEXT_TRUNCATE_LIMIT
-        ? raw.slice(0, STORY_CONTEXT_TRUNCATE_LIMIT) + '\n... (内容已截断，完整内容请读取源文件)'
-        : raw
-      contents.push(`### ${name}\n${truncated}`)
-    } catch (e) {
-      contents.push(`### ${name}\n(读取失败: ${e.message})`)
-    }
+    const fullPath = path.join(storyDir, name)
+    contents.push(`- \`${name}\` — 请读取该文件获取完整内容（路径: ${fullPath}）`)
   }
   return contents
 }
@@ -119,9 +105,8 @@ function readStoryContext (storyId) {
 /**
  * 读取 Phase 1 产出的 Figma 组件映射文档（figma-component-map.md），在 Phase 2 注入 prompt。
  *
- * 历史教训: 仅向前端 agent 注入 figmaLink 链接不足以让它对齐设计稿 —— 链接存在 ≠ 样式对齐。
- * 必须同时提供: ①「按设计稿实现」显式指令 ② 设计稿的视觉规范（色值/间距/字体，即组件映射）。
- * 本函数把 Phase 1 产出的组件映射（若有）注入 Phase 2 前端 agent 的 prompt，补齐第②项。
+ * v2（需求10）：不再内联映射全文（可能很长且含设计规格明细），改为给文件路径，
+ * Agent 结合 Figma MCP 完整拉取为准，映射文档仅作辅助参考。
  *
  * @param {string} storyId - Story ID
  * @returns {string[]} 已格式化的 markdown 片段，无组件映射时返回空数组
@@ -129,31 +114,23 @@ function readStoryContext (storyId) {
 function readFigmaDesignMap (storyId) {
   const mapPath = path.join(PLANS_DIR, storyId, 'figma-component-map.md')
   if (!fs.existsSync(mapPath)) return []
-  try {
-    const content = fs.readFileSync(mapPath, 'utf-8')
-    const truncated = content.length > CONTRACT_TRUNCATE_LIMIT
-      ? content.slice(0, CONTRACT_TRUNCATE_LIMIT) + '\n... (内容已截断，完整内容请读取源文件)'
-      : content
-    return [
-      '## Figma 组件映射（Phase 1 产出，开发必须遵循）',
-      '',
-      '> 以下映射把 Figma 设计稿的视觉规范翻译为开发规范，**严格按此实现样式**，不要使用默认/直觉样式。',
-      '```',
-      truncated,
-      '```',
-      ''
-    ]
-  } catch (e) {
-    return [`## Figma 组件映射\n(读取失败: ${e.message})\n`]
-  }
+  return [
+    '## Figma 组件映射（Phase 1 产出，开发必须遵循）',
+    '',
+    '> 以下映射把 Figma 设计稿的视觉规范翻译为开发规范，**严格按此实现样式**，不要使用默认/直觉样式。',
+    '> 请读取完整映射文件（路径: ' + mapPath + '）获取全部设计规格。',
+    ''
+  ]
 }
 
 /**
  * 构造「有 Figma 设计稿时必须对齐」的开发阶段指令片段。
  *
  * 仅在 Phase 2（前端开发）注入。核心诉求: 有 Figma 链接时，前端 agent 必须亲自
- * 用 Figma MCP 拉取完整设计内容实现，而不是吃 Phase 0/1 转译的二手 token 摘要
- * （色值/间距/字体只是设计稿的极小部分，会丢失大量细节）。
+ * 用 Figma MCP 拉取完整设计内容实现（设计稿内容由 agent 自行获取，不在 prompt 转译）。
+ * 因此 prompt 只保留**关键指令**（对齐设计稿 + MCP 不可用停下），删去冗长的样式还原
+ * 细节（CSS class / ::v-deep / 逐条核对等）——那些 agent 自会从 Figma MCP 获取，
+ * 写在 prompt 里只会常驻占用上下文（原为 924 字符固定文案，多轮 fix-loop 反复计费）。
  *
  * @param {string} storyId - Story ID
  * @param {number} targetPhase - 目标 Phase
@@ -163,25 +140,17 @@ function buildFigmaAlignInstruction (storyId, targetPhase) {
   if (targetPhase !== 2) return []
   const detected = detectFigmaSource(storyId)
   if (!detected.hasFigma) return []
+  // 需求要求 Figma，但本 Story 没有任何需要 Figma 的 task（纯逻辑改动，无 UI）→ 不强求对齐
+  if (!hasTaskRequiringFigma(storyId)) return []
 
   return [
-    '## 🎨 Figma 设计稿对齐（强制 — 必须用 Figma MCP 拉取完整设计内容）',
+    '## 🎨 Figma 设计稿对齐（强制）',
     '',
-    '**本 Story 已注入 Figma 设计稿链接，UI 必须严格对齐设计稿，禁止使用 ElementUI/组件库默认样式或自行发挥。**',
-    '',
-    '**硬性要求：每个 UI 任务都必须亲自调用 Figma MCP 拉取该节点的完整设计内容，不得依赖二手摘要/截图/组件映射推测。**',
-    '',
-    '对每个 UI 任务，必须：',
-    '1. 从 task 的 `figmaLink` 提取 node-id，调用 Figma MCP 拉取该节点的**完整设计上下文**：',
-    '   - `get_design_context` → 拿完整的布局/层级/样式/文案（不要只看截图）',
-    '   - `get_screenshot` → 作为视觉核对基准',
-    '   - 设计稿中的嵌套组件、状态变体（hover/disabled/空态/加载态）、交互细节，一律以 `get_design_context` 返回为准',
-    '2. **100% 还原** — 尺寸、颜色、字号、字重、间距、圆角、边框、文案、层级、状态变体与设计稿一致',
-    '3. 样式使用 CSS class（禁用内联 style），动态样式用 `:class`；深度选择器统一用 `::v-deep`（禁止 /deep/，避免 SCSS 编译失败）',
-    '4. 完成后再输出「Figma 设计稿确认」清单，逐条核对对齐项（必须附上已调用的 node-id）',
-    '',
-    '> `figma-component-map.md`（若存在）仅作辅助参考，**不能替代** Figma MCP 的完整拉取；',
-    '> 与 MCP 返回不一致时，以 MCP 完整设计上下文为准。',
+    '- UI 必须严格对齐设计稿，禁止使用默认/直觉样式。',
+    '- 每个 UI 任务**自行调用 Figma MCP** 拉取该节点的完整设计上下文（`get_design_context` 为主，`get_screenshot` 为辅）——设计稿内容以 MCP 返回为准，不要凭截图/摘要推测。',
+    '- **开工前先校验 Figma MCP 可用性**；若无法使用（工具不可用 / Figma 桌面端未运行 / 返回错误）——**立即停下当前任务并上报主 Agent，禁止硬做**（设计稿未对齐就开发会导致大量返工）。',
+    '- 设计稿链接（node-id 从 task 的 `figmaLink` 提取，支持多个 `figmaNodeId`）：',
+    ...detected.urls.map(u => `  - ${u}`),
     ''
   ]
 }
@@ -214,12 +183,8 @@ function buildStoryInputSection (storyId, targetPhase) {
   const mode = input.mode === 'fixbugs' ? 'fixbugs' : 'run'
   const lines = [
     '## 本 Story 原始输入',
-    `文件: .codebuddy/plans/${storyId}/${STORY_INPUT_FILE}`,
+    `请读取 .codebuddy/plans/${storyId}/${STORY_INPUT_FILE} 获取完整参数（含 TAPD/原型/Figma 链接等）——此处不内联全文，避免占上下文。`,
     '',
-    '```json',
-    JSON.stringify(input, null, 2),
-    '```',
-    ''
   ]
 
   if (mode === 'fixbugs') {
@@ -270,9 +235,10 @@ function buildFigmaInstruction (storyId, input) {
   return [
     `**🌐 检测到 ${detected.urls.length} 个 Figma 设计稿链接**`,
     '',
-    '- 必须调用 `use_skill("figma-to-component-map")` 解析设计稿，**禁止凭链接猜测 UI 结构**。',
+    '- **先产出 `requirement-analysis.md`**（需求分析文档），再调用 `use_skill("figma-to-component-map")` 解析设计稿，**禁止凭链接猜测 UI 结构**。',
     '- 前置条件: Figma 桌面端需处于运行状态并已打开该文件；未运行则如实告知用户并停止，不要退回缓存数据。',
-    `- 产出 \`figma-frame-inventory.json\`：覆盖每个 page / dialog / drawer 的完整 node 链接。`,
+    `- 根据需求分析文档**只针对涉及的组件**产出 \`figma-frame-inventory.json\`（覆盖每个相关 page / dialog / drawer 的完整 node 链接），**不要全量扫描所有页面**——需求不涉及的组件不必进清单，避免重复分析浪费 token。`,
+    '- Figma 设计稿的完整内容（布局/样式/文案/交互细节）不在此阶段转译给下游——由开发 Agent 通过 Figma MCP 自行拉取。',
     gateEnabled
       ? '- ⚠️ 本 Story 已开启 Figma 门控，Phase 0→1 会校验该清单完整性，缺失或不完整将阻断推进。'
       : '- 本 Story 未开启 Figma 强制门控（fixbugs 模式），但涉及 UI 的改动仍应按清单核对设计规范。',
@@ -297,10 +263,13 @@ function buildFixLoopContext (storyId, targetPhase) {
     const fixRequest = JSON.parse(fs.readFileSync(fixRequestPath, 'utf-8'))
     const fixVerificationPath = path.join(PLANS_DIR, storyId, 'fix-verification.json')
     const hasFixVerification = fs.existsSync(fixVerificationPath)
+    // 修复预算按失败源独立计数（code-review / test 各 2 次），maxRounds 取对应预算
+    const sourcePhase = fixRequest.sourcePhase === 4 ? 4 : 3
+    const maxRounds = getMaxFixRounds(storyId, sourcePhase)
     return {
       active: true,
       round: fixRequest.round,
-      maxRounds: fixRequest.maxRounds,
+      maxRounds,
       sourcePhase: fixRequest.sourcePhase,
       issueCount: fixRequest.issues ? fixRequest.issues.length : 0,
       affectedFiles: fixRequest.affectedFiles || [],
@@ -400,13 +369,13 @@ function buildAgentPrompt (opts) {
     figmaAlignInstruction.length > 0 ? figmaAlignInstruction.join('\n') : '',
     figmaDesignMap.length > 0 ? figmaDesignMap.join('\n') : '',
     '## 上一 Phase 摘要',
-    summaryInfo ? summaryInfo.content : '(无摘要)',
+    summaryInfo ? `请读取上轮摘要文件获取完整信息（路径: ${summaryInfo.path}）` : '(无摘要)',
     '',
     lessons ? `## 历史教训\n${lessons.trim()}\n` : '',
     metricsInsights ? `## 度量洞察\n${metricsInsights.trim()}\n` : '',
     fixLoopContext ? `## 修复回路上下文 (第 ${fixLoopContext.round}/${fixLoopContext.maxRounds} 轮)\n${fixLoopContext.instruction}\n受影响文件: ${fixLoopContext.affectedFiles.join(', ') || '(见 fix-request.json)'}\n` : '',
     '## 契约文件内容',
-    contractContents.length > 0 ? contractContents.join('\n\n') : '(无契约文件)',
+    contractContents.length > 0 ? '请逐个读取以下契约文件获取完整内容（不要依赖摘要）：\n' + contractContents.join('\n') : '(无契约文件)',
     '',
     expectedDescriptions.length > 0
       ? `## 产出要求\n${expectedDescriptions.map(d => `- ${d}`).join('\n')}\n产出目录: .codebuddy/plans/${storyId}/`
@@ -448,7 +417,5 @@ module.exports = {
   readStoryContext,
   readFigmaDesignMap,
   buildFigmaAlignInstruction,
-  AGENT_CONSTRAINTS,
-  CONTRACT_TRUNCATE_LIMIT,
-  STORY_CONTEXT_TRUNCATE_LIMIT
+  AGENT_CONSTRAINTS
 }

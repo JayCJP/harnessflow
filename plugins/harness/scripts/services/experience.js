@@ -125,17 +125,24 @@ function recordFailurePattern (pattern) {
 /**
  * 获取针对指定 Phase 的历史教训（用于注入 Agent prompt）
  * v2: 区分 unknown 类型，提醒需人工补录到 RECOVERY_SUGGESTIONS
+ * v3: 只取当前阶段（phase 精确匹配）的教训，并按出现次数取 Top N，
+ *     避免经验库增长导致 prompt 膨胀（对照腾讯 Multi-Agent 成本优化：
+ *     只给 AI 当前需要的上下文，不把整个经验库灌进去）。
  * @param {number} phase - Phase 编号
+ * @param {number} [maxItems=5] - 最多注入几条教训，超出按 occurrences 取 Top N
  * @returns {string} 注入到 prompt 的教训文本，无则返回空字符串
  */
-function getLessonsForPhase (phase) {
+function getLessonsForPhase (phase, maxItems = 5) {
   const data = readFailurePatterns()
   const relevant = data.patterns.filter(p => p.phase === phase)
 
   if (relevant.length === 0) return ''
 
   // 分为已确认和待审查两组
-  const confirmed = relevant.filter(p => !p.needsManualReview || p.reviewStatus === 'confirmed')
+  const confirmed = relevant
+    .filter(p => !p.needsManualReview || p.reviewStatus === 'confirmed')
+    .sort((a, b) => (b.occurrences || 1) - (a.occurrences || 1)) // 按出现次数降序，取最常踩的坑
+    .slice(0, maxItems)
   const pending = relevant.filter(p => p.needsManualReview && p.reviewStatus === 'pending')
 
   const lines = confirmed.map(p => {
@@ -396,15 +403,20 @@ function mergeInsightsToGlobal (projectInsights, projectName) {
 /**
  * 获取指定 Phase 的度量洞察（用于注入到 Agent prompt）
  * 从全局 metrics-insights.json 读取，按 targetPhase 过滤
+ * v2: 只取当前 targetPhase 的洞察，并按 occurrences 取 Top N，避免随洞察库增长膨胀 prompt
  * @param {number} targetPhase - 目标 Phase（即将开始的 Phase）
+ * @param {number} [maxItems=3] - 最多注入几条洞察
  * @returns {string} 注入到 prompt 的洞察文本，无则返回空字符串
  */
-function getMetricsInsights (targetPhase) {
+function getMetricsInsights (targetPhase, maxItems = 3) {
   const data = readMetricsInsights()
   if (!data.insights || data.insights.length === 0) return ''
 
-  // 过滤目标 Phase 的洞察
-  const relevant = data.insights.filter(i => i.targetPhase === targetPhase)
+  // 过滤目标 Phase 的洞察，按出现次数取 Top N
+  const relevant = data.insights
+    .filter(i => i.targetPhase === targetPhase)
+    .sort((a, b) => (b.occurrences || 1) - (a.occurrences || 1))
+    .slice(0, maxItems)
   if (relevant.length === 0) return ''
 
   const lines = relevant.map(i => {

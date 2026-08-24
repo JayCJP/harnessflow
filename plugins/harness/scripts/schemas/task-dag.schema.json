@@ -18,7 +18,7 @@
           "files": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string", "minLength": 1 }
+            "items": { "type": "string", "minLength": 1, "description": "允许修改的文件/模块区域。支持目录级 glob（如 src/views/pc/modules/**）或直接写模块目录路径（如 src/views/pc/modules），该目录下任意层级文件都可修改，避免「符合开发规范但在文件外」的新增文件被 dev-pass 误拦截。精确文件路径（如 src/views/pc/Foo.vue）只允许改该文件" }
           },
           "acceptanceCriteria": {
             "type": "array",
@@ -31,7 +31,13 @@
               { "type": "array", "items": { "type": "string" } }
             ]
           },
-          "figmaNodeId": { "type": ["string", "null"] },
+          "figmaNodeId": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "string", "minLength": 1 },
+              { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "一个 task 可关联多个 Figma 节点（处理多个组件时），每个元素是图一 node ID 如 '3020:83533'" }
+            ]
+          },
           "parallelizable": { "type": "boolean" },
           "complexity": { "type": "string", "enum": ["low", "medium", "high"] },
           "estimate": { "type": "integer", "minimum": 1 },

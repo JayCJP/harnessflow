@@ -352,8 +352,10 @@ if (rollbackFlag) {
 
 /**
  * 从 code-review.json 中提取 BLOCKER 级别问题
+ * 保留 issue 的 project/repoPath —— 跨仓 Story 中 issue.file 只是「问题出现位置」，
+ * 修复点可能在别的仓库（如落地页），fix-loop 需据此把受影响文件定位到正确仓库。
  * @param {string} storyDir - Story 目录路径
- * @returns {Array<{id, severity, file, line, description, suggestion}>}
+ * @returns {Array<{id, severity, file, line, description, suggestion, project, repoPath}>}
  */
 function extractFixIssuesFromReview(storyDir) {
   const crJsonPath = path.join(storyDir, 'code-review.json')
@@ -370,7 +372,9 @@ function extractFixIssuesFromReview(storyDir) {
       file: b.file || '',
       line: b.line ? String(b.line) : '',
       description: b.title ? `${b.title}: ${b.description || ''}` : (b.description || ''),
-      suggestion: b.suggestion || ''
+      suggestion: b.suggestion || '',
+      project: b.project || undefined,
+      repoPath: b.repoPath || undefined
     }))
   } catch (e) {
     return []
@@ -408,7 +412,6 @@ if (fixLoopFlag) {
   }
 
   const storyDir = path.join(PLANS_DIR, storyId)
-  const MAX_FIX_ROUNDS = getMaxFixRounds(storyId)
 
   // 1. 从失败 Phase 的产出物中提取待修复问题
   let issues = []
@@ -468,21 +471,26 @@ if (fixLoopFlag) {
     process.exit(1)
   }
 
-  // 2. 检查修复轮次
+  // 2. 修复预算按失败源独立计数（code-review 与 test 各 2 次，不共享额度）
+  const MAX_FIX_ROUNDS = getMaxFixRounds(storyId, sourcePhase)
+
+  // 检查修复轮次
   const fixRequestPath = path.join(storyDir, 'fix-request.json')
   let currentRound = 0
   if (fs.existsSync(fixRequestPath)) {
     try {
       const prevFix = JSON.parse(fs.readFileSync(fixRequestPath, 'utf-8'))
-      currentRound = prevFix.round || 0
+      // round 独立计数：仅当上次 fix-loop 与本次同源才累加；跨源（review→test 或反之）视为该阶段首次
+      currentRound = (prevFix.sourcePhase === sourcePhase) ? (prevFix.round || 0) : 0
     } catch (e) { /* 解析失败，从 0 开始 */ }
   }
 
   if (currentRound >= MAX_FIX_ROUNDS) {
+    const sourceLabel = sourcePhase === 3 ? '代码审查 (Phase 3)' : '功能测试 (Phase 4)'
     console.log(JSON.stringify({
       action: 'human_intervention_required',
       status: 'fix_loop_exhausted',
-      message: `已达最大修复轮次 (${MAX_FIX_ROUNDS})，需人工介入决策`,
+      message: `已达 ${sourceLabel} 的最大修复轮次 (${MAX_FIX_ROUNDS})，需人工介入决策`,
       remainingIssues: issues.map(i => `${i.id}: ${i.description}`),
       escalation: [
         '1. 人工评审剩余 BLOCKER，判断是否可降级为 WARNING',
@@ -496,13 +504,45 @@ if (fixLoopFlag) {
 
   const nextRound = currentRound + 1
 
-  // 3. 提取受影响文件
-  const affectedFiles = [...new Set(
-    issues
-      .map(i => i.file)
-      .filter(Boolean)
-      .map(f => f.trim())
-  )]
+  // 3. 提取受影响文件 —— 跨仓 Story 中 issue.file 只是「问题出现位置」，修复点可能在别的仓库
+  //    （如跳转参数无人消费，问题报在跳出端，要改的是落地页）。
+  //    收集规则：
+  //      - issue.file：问题出现位置（必收）
+  //      - issue.repoPath：若它是具体修复点文件（非仓库根路径）→ 作为额外受影响文件加入；
+  //        若它是仓库根 → 仅用于把 issue.file 定位到该仓库
+  //    dev-pass 限域据此把每个受影响文件归到正确仓库，避免跨仓修复时被误拦截。
+  const reposForFix = loadRepos(storyId)
+  // 已注册仓库根路径集合，用于判断 repoPath 是「仓库根」还是「具体文件」
+  const repoRoots = new Set(Object.values(reposForFix.repos).map(r => path.resolve(r).replace(/\\/g, '/')))
+  const affectedFileRepo = {} // 文件(相对路径) → { repo, repoPath }
+
+  function addAffectedFile (relPath, repoName, explicitRepoPath) {
+    if (!relPath) return
+    const trimmed = String(relPath).trim()
+    if (!trimmed) return
+    const validRepo = reposForFix.repos[repoName] ? repoName : reposForFix.primary
+    if (!affectedFileRepo[trimmed]) {
+      affectedFileRepo[trimmed] = { repo: validRepo, repoPath: explicitRepoPath || reposForFix.repos[validRepo] }
+    }
+  }
+
+  for (const issue of issues) {
+    const repoName = issue.project || reposForFix.primary
+    // repoPath 是仓库根还是具体修复点文件？
+    let repoPathIsRoot = false
+    if (issue.repoPath) {
+      const rpAbs = path.resolve(issue.repoPath).replace(/\\/g, '/')
+      repoPathIsRoot = repoRoots.has(rpAbs)
+    }
+    // 修复点文件：repoPath 是具体文件（非仓库根）时采用；否则用 issue.file 并归到 project 仓库
+    if (issue.repoPath && !repoPathIsRoot) {
+      addAffectedFile(issue.repoPath, repoName, issue.repoPath)
+    } else {
+      addAffectedFile(issue.file, repoName, issue.repoPath)
+    }
+  }
+
+  const affectedFiles = Object.keys(affectedFileRepo)
 
   // 4. 生成 fix-request.json
   const fixRequest = {
@@ -557,10 +597,13 @@ if (fixLoopFlag) {
   state.status = 'running'
   state.updatedAt = now.toISOString()
 
-  // 7. 重新签发 dev-pass（限域到 affectedFiles）
+  // 7. 重新签发 dev-pass（限域到 affectedFiles，跨仓时按 issue 的 project/repoPath 定位到正确仓库）
   const repos = loadRepos(storyId)
   const scopedPaths = affectedFiles.length > 0
-    ? affectedFiles.map(f => ({ repo: repos.primary, path: f }))
+    ? affectedFiles.map(f => {
+        const fr = affectedFileRepo[f] || { repo: repos.primary }
+        return { repo: fr.repo, path: f }
+      })
     : [{ repo: repos.primary, path: 'src/**' }]
 
   const devPass = {

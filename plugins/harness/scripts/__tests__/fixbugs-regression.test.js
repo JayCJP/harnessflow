@@ -22,7 +22,10 @@ const { execFileSync } = require('child_process')
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
 // ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
+// 同时覆盖 CODEBUDDY_PROJECT_DIR 与 CLAUDE_PROJECT_DIR（state.js 的 PROJECT_ROOT 优先取
+// CODEBUDDY_PROJECT_DIR，只覆盖后者会导致沙箱失效、读到真实项目目录）
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-fixbugs-'))
+process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
 process.env.CLAUDE_PROJECT_DIR = SANDBOX
 fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
 
@@ -143,7 +146,7 @@ section('3. fixbugs prompt 注入')
 
 const p0 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 0 })
 ok('storyMode = fixbugs', p0.storyMode === 'fixbugs')
-ok('P0 含 story-input 原文', p0.agentPrompt.includes('10109441'))
+ok('P0 给出 story-input.json 路径（不内联原文，优化上下文）', /story-input\.json/.test(p0.agentPrompt) && /读取 .codebuddy\/plans\/.*\/story-input\.json/.test(p0.agentPrompt))
 ok('P0 含自行调 skill 指引', p0.agentPrompt.includes('tapd-bug-analyzer'))
 ok('P0 含「不写修复方案」', /不要写修复方案|不写修复方案|只记录事实|只记事实/.test(p0.agentPrompt))
 // expectedOutputs 是主 Agent 校验子 Agent 产出物汇报的依据，
@@ -153,7 +156,7 @@ ok('P0 产出要求文字含 bug分析报告', p0.agentPrompt.includes('bug分�
 
 const p1 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 1 })
 ok('P1 不重复注入 story-input 原文', !p1.agentPrompt.includes('"tapdUrl"'))
-ok('P1 自动注入 Bug 报告全文', p1.agentPrompt.includes('userInfo'))
+ok('P1 给出 Bug 报告文件路径（路径化，不内联全文）', p1.agentPrompt.includes('bug分析报告') && /读取该文件获取完整内容/.test(p1.agentPrompt))
 
 const p2 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 2 })
 ok('P2 含「Bug 修复说明」', p2.agentPrompt.includes('Bug 修复说明'))

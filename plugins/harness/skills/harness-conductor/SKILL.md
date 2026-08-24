@@ -8,6 +8,10 @@ description: >
 
 # Harness Conductor — 工作流编排器
 
+> **渐进式披露**：本文档只保留每次循环必用的**骨架**（核心原则、执行流程、Phase→Agent 对照、铁律）。
+> 条件性内容（错误恢复 / 代码检索 / 工作流生命周期 / Prompt 单一信源）已外移到 `references/`，
+> 用到时按需 `read_file` 读取，避免常驻 context 浪费。
+
 ## 核心原则
 
 > **AI 不操作工作流状态，所有 Phase 推进必须通过脚本完成。**
@@ -80,71 +84,20 @@ Agent 文件名和正文标题是中文，但注册键是英文 `name`——传�
 
 **推进命令不要手写**：从 `dispatch.js` 的 `advanceCommand` 字段取，它已算好 `targetPhase`。
 
-## 工作流生命周期
-
-```bash
-# 激活工作流
-node ${HARNESS}/harness-workflow.js start <storyId> "<标题>"
-
-# 查看状态
-node ${HARNESS}/harness-workflow.js status
-
-# 归档
-node ${HARNESS}/archive-story.js <storyId> archive [--force]
-
-# 复档
-node ${HARNESS}/archive-story.js <storyId> restore [--round N] [--force]
-```
-
-## 错误恢复
-
-**不需要决策树。** `advance-phase.js` 返回 `success: false` 时，输出中已带 `recovery.command`，
-主 Agent 执行它，然后回到 Step 1 重新 `dispatch.js`。
-
-```
-advance-phase.js 失败
-  ├─ recovery.command 存在 → 原样执行 → 回 Step 1
-  └─ recovery.command 为 null → 转人工，转述 recovery.description 给用户
-```
-
-恢复策略（fix-loop / --auto-fix 重试 / 转人工）由 `policy.js` 按 `recovery level` 判定：
-1=自动修复、2=提示修复、3=降级、4=人工。主 Agent 不参与选择。
-
-## Agent Prompt 单一信源
-
-`agentPrompt` 由 `prompt-builder.js` 统一生成，**只有一个出口**: `dispatch.js` 输出的 `agentPrompt` 字段。
-它已包含 Story ID、当前 Phase、上一 Phase 摘要、契约文件内容、历史教训、约束条款、产出物清单，
-**无占位符，可直接原样注入**。
-
-```
-node ${HARNESS}/dispatch.js <storyId>
-  └─ agentPrompt      ← 原样传给 Spawn 的 prompt 参数
-     nextAgent        ← 传给 Spawn 的 Agent 注册名
-     expectedOutputs  ← 本 Phase 应产出的文件（用于校验子 Agent 汇报）
-```
-
-**为什么不允许主 Agent 加工 prompt**: 一旦主 Agent 参与拼接，注入哪些上下文就变成一次自由裁量，
-不同轮次注入的内容会不一致，Phase 2 的 `files[]` 写入范围也可能被漏掉——这是流程不可控的直接来源。
-prompt 内容需要调整时，改 `prompt-builder.js`，不改主 Agent 行为。
-
-## 代码检索规范（查找代码时强制）
-
-> 编排过程中需要查找/定位代码（Spawn 子 Agent、撰写上下文、判断改动范围）时，**必须使用双源交叉验证**，
-> 不要只依赖单一检索方式（如仅 Explore agent 或仅文本搜索）。
-
-**标准流程**:
-1. **kb-query** — 业务语义层：按功能模块/接口名检索，拿业务语义、候选文件、历史踩坑
-2. **graphify** — 结构层：`query "<关键词>"` 拿结构视图，`explain "<模块>"` 理解职责，`path "<API>" "<渲染出口>"` 追调用链
-3. 双源交叉验证收敛（规则见 kb-query skill「双源交叉验证」章节）
-4. `search_content` / `search_file` 兜底：仅当两路都没定位到文件时使用
-
-**禁止**:
-- 🚫 仅用 Explore agent 或仅文本搜索定位代码
-- 🚫 跳过 kb-query / graphify 直接猜文件路径
-
 ## 铁律
 
 - 🚫 AI 不直接写/改 `e2e-state.json`
 - 🚫 AI 不直接写/改 `dev-pass.json`
 - 🚫 AI 不跳过 Phase
 - 🚫 AI 不自标记 `open-questions.json` resolved
+
+---
+
+## 按需读取的资源（渐进式披露）
+
+| 场景 | 读取文件 |
+|------|---------|
+| advance-phase 推进失败 | `references/错误恢复.md` |
+| 需要查找/定位代码 | `references/代码检索规范.md` |
+| 激活/查看/归档/复档工作流 | `references/工作流生命周期.md` |
+| 理解为何不能加工 prompt | `references/Agent-Prompt-单一信源.md` |
