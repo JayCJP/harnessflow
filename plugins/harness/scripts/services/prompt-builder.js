@@ -282,8 +282,8 @@ function buildTaskPlannerFigmaInstruction (storyId) {
     '- 拆 task 前调用 `use_skill("figma-to-component-map")` 处理设计稿，**禁止凭链接猜测 UI 结构**。',
     '- 前置条件: Figma 桌面端需处于运行状态并已打开该文件；未运行则如实告知用户并停止，不要退回缓存数据。',
     `- 只针对**要拆分的 task 涉及的文件/组件**产出 \`figma-frame-inventory.json\`（覆盖每个相关 page / dialog / drawer 的完整 node 链接），**不要全量扫描所有页面**——拆到哪些组件就拉哪些，避免重复分析浪费 token。`,
+    '- **只用 `get_metadata` 扫帧结构（id/name/type/link/rect），禁止调用 `get_design_context` / `get_screenshot`**——设计稿完整内容（色值/间距/字体/布局/交互）由开发工程师 Phase 2 拉取，你不拉，避免重复调用浪费 token。',
     '- 为每个 UI task 绑定 `figmaRefs: [{ nodeId, link }]` 精确配对（nodeId 用 `:`，link 用 `-`），前端开发工程师据此一次精准拉取设计稿。',
-    '- Figma 设计稿的完整内容（布局/样式/文案/交互细节）不在此转译给下游——由开发 Agent 通过 Figma MCP 自行拉取。',
     gateEnabled
       ? '- ⚠️ 本 Story 已开启 Figma 门控，Phase 1→2 会校验 frame-inventory 完整性及 task 的 figmaNodeId 命中清单，缺失或不完整将阻断推进。'
       : '- 本 Story 未开启 Figma 强制门控（fixbugs 模式），但涉及 UI 的改动仍应按清单核对设计规范。',

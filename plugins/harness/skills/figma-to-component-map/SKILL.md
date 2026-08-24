@@ -27,12 +27,13 @@ description: >
    - `get_metadata` — 遍历页面/帧结构
 5. 确保在尝试失败后不要继续执行依赖于设计稿的任务。
 
-## 步骤 A: Produce Frame Inventory (`figma-frame-inventory.json`)
+## 步骤 A（任务规划师专用）: Produce Frame Inventory (`figma-frame-inventory.json`)
 
-> **按需分析（任务规划阶段）**：本 skill 由 **Phase 1 任务规划师**在拆 task 时调用（需求分析阶段不处理 Figma）。
+> **按需分析（任务规划阶段）**：本步骤由 **Phase 1 任务规划师**在拆 task 时执行（需求分析阶段不处理 Figma）。
 > 只针对**要拆分的 task 涉及的文件/组件**生成 frame 清单，**不要全量扫描设计稿的所有页面**——
 > 拆到哪些组件就拉哪些，避免重复分析浪费 token。
-> 设计稿完整内容（布局/样式/文案/交互细节）不在此转译给下游，由开发 Agent 通过 Figma MCP 自行拉取。
+>
+> ⚠️ **本步骤只用 `get_metadata`（轻量结构扫描）**，**禁止调用 `get_design_context` / `get_screenshot`**——那是开发工程师 Phase 2 的职责。设计稿完整内容（布局/样式/文案/交互细节）由开发 Agent 自行拉取，任务规划师不拉，避免重复调用。
 
 ### Step 1: List all pages
 
@@ -44,9 +45,9 @@ mcp_call_tool(serverName="Figma", toolName="get_metadata", arguments="{}")
 
 This returns GUID + name for every top-level page (e.g. `0:1` / "设置页", `1:2` / "会话页").
 
-### Step 2: Scan pages for frames RELEVANT to the requirement
+### Step 2: Scan pages for frames RELEVANT to the tasks
 
-For each page ID referenced by the requirement-analysis.md, call `get_metadata` to dump the node tree, and focus on frames that correspond to the components/pages the requirement actually touches:
+For each page ID that contains frames the tasks will touch, call `get_metadata` to dump the node tree, and focus on frames that correspond to the components the tasks actually modify:
 
 ```
 mcp_call_tool(serverName="Figma", toolName="get_metadata", arguments="{"nodeId":"0:1"}")
@@ -75,9 +76,9 @@ https://www.figma.com/design/{fileKey}/{fileName}?node-id={dashNodeId}&m=dev
 - `{fileName}` — URL-encoded file name from the original URL
 - `{dashNodeId}` — node ID with `:` → `-` conversion (e.g. `3020:83533` → `3020-83533`)
 
-### Step 5: Output `figma-frame-inventory.json`（唯一产出物，含可选 designSpec）
+### Step 5: Output `figma-frame-inventory.json`（唯一产出物）
 
-**Every frame MUST have a complete `link`.** `designSpec` 可选，若已提取到关键设计规格（尺寸/色值/间距/字体等）则填入，供开发 agent 作辅助参考（不替代 Figma MCP 完整拉取）。Format:
+**Every frame MUST have a complete `link`.** `designSpec` **不填**——因为本步骤只用 `get_metadata`，拿不到色值/间距/字体（那是 `get_design_context` 的职责，由开发工程师 Phase 2 拉取）。每个 frame 只记录 `id`/`name`/`type`/`link`（及 `get_metadata` 能返回的 `rect` 尺寸）。Format:
 
 ```json
 {
@@ -89,8 +90,7 @@ https://www.figma.com/design/{fileKey}/{fileName}?node-id={dashNodeId}&m=dev
       "name": "编辑分组弹窗",
       "type": "dialog",
       "link": "https://www.figma.com/design/qim2RjyYi833JXyFeIJd88/%E5%AE%A2%E6%9C%8D%E7%B3%BB%E7%BB%9F?node-id=3020-83533&m=dev",
-      "rect": { "w": 634, "h": 520 },
-      "designSpec": "标题栏 56px, 列表项高 55px, 关闭按钮 14×14, 主色 #2A6AF2"
+      "rect": { "w": 634, "h": 520 }
     },
     {
       "id": "3020:78242",
@@ -105,62 +105,15 @@ https://www.figma.com/design/{fileKey}/{fileName}?node-id={dashNodeId}&m=dev
 
 Write to: `.codebuddy/plans/<storyId>/figma-frame-inventory.json`
 
-> **注意**：本 skill 只产出这一个文件。不再产出 `figma-component-map.md`（已废弃）——设计稿完整内容由开发 Agent 通过 Figma MCP 自行拉取，frame-inventory 的 `designSpec` 仅作辅助参考。
+> **注意**：本 skill 只产出这一个文件。不再产出 `figma-component-map.md`（已废弃）。设计稿完整内容由开发 Agent（Phase 2）通过 `get_design_context` 自行拉取，任务规划师不拉设计细节。
 
 ---
 
-## 步骤 B: Task → Frame Precise Mapping (via task-dag.json)
+## 设计稿内容拉取（开发工程师 Phase 2 专属，任务规划师不执行）
 
-> Only run when `task-dag.json` exists and contains `figmaRefs` / `figmaNodeId` fields.
-> `figmaRefs` 为**精确配对数组**（每个元素含 nodeId + link），一个 task 处理多个组件时有多个元素；
-> `figmaNodeId` 是门控校验用的简化字段（单值 string 或 string 数组）。两者可并存，精确拉取用 figmaRefs。
-
-### Step 1: Read `task-dag.json` figmaRefs references
-
-```json
-// task-dag.json
-{
-  "tasks": [
-    {
-      "id": "T1",
-      "title": "标签面板组件",
-      "files": ["src/views/pc/Components/UserTagPanel.vue"],
-      "figmaRefs": [
-        { "nodeId": "3:456", "link": "https://www.figma.com/design/xxx?node-id=3-456&m=dev" },
-        { "nodeId": "3:789", "link": "https://www.figma.com/design/xxx?node-id=3-789&m=dev" }
-      ],
-      "figmaNodeId": ["3:456", "3:789"],
-      "acceptanceCriteria": ["AC-001"]
-    }
-  ]
-}
-```
-
-### Step 2: Direct design spec extraction (zero guessing)
-
-For each task with `figmaRefs` / `figmaNodeId`, call `get_design_context` for **EACH node ID** (single value = one node):
-
-```
-mcp_call_tool(serverName="Figma", toolName="get_design_context",
-  arguments="{"nodeId":"3:456","clientLanguages":"javascript,css,html","clientFrameworks":"vue"}")
-```
-
-And take a screenshot:
-
-```
-mcp_call_tool(serverName="Figma", toolName="get_screenshot", arguments="{"nodeId":"3:456"}")
-```
-
-### Step 3: Output exact node links for each task
-
-For each task, output the exact Figma node link + design specs (供任务规划师写入 task-dag 的 figmaRefs，开发 agent 据此精准拉取):
-
-```
-T1 标签面板组件:
-  Figma: https://www.figma.com/design/{fileKey}/{fileName}?node-id=3-456&m=dev
-  Node: 3:456 (drawer, 360×auto)
-  Key specs: header 56px, list items 55px each, checkbox 14×14
-```
+> 任务规划师完成 inventory 后，**不要**对任何 node 调用 `get_design_context` / `get_screenshot`。
+> 开发工程师在 Phase 2 实现 UI 时，通过 Figma MCP `get_design_context`（每个 nodeId）拉取完整设计规格并 100% 还原。
+> 这样设计稿内容只被拉取一次（开发阶段），避免任务规划师与开发重复调用。
 
 ---
 
@@ -183,28 +136,22 @@ When `task-dag.json` does NOT have `figmaNodeId` fields, fall back to the old he
 ### When figmaNodeId available (precise):
 
 ```markdown
-## Figma → Component Mapping (Precise, N tasks)
+## Figma → Component Inventory (Precise, N frames)
 
-| 组件文件 | Task ID | Figma Node ID | 完整 Figma 链接 | 设计规格 |
-|---------|---------|--------------|----------------|---------|
-| `UserTagPanel.vue` | T1 | `3:456` | [链接](https://...) | drawer 360×auto |
-| `AssignRule.vue` | T4 | `3020:78242` | [链接](https://...) | page 1920×1080 |
+| 组件/页面 | Figma Node ID | 完整 Figma 链接 | 类型 |
+|---------|--------------|----------------|------|
+| `编辑分组弹窗` | `3020:83533` | [链接](https://...) | dialog |
+| `会话分配规则-高级设置` | `3020:78242` | [链接](https://...) | page |
 
-## Design Specs (per component)
-
-### UserTagPanel.vue → T1
-- **Node**: `3:456`
-- **Link**: https://www.figma.com/design/...?node-id=3-456&m=dev
-- **Size**: 360px × auto
-- **Key**: 标签列表, 彩色圆角, 关闭按钮 14×14
+（设计规格不在此列出——由开发工程师 Phase 2 通过 get_design_context 拉取）
 ```
 
 ### When heuristic (mark as fallback):
 
 ```markdown
-## Figma → Component Mapping (Heuristic, N tasks)
+## Figma → Component Inventory (Heuristic, N frames)
 
-| 组件文件 | Figma Node ID | 完整 Figma 链接 | 匹配方式 |
+| 组件/页面 | Figma Node ID | 完整 Figma 链接 | 匹配方式 |
 |---------|--------------|----------------|---------| 
 | `AssignRule.vue` | `3020:78242` | [链接](https://...) | ⚠️ heuristics (名称+UI) |
 ```
@@ -213,7 +160,8 @@ When `task-dag.json` does NOT have `figmaNodeId` fields, fall back to the old he
 
 - **Every link must be a complete URL** with `?node-id=...&m=dev` — never just the node ID.
 - `node-id` in URLs uses `-` separator (e.g. `3020-83533`). API calls use `:` (e.g. `3020:83533`).
-- 产出物唯一：只产出 `figma-frame-inventory.json`（frame 可含可选 `designSpec`）。`figma-component-map.md` 已废弃。
+- 产出物唯一：只产出 `figma-frame-inventory.json`（每个 frame 含 `id`/`name`/`type`/`link`，不含 designSpec）。`figma-component-map.md` 已废弃。
+- **设计稿内容只由开发工程师 Phase 2 通过 `get_design_context` 拉取**，任务规划师只用 `get_metadata` 扫结构，不拉设计细节（避免重复调用）。
 - 任务规划师在 task-dag 中应为每个 UI task 写 `figmaRefs: [{nodeId, link}]`（精确配对），开发 agent 据此一次精准拉取，不做全量探索。
 - If a task in `task-dag.json` has `figmaRefs`/`figmaNodeId`, skip heuristics entirely — go straight to direct extraction.
 - For pages (>10 child frames), prefer `get_metadata` over `get_design_context` to avoid truncation.
