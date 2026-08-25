@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1787560427776,
+  "createdAt": 1787621402572,
   "plugins": [
     {
       "name": "harness",
@@ -165,13 +165,8 @@
           "path": "skills/api-generator"
         },
         {
-          "name": "figma",
-          "description": "处理 Figma 设计稿的读取和分析。当用户提到 Figma 时立即且优先调用此 skill。",
-          "path": "skills/figma"
-        },
-        {
           "name": "figma-to-component-map",
-          "description": "Phase 0: produce a complete Figma frame inventory (figma-frame-inventory.json) with precise full node links for every page, dialog, drawer, and component. Phase 1: use task-dag.json figmaNodeId references for zero-guess design spec extraction. Should be used when the user provides a Figma URL.",
+          "description": "Produce a complete Figma frame inventory (figma-frame-inventory.json) with precise full node links for the pages/dialogs/drawers/components a task touches, then bind each UI task to precise figmaRefs (nodeId+link). Used by the Phase 1 task planner when a Story has Figma design URLs.",
           "path": "skills/figma-to-component-map"
         },
         {
@@ -225,7 +220,8 @@
           "name": "kb-auto-query",
           "path": "rules\\kb-auto-query.md"
         }
-      ]
+      ],
+      "status": "enabled"
     }
   ]
 }
