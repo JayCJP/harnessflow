@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 /**
- * Figma 分模式判定回归测试
+ * Figma 流程回归测试
  *
  * 覆盖 2026-08 的 Figma 改造：
  *   1. hasFigmaDesign 从 story-input.json 的 sources.figmaUrls 自动推导
- *      （原先只来自 --figma flag，而唯一入口 harness-workflow.js 硬编码 false，
- *       导致三道 Figma 门控在正常流程下永不触发）
  *   2. run 开硬门控 / fixbugs 关硬门控 / --figma 任何模式强制开
- *   3. 两种模式都注入 figma-to-component-map 解析指引（软约束始终在）
- *   4. --refresh-input 在 story-input.json 后写场景下回填判定
+ *   3. Figma 处理从 Phase 0 移到 Phase 1（任务规划师拆 task 时处理，需求分析阶段不拉设计稿）
+ *   4. 任务规划师只用 get_metadata 扫结构，设计稿内容（get_design_context）仅开发工程师拉取
+ *   5. --refresh-input 在 story-input.json 后写场景下回填判定
  *
- * 无外部依赖，用一个临时的 CLAUDE_PROJECT_DIR 做沙箱，跑完自动清理。
+ * 无外部依赖，用临时沙箱（同时覆盖 CODEBUDDY/CLAUDE_PROJECT_DIR），跑完自动清理。
  *
  * 用法:
  *   node scripts/__tests__/figma-detection.test.js
@@ -157,6 +156,8 @@ ok('run P1 要求产出 frame 清单', runPrompt.includes('figma-frame-inventory
 ok('run P1 标注门控已开启', /已开启 Figma 门控/.test(runPrompt))
 ok('run P1 声明桌面端前置条件', /桌面端/.test(runPrompt))
 ok('run P1 要求绑定 figmaRefs', runPrompt.includes('figmaRefs'))
+ok('run P1 明确只用 get_metadata 不拉设计稿', /只用 `get_metadata`/.test(runPrompt) && /禁止调用 `get_design_context`/.test(runPrompt))
+ok('run P1 不要求产出 designSpec', !/designSpec/.test(runPrompt) || /不填/.test(runPrompt))
 
 const fixPrompt = buildAgentPrompt({ storyId: 'FG-FIX', targetPhase: 1 }).agentPrompt
 ok('fixbugs P1 同样点名 skill', fixPrompt.includes('figma-to-component-map'))
