@@ -30,6 +30,7 @@ const {
   checkAcceptanceVerification,
   validateContractReferences,
   validateTaskFigmaReferences,
+  checkFigmaFrameInventory,
   hasFigmaDesign,
   readJsonArtifact,
   getStoryDir,
@@ -95,7 +96,7 @@ const RECOVERY_SUGGESTIONS = {
     action: '逐项确认 open-questions 中的问题并更新 resolved 字段',
     autoFixable: false
   },
-  // Phase 0→1: Figma frame 缺少 id/name/link
+  // Phase 1→2: Figma frame 缺少 id/name/link/type
   figma_frame_incomplete: {
     level: 2,
     action: '每个 Figma frame 必须有 id、name、link 字段',
@@ -445,17 +446,18 @@ function runGateCheck (storyId, phaseNum, state) {
  * 判定依据（v2 证据链）：
  *   - kb-query / graphify 调用为 0 → WARNING（放行但记 debt，Evo Score 扣分）
  *
- * 检查时机：仅当 phaseNum === 3（Phase 2 开发完成，进入代码审查前）时执行。
- * 早期阶段（phaseNum < 3）尚未开发，不检查；后期阶段（phaseNum > 3）已过审查，无需重复。
+ * 检查时机：仅在 phaseNum === 3（即 Phase 3→4 门控，代码审查完成、准备进入功能测试前）时执行。
+ * 此时 Phase 2 开发阶段已全部结束，trace.jsonl 的开发 tool_call 记录最完整，判定最可靠。
+ * 早期阶段（phaseNum < 3）开发尚未完成，trace 不完整；后期阶段（phaseNum > 3）已过功能测试，无需重复。
  *
  * @param {string} storyId - Story ID
- * @param {number} phaseNum - 要推进到的 Phase 编号
+ * @param {number} phaseNum - 要推进到的 Phase 编号（来源 phase）
  * @param {Object} state - e2e-state.json 状态对象
  * @param {Object} result - 门控结果对象（会原地写入 blockers / warnings）
  * @returns {void}
  */
 function checkResourceIntegrity (storyId, phaseNum, state, result) {
-  // 只在 Phase 2 开发完成（即将进入 Phase 3）时检查知识库消费
+  // 仅在 Phase 3→4 门控时检查（此时 Phase 2 开发 trace 完整；phaseNum 是来源 phase）
   if (phaseNum !== 3) return
 
   // 读 trace.jsonl 里的 tool_call 事件
@@ -482,7 +484,9 @@ function checkResourceIntegrity (storyId, phaseNum, state, result) {
 }
 
 /**
- * Phase 0→1 门控: AC + 双源 open-questions + Figma
+ * Phase 0→1 门控: AC + open-questions + PRD 覆盖率
+ * （Figma frame-inventory 不在此校验 —— frame-inventory 由 Phase 1 任务规划师拆 task 时产出，
+ *   完整性与 nodeId 引用在 Phase 1→2 门控 checkPhase1Gate 校验）
  */
 function checkPhase0Gate (storyId, state, result) {
   // 验收标准 — 将 errors 字符串转为结构化 blocker
@@ -622,7 +626,7 @@ function checkPrdCoverage (storyId, result) {
 }
 
 /**
- * Phase 1→2 门控: task-dag + AC↔Task 交叉引用 + Figma nodeId 引用（条件性）
+ * Phase 1→2 门控: task-dag + AC↔Task 交叉引用 + Figma frame-inventory 完整性 & nodeId 引用（条件性，仅 hasFigmaDesign）
  */
 function checkPhase1Gate (storyId, state, result) {
   const taskCheck = checkTaskDagJson(storyId)
@@ -698,6 +702,21 @@ function checkPhase1Gate (storyId, state, result) {
   // 从 validate-phase-gate.js 迁入 —— run.md 声称的"task 需带 figmaNodeId"硬门控此前从未在生效路径执行。
   // 取舍：引用了不存在的 frame → BLOCKER（明确错误）；Vue task 未绑 nodeId → WARNING（可能是纯逻辑改动）
   if (hasFigmaDesign(state)) {
+    // 先校验 frame-inventory 内容完整性（id/name/link/type 等），残缺即 BLOCKER。
+    // 存在性已由 checkPhaseArtifact 的 requiredWhen:'hasFigmaDesign' 覆盖，这里管内容。
+    const ffiCheck = checkFigmaFrameInventory(storyId)
+    if (ffiCheck.exists && !ffiCheck.valid) {
+      for (const e of ffiCheck.errors) {
+        result.blockers.push(structuredError(
+          'figma_frame_incomplete',
+          `figma-frame-inventory.json 不完整: ${e}`,
+          2,
+          'figma-frame-inventory.json 的每个 frame 必须包含 id/name/link/type 字段，缺一不可'
+        ))
+        result.passed = false
+      }
+    }
+
     const figmaRef = validateTaskFigmaReferences(storyId)
     for (const r of figmaRef.invalidRefs || []) {
       result.blockers.push(structuredError(
@@ -1010,8 +1029,9 @@ function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
  *   - testType=ui   + passed + evidenceType=static → BLOCKER。纯交互断言（点击/禁用态/
  *     弹窗）不可能靠静态阅读证明，要么补 playwright/manual 证据，要么老实改成 unverifiable。
  *   - 其余 testType + passed + evidenceType=static → WARNING。集成/接口型 AC 的静态证据
- *     强度不足但仍有参考价值，且若一律阻塞会迫使大批 AC 降级成 unverifiable，
- *     反而触发 checkAcceptanceVerification 的「unverifiable 比例 > 50%」硬阻塞。
+ *     强度不足但仍有参考价值，且若一律阻塞会迫使大批 AC 降级成 unverifiable。
+ *     （unverifiable 不阻塞门控 —— checkAcceptanceVerification 已移除比例阈值，
+ *      unverifiable 由本函数与 checkPhase4Gate 降级为 WARNING 提示。）
  *
  * evidenceType 缺失按 static 处理（schema 已要求必填，缺失即未如实声明）。
  */

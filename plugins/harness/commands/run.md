@@ -311,18 +311,23 @@ HARNESS_SKIP_BUILD=1 node $HARNESS/advance-phase.js <storyId> 3
     "id": "B1",                        // MUST: 匹配 ^(B|W|S)\d+$
     "severity": "BLOCKER|WARNING|SUGGESTION",
     "status": "open|fixed|skipped",    // MUST: 门控唯一信源，BLOCKER+open 阻断推进
-    "file": "src/views/xxx.vue",
+    "file": "src/views/xxx.vue",       // MUST: 问题出现位置
     "line": 42,
     "title": "...",                    // MUST
     "description": "...",              // MUST
-    "suggestion": "..."
+    "suggestion": "...",
+    "impact": "...",                   // 可选：影响范围/影响到的 AC-N（供 Phase 4 交叉对账）
+    "reason": "...",                   // 可选：根因分析
+    "project": "userlive",             // 可选：跨仓时声明问题所属仓库
+    "repoPath": "D:/workfile/userlive" // 可选：跨仓时声明修复点仓库路径
   }],
   "summary": { "blockerCount": 0, "warningCount": 0, "suggestionCount": 0 }  // MUST
 }
 ```
 
-> 以上字段约束与 `scripts/schemas/code-review.schema.json` 一致（`additionalProperties: false`，
-> 多写字段会被门控拒绝）。schema 是唯一权威，本表仅为速查。
+> 顶层 schema 为 `additionalProperties: false`（storyId/issues/summary 之外的顶层字段会被门控拒绝）；
+> `issues[]` 内为 `additionalProperties: true`，可额外携带 `impact/reason/project/repoPath` 等字段
+> （供 Phase 4 交叉对账与 fix-loop 跨仓定位消费）。字段约束以 `scripts/schemas/code-review.schema.json` 为准。
 
 **acceptance-verification.json** (Phase 4，测试工程师产出):
 ```json
@@ -343,8 +348,8 @@ HARNESS_SKIP_BUILD=1 node $HARNESS/advance-phase.js <storyId> 3
 | code-review 中 open 的问题自称影响某 AC，而该 AC 判 passed | **BLOCKER** | `review_acceptance_conflict` |
 
 设计取舍：交互型断言（点击/禁用态/弹窗/勾选）读代码读不出来，只能实跑，所以硬阻塞；
-集成/接口型 AC 若也一律阻塞，会迫使大批 AC 降级成 `unverifiable`，反而撞上
-「unverifiable 比例 > 50%」的 L4 阻塞 —— 那是把门控变成墙，不是提高质量。
+集成/接口型 AC 若也一律阻塞，会迫使大批 AC 降级成 `unverifiable` —— 那是把门控变成墙，不是提高质量。
+`unverifiable` 不阻塞门控（`checkAcceptanceVerification` 已移除比例阈值，降级为 warning）；
 给不出运行时证据时的正确做法是标 `unverifiable` + 写明环境限制，而不是用 `static` 冒充 `passed`。
 
 ## 附录 C：Hook 守卫（自动运行，AI 无需干预）

@@ -293,7 +293,7 @@ function auditContracts() {
  *
  * 检查逻辑: 对每个未完成 Story，若 story-input 声明了 Figma 链接（detectFigmaSource.hasFigma），
  * 则校验后续是否真的产出了 figma-frame-inventory.json（checkFigmaFrameInventory）。
- * 声明了 Figma 但 Phase 0 没产出 frame 清单 = 断裂，告警。
+ * 声明了 Figma 但 Phase 1（任务规划）没产出 frame 清单 = 断裂，告警。
  *
  * @returns {void}
  */
@@ -317,7 +317,7 @@ function auditDeclarationConsumption() {
       const errText = (ffi.errors && ffi.errors.length > 0)
         ? ffi.errors.join("; ")
         : "figma-frame-inventory.json 缺失或无效"
-      warnings.push({ cat: "decl-consume", severity: "WARNING", msg: "[" + sid + "] 声明了 " + figma.urls.length + " 个 Figma 链接但 Phase 0 未产出有效 frame 清单: " + errText })
+      warnings.push({ cat: "decl-consume", severity: "WARNING", msg: "[" + sid + "] 声明了 " + figma.urls.length + " 个 Figma 链接但 Phase 1 未产出有效 frame 清单: " + errText })
     }
   }
 }

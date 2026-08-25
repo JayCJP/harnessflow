@@ -49,7 +49,7 @@
         "figmaUrls": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Figma 设计稿链接。非空时需求分析师必须产出 figma-frame-inventory.json"
+          "description": "Figma 设计稿链接。非空时 create-workflow 会置 state.hasFigmaDesign=true；frame-inventory 与 figmaNodeId/figmaRefs 由 Phase 1 任务规划师拆 task 时产出（需求分析师只标注 UI 改动点，不拉设计稿内容）"
         },
         "docs": {
           "type": "array",

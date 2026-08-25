@@ -26,6 +26,7 @@ fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
 
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const { createWorkflow } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
+const policy = require(path.join(SCRIPTS_DIR, 'services/policy'))
 
 let pass = 0
 const failures = []
@@ -106,6 +107,82 @@ fs.writeFileSync(path.join(dir3, 'task-dag.json'), JSON.stringify({
 const tasks = state.getTasksRequiringFigma('GL-1')
 ok('目录 glob 的 task-1 被识别为需 Figma', tasks.some(t => t.id === 'task-1'), JSON.stringify(tasks.map(t => t.id)))
 ok('纯逻辑 task-2 不被识别', !tasks.some(t => t.id === 'task-2'), JSON.stringify(tasks.map(t => t.id)))
+
+// ════════════════════════════════════════════════════════════
+section('4. Phase 1→2 门控：figma-frame-inventory 存在性 & 完整性')
+
+// 场景 A：hasFigmaDesign=true 但 frame-inventory 缺失 → BLOCKER（存在性门控，依赖 requiredWhen:'hasFigmaDesign'）
+const dir4a = storyDir('FG1-MISS')
+fs.mkdirSync(dir4a, { recursive: true })
+fs.writeFileSync(path.join(dir4a, 'story-input.json'), JSON.stringify({
+  mode: 'run', sources: { figmaUrls: ['https://www.figma.com/design/abc/x'] }
+}))
+fs.writeFileSync(path.join(dir4a, 'e2e-state.json'), JSON.stringify({ storyId: 'FG1-MISS', phase: 1, status: 'running', hasFigmaDesign: true }))
+fs.writeFileSync(path.join(dir4a, 'task-dag.md'), '# DAG')
+fs.writeFileSync(path.join(dir4a, 'task-dag.json'), JSON.stringify({
+  tasks: [
+    { id: 'task-1', title: 'T', files: ['src/views/Foo.vue'], acceptanceCriteria: ['AC-1'], parallelizable: false, figmaNodeId: '3020:1' }
+  ],
+  batches: [{ batchId: 1, taskIds: ['task-1'] }]
+}))
+fs.writeFileSync(path.join(dir4a, 'acceptance-criteria.json'), JSON.stringify({
+  featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
+  criteria: [{ id: 'AC-1', description: '验收', testType: 'ui' }]
+}))
+// 刻意不写 figma-frame-inventory.json
+const g1 = policy.runGateCheck('FG1-MISS', 1, state.readStateFile('FG1-MISS'))
+const missBlocked = g1.blockers.some(b => (b.type === 'artifact_missing') && /figma-frame-inventory\.json/.test(b.message))
+ok('hasFigma=true 且 frame-inventory 缺失 -> BLOCKER(artifact_missing)', missBlocked,
+  JSON.stringify(g1.blockers.map(b => b.type + ':' + b.message)))
+
+// 场景 B：frame-inventory 存在但内容残缺（缺 link/type）→ BLOCKER（完整性门控 checkFigmaFrameInventory）
+const dir4b = storyDir('FG1-BAD')
+fs.mkdirSync(dir4b, { recursive: true })
+fs.writeFileSync(path.join(dir4b, 'story-input.json'), JSON.stringify({
+  mode: 'run', sources: { figmaUrls: ['https://www.figma.com/design/abc/x'] }
+}))
+fs.writeFileSync(path.join(dir4b, 'e2e-state.json'), JSON.stringify({ storyId: 'FG1-BAD', phase: 1, status: 'running', hasFigmaDesign: true }))
+fs.writeFileSync(path.join(dir4b, 'task-dag.md'), '# DAG')
+fs.writeFileSync(path.join(dir4b, 'task-dag.json'), JSON.stringify({
+  tasks: [
+    { id: 'task-1', title: 'T', files: ['src/views/Foo.vue'], acceptanceCriteria: ['AC-1'], parallelizable: false, figmaNodeId: '3020:1' }
+  ],
+  batches: [{ batchId: 1, taskIds: ['task-1'] }]
+}))
+fs.writeFileSync(path.join(dir4b, 'acceptance-criteria.json'), JSON.stringify({
+  featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
+  criteria: [{ id: 'AC-1', description: '验收', testType: 'ui' }]
+}))
+// frame 缺 link（不完整）
+fs.writeFileSync(path.join(dir4b, 'figma-frame-inventory.json'), JSON.stringify({ frames: [{ id: '3020:1', name: 'A', type: 'dialog' }] }))
+const g2 = policy.runGateCheck('FG1-BAD', 1, state.readStateFile('FG1-BAD'))
+const incompleteBlocked = g2.blockers.some(b => b.type === 'figma_frame_incomplete')
+ok('frame-inventory 内容残缺（缺 link）-> BLOCKER(figma_frame_incomplete)', incompleteBlocked,
+  JSON.stringify(g2.blockers.map(b => b.type + ':' + b.message)))
+
+// 场景 C：frame-inventory 完整（有 id/name/type/link）→ 不再因 frame 内容报 BLOCKER
+const dir4c = storyDir('FG1-OK')
+fs.mkdirSync(dir4c, { recursive: true })
+fs.writeFileSync(path.join(dir4c, 'story-input.json'), JSON.stringify({
+  mode: 'run', sources: { figmaUrls: ['https://www.figma.com/design/abc/x'] }
+}))
+fs.writeFileSync(path.join(dir4c, 'e2e-state.json'), JSON.stringify({ storyId: 'FG1-OK', phase: 1, status: 'running', hasFigmaDesign: true }))
+fs.writeFileSync(path.join(dir4c, 'task-dag.md'), '# DAG')
+fs.writeFileSync(path.join(dir4c, 'task-dag.json'), JSON.stringify({
+  tasks: [
+    { id: 'task-1', title: 'T', files: ['src/views/Foo.vue'], acceptanceCriteria: ['AC-1'], parallelizable: false, figmaNodeId: '3020:1' }
+  ],
+  batches: [{ batchId: 1, taskIds: ['task-1'] }]
+}))
+fs.writeFileSync(path.join(dir4c, 'acceptance-criteria.json'), JSON.stringify({
+  featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
+  criteria: [{ id: 'AC-1', description: '验收', testType: 'ui' }]
+}))
+fs.writeFileSync(path.join(dir4c, 'figma-frame-inventory.json'), JSON.stringify({ frames: [{ id: '3020:1', name: 'A', type: 'dialog', link: 'https://figma.com/node/3020:1' }] }))
+const g3 = policy.runGateCheck('FG1-OK', 1, state.readStateFile('FG1-OK'))
+const hasFrameIncomplete = g3.blockers.some(b => b.type === 'figma_frame_incomplete')
+ok('frame-inventory 完整（含 link）-> 无 figma_frame_incomplete BLOCKER', !hasFrameIncomplete,
+  JSON.stringify(g3.blockers.map(b => b.type + ':' + b.message)))
 
 // ════════════════════════════════════════════════════════════
 try {

@@ -263,7 +263,7 @@ const PHASE_ARTIFACTS = {
     artifacts: [
       { fileName: 'task-dag.md', description: '任务 DAG 文档', contract: false },
       { fileName: 'task-dag.json', description: '任务 DAG 契约', contract: true },
-      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出，任务规划师拆 task 时只针对相关组件拉取，每个 frame 含 id/name/link/type/rect 及可选 designSpec 设计规格摘要）', contract: true, optional: true }
+      { fileName: 'figma-frame-inventory.json', description: 'Figma Frame 清单（有 Figma 设计稿时产出，任务规划师拆 task 时只针对相关组件拉取，每个 frame 含 id/name/link/type/rect 及可选 designSpec 设计规格摘要）', contract: true, optional: true, requiredWhen: 'hasFigmaDesign' }
     ]
   },
   2: { artifacts: [{ fileName: null, description: '代码变更（git diff）', contract: false }] },
@@ -747,7 +747,7 @@ function hasFigmaDesign (state) {
 
 /**
  * 🌐 检查 Figma Frame 清单 (figma-frame-inventory.json) 是否完整
- * Phase 0 Figma 设计理解阶段的产出。每个 frame 必须有 id、name、link。
+ * Phase 1 任务规划师拆 task 时的产出（需求分析师不拉设计稿）。每个 frame 必须有 id、name、link。
  * @param {string} storyId - Story ID
  * @returns {{ exists: boolean, valid: boolean, frames: Array, errors: string[] }}
  */
@@ -756,7 +756,7 @@ function checkFigmaFrameInventory (storyId) {
   const data = readJsonArtifact(storyId, FIGMA_FRAME_INVENTORY_FILE)
 
   if (!data) {
-    result.errors.push(FIGMA_FRAME_INVENTORY_FILE + ' 不存在（如有 Figma 设计稿，Phase 0 必须产出此文件）')
+    result.errors.push(FIGMA_FRAME_INVENTORY_FILE + ' 不存在（如有 Figma 设计稿，Phase 1 任务规划师必须产出此文件）')
     return result
   }
   if (data._parseError) {

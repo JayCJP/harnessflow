@@ -123,7 +123,7 @@ function readFigmaDesignSpec (storyId) {
     const lines = [
       '## Figma 设计规格摘要（frame-inventory 中的 designSpec，辅助参考）',
       '',
-      '> 设计稿完整内容以你通过 Figma MCP 拉取为准；以下仅列出 Phase 0 已提取的关键规格，减少全量探索。',
+      '> 设计稿完整内容以你通过 Figma MCP 拉取为准；以下仅列出 Phase 1 任务规划阶段已提取的关键规格，减少全量探索。',
       ''
     ]
     for (const f of withSpec) {
