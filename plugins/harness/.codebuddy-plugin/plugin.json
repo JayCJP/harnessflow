@@ -1,0 +1,19 @@
+{
+  "name": "harness",
+  "version": "2.0.0",
+  "description": "Harness Engineering 端到端工作流 — Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 审查 → 测试 → 部署 全流程自动化",
+  "author": {
+    "name": "CJP"
+  },
+  "license": "MIT",
+  "homepage": "https://codebuddy.tencent.com",
+  "keywords": [
+    "workflow",
+    "cicd",
+    "bug-fix",
+    "code-review",
+    "testing",
+    "deployment",
+    "phase-management"
+  ]
+}
