@@ -1,7 +1,6 @@
 ---
+name: harness-archive
 description: 归档 Story 全部文件 / 复档恢复 / 查看归档历史，归档后 root 目录清空
-category: workflow
-allowed-tools: Bash
 ---
 
 # /harness archive — Story 归档与复档

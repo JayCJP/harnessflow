@@ -16,6 +16,9 @@
 | gen-project-docs | gen-project-docs/ | 扫描源码生成 8 类文档 |
 | api-generator | api-generator/ | Swagger → 接口定义/请求函数 |
 | harness-conductor | harness-conductor/ | 工作流编排器 |
+| harness-run | harness-run/ | 新功能开发全流程 |
+| harness-fixbugs | harness-fixbugs/ | Bug 修复全流程 |
+| harness-archive | harness-archive/ | Story 归档、复档与历史查询 |
 | harness-evolve | harness-evolve/ | Harness 自进化（体检→度量→诊断→治疗→验证） |
 | tapd-bug-analyzer | tapd-bug-analyzer/ | TAPD 缺陷分析 |
 

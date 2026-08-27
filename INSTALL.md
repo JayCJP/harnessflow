@@ -175,10 +175,9 @@ harness-marketplace/
 ├── .claude-plugin/marketplace.json      # Claude Code 市场清单（内容一致）
 ├── plugins/
 │   └── harness/
-│       ├── plugin.json                  # 插件元信息（commands/agents/skills/hooks 入口）
+│       ├── plugin.json                  # 插件元信息（agents/skills/hooks 入口）
 │       ├── agents/                     # 6 个工程角色代理
-│       ├── commands/                   # run / fixbugs / evolve / archive
-│       ├── skills/                     # 编排 / 知识库 / 文档 / 接口 / Figma 技能
+│       ├── skills/                     # 工作流 / 编排 / 知识库 / 文档 / 接口 / Figma 技能
 │       ├── hooks/                      # 阶段钩子（hooks.json 声明）
 │       ├── rules/                      # 知识库自动检索规则
 │       ├── scripts/                    # audit / services / schemas / commands

@@ -13,7 +13,7 @@
 | 关键词 | 模块 | 文档入口 |
 |--------|------|----------|
 | agent、角色、需求分析师、前端开发、代码审查、测试、发布、任务规划 | agents | `business/agents/overview.md` |
-| run、fixbugs、archive、evolve、命令入口 | commands | `business/commands/overview.md` |
+| run、fixbugs、archive、evolve、工作流入口 | skills | `business/skills/overview.md` |
 | prompt-builder、context-refresh、state、trace、policy、schema-validator | scripts-core | `business/scripts-core/overview.md` |
 | advance-phase、create-workflow、dispatch、harness-workflow | scripts-commands | `business/scripts-commands/overview.md` |
 | enforce-*、session-start、session-stop、trace-command、钩子 | scripts-hooks | `business/scripts-hooks/overview.md` |
