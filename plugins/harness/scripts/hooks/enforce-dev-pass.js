@@ -1,16 +1,47 @@
 #!/usr/bin/env node
 /**
- * PreToolUse Hook #1 — /harness 模式下的 src/ 编辑保护
+ * enforce-dev-pass.js — /harness 模式下按 dev-pass 限域保护 src/ 编辑
  *
- * v5 CCHF: file-level scope via task-dag.json allowedPaths + 经验采集
- *   Normal  → unrestricted
- *   Harness → check dev-pass:
- *     - invalid             → block + recordFailure
- *     - valid + src/**      → allow (fallback)
- *     - valid + precise     → check file against allowedPaths
+ * 职责:
+ *   - /harness 模式激活时，拦截对 src/ 文件的写入/编辑，校验 dev-pass.json 是否有效
+ *   - dev-pass 有效且声明了 allowedPaths 时，逐个校验目标文件是否落在限域范围内
+ *   - 拒绝时写入 trace.jsonl 的 hook_rejection 事件，并携带 recordFailure 结构化失败信息
  *
- * 拒绝事件通过 hookSpecificOutput.recordFailure 字段携带结构化失败信息，
- * 供 session-stop.js 读取并沉淀到经验库。
+ * 用法:
+ *   由宿主自动触发，无需手动执行。
+ *   注册事件: PreToolUse
+ *   输入: stdin JSON（{ tool_name, tool_input: { filePath | file_path | command } }）
+ *   输出: stdout JSON（放行 { continue: true, hookSpecificOutput.additionalContext }；
+ *                      拒绝 { continue: false, stopReason, hookSpecificOutput.permissionDecision: 'deny', recordFailure }）
+ *   退出码: 0=放行，2=阻止
+ *   手动调试: echo '{"tool_name":"Write","tool_input":{"filePath":"<repo>/src/views/Foo.vue"}}' | node enforce-dev-pass.js
+ *
+ * 使用场景:
+ *   - Agent 在 Phase 2 未签发 dev-pass 时就动手改 src/（例如直接跳到写代码）：
+ *     不拦截会让「先规划后编码」的流程约束失效，需求/DAG 未定稿就产生代码，后续返工面极大。
+ *   - Agent 编辑 task-dag.json 限域外的文件（顺手改公共组件、改别人的模块、改配置）：
+ *     这是经验库里长期占比最高的失败模式（failureType: dev_pass_scope_violation，
+ *     具体频次见 failure-patterns.json，不在此写死以免随统计变动而失真）。
+ *     越界改动会污染其他任务的代码基线、引入无人审查的隐性缺陷，
+ *     且事后难以从一次大 diff 中剥离出哪些改动属于本次 Story。
+ *   - dev-pass 已随 Phase 2→3 撤销但 dev-pass.json 残留：
+ *     过期凭证若仍被信任，等于任何时刻都能改 src/，限域体系整体失效。
+ *
+ * 说明:
+ *   - 本 Hook 是 PreToolUse 门控链的第 1 道（#2 为 enforce-artifact.js）。
+ *   - v5 CCHF 限域逻辑（file-level scope via task-dag.json allowedPaths + 经验采集）：
+ *       Normal  → unrestricted（.harness-active 未激活，直接放行）
+ *       Harness → check dev-pass:
+ *         - invalid             → block + recordFailure
+ *         - valid + src/**      → allow (fallback)
+ *         - valid + precise     → check file against allowedPaths
+ *   - 拦截工具: write_to_file / replace_in_file / apply_patch / Write / Edit；非 src/ 目标直接放行。
+ *   - allowedPaths 统一为 { repo, path } 对象数组，按 multi-repo 配置的仓库根解析为绝对路径后匹配；
+ *     无通配符的目录型 pattern 按目录前缀匹配，含通配符的 pattern 转为 glob 正则匹配（statSync 失败则降级为正则）。
+ *   - dev-pass 撤销双保险: Phase 2→3（主）+ Phase 4→5（兜底）；currentPhase > 2 时即便 dev-pass 文件有效也拒绝。
+ *   - 拒绝事件通过 hookSpecificOutput.recordFailure 携带结构化失败信息（failureType / rootCause / resolution），
+ *     供 session-stop.js 从 trace.jsonl 读取并沉淀到经验库。
+ *   - recordFailure.failureType 取值: dev_pass_missing / dev_pass_expired / dev_pass_scope_violation。
  */
 const fs = require('fs')
 const path = require('path')

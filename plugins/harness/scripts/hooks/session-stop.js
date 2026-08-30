@@ -1,19 +1,43 @@
 #!/usr/bin/env node
 /**
- * Stop Hook — Agent 回答结束时自动收尾
+ * session-stop.js — Agent 每轮回答结束时的自动收尾
  *
- * ⚠️ 注册在 Claude Code 的 `Stop` 事件下，每轮回答结束都会触发（不是会话终止）。
- *    会话终止对应 `SessionEnd` 事件。
+ * 职责:
+ *   - 单次扫描所有 Story 目录，产出 session 变更摘要（活跃工作流 / src 变更 / 知识库待办）
+ *   - 清理过期 dev-pass，把 trace.jsonl 中的 Hook 拒绝事件沉淀到经验库
+ *   - 当前激活 Story 走到终态时自动关闭 Harness 模式（harness end）
  *
- * 功能：
- * 1. 单次扫描所有工作流（活跃 + 已完成）
- * 2. 清理过期的 dev-pass 文件
- * 3. 从 trace.jsonl 沉淀 Hook 拒绝事件到经验库
- * 4. 所有工作流完成后自动结束 Harness 模式
- * 5. 输出 session 变更摘要
+ * 用法:
+ *   由宿主自动触发，无需手动执行。
+ *   注册事件: Stop
+ *   输入: stdin JSON（含 stop_hook_active；为 true 说明本 Hook 已在续跑循环中，直接放行不做收尾）
+ *   输出: stdout JSON（{ continue: true, hookSpecificOutput: { hookEventName: 'Stop', additionalContext } }，
+ *         additionalContext 上限 8000 字符，超限逐级降级）
+ *   手动调试: echo '{}' | node session-stop.js
  *
- * 输入：stdin JSON（含 stop_hook_active，为 true 时直接放行）
- * 输出：stdout JSON（additionalContext 上限 8000 字符，超限逐级降级）
+ * 使用场景:
+ *   - Agent 一轮回答结束后留下过期的 dev-pass.json：
+ *     不清理会留下可被 enforce-dev-pass.js 误信的过期凭证，src/ 限域出现空窗。
+ *   - 本轮触发过 Hook 拒绝（越界编辑、跳 Phase、写状态文件）：
+ *     不沉淀到经验库，同样的失败模式会在下一轮、下一个 Story 反复重演，门控只能一直硬拦而无法自省。
+ *   - Story 已走完 Phase 8 但 .harness-active 未关闭：
+ *     不自动结束会让 src/ 持续处于限域保护下，后续正常的非 Harness 编辑被无谓拦截。
+ *
+ * 说明:
+ *   - 注册在 Claude Code 的 `Stop` 事件下，**每轮回答结束都会触发**（不是会话终止）。
+ *     会话终止对应 `SessionEnd` 事件 —— 不要按「会话结束才跑一次」来理解本脚本的执行频率。
+ *   - 功能清单:
+ *       1. 单次扫描所有工作流（活跃 + 已完成），替代早期的两次扫描
+ *       2. 清理过期的 dev-pass 文件
+ *       3. 从 trace.jsonl 沉淀 Hook 拒绝事件到经验库
+ *       4. 所有工作流完成后自动结束 Harness 模式
+ *       5. 输出 session 变更摘要
+ *   - 各环节独立 try/catch，单点失败不阻塞整体收尾。
+ *   - autoEndHarness 演进说明：旧逻辑要求「所有活跃工作流都完成」才 end；新逻辑改为「当前激活 Story
+ *     走到终态（status='completed' 且 phase >= 8）即 end」——因为 .harness-active 一次只激活一个 Story，
+ *     它走到终态即代表本次 Harness 主流程结束。无激活 Story 时回退到旧逻辑。
+ *   - additionalContext 超过 MAX_CONTEXT_CHARS(8000) 时逐级降级：完整 → 去掉 src 文件清单 → 只保留核心计数。
+ *   - 诊断日志走 stderr，不污染 stdout 的 JSON 输出。
  */
 
 const fs = require('fs')

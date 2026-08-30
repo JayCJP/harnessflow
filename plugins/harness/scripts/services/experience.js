@@ -1,14 +1,32 @@
 #!/usr/bin/env node
 /**
- * experience.js — 经验沉淀飞轮模块
+ * experience.js — 经验沉淀飞轮：记录失败模式，并向 Agent 注入历史教训
  *
- * v2.0: 增强采集能力
- *   - 去重键从 phase+failureType 改为 phase+failureType+rootCauseKey(前50字符)
- *   - unknown 类型自动沉淀 + 标记需人工补录
- *   - getLessonsForPhase 输出时区分 unknown 类型提醒
+ * 职责:
+ *   - 把门控/Hook 失败模式写入全局经验库 failure-patterns.json，并归档失败案例
+ *   - 按 Phase 检索历史教训与度量洞察，供 prompt 与会话启动注入
+ *   - 提供失败分布统计（getFailureStats），支撑 harness-evolve 的度量与诊断
  *
- * 记录失败模式 + 注入历史教训到 Agent prompt
- * 实现"执行→观测→评估→提纯→知识→门控"闭环
+ * 用法:
+ *   作为模块引用:
+ *     const { recordFailurePattern, getLessonsForPhase } = require('./services/experience')
+ *
+ * 使用场景:
+ *   - commands/advance-phase.js 门控失败且自动恢复无效后，recordFailurePattern 沉淀失败模式
+ *   - hooks/session-start.js 会话启动注入 getLessonsForPhase 与 getMetricsInsights
+ *   - services/prompt-builder.js 构造 prompt 时注入本 Phase 历史教训与度量洞察
+ *   - services/context-refresh.js injectMustCheck 用 getLessonsAsChecklist(2) 生成 mustCheck 清单
+ *   - hooks/session-stop.js 会话结束时 recordHookFailure 沉淀 Hook 层失败
+ *   - audit/metrics-aggregator.js 读取与合并跨项目度量洞察
+ *
+ * 说明:
+ *   - v2.0 增强采集: 去重键从 phase+failureType 改为 phase+failureType+rootCauseKey(前 50 字符)，
+ *     同一 failureType 下不同根因不再被合并；unknown 类型自动沉淀并标记 needsManualReview
+ *     （reviewStatus=pending），待人工用 confirmUnknownPattern 补录正确类型
+ *   - getLessonsForPhase 输出时区分 unknown 类型，提醒人工补录到 policy.js 的 RECOVERY_SUGGESTIONS
+ *   - 实现「执行→观测→评估→提纯→知识→门控」闭环
+ *   - 经验库目录由 EXPERIENCE_DIR 解析（scripts/experience），全局跨项目共享：
+ *     失败模式（如「task-dag 应用 title 而非 name」）是 Harness 流程本身的规范，与具体项目无关
  *
  * @module experience
  */
@@ -19,7 +37,7 @@ const { getStoryDir } = require('../lib/state')
 
 /**
  * 经验库根目录 — 全局跨项目共享
- * 位于 ~/.codebuddy/experience/（与 scripts/ 同级）
+ * 实际解析为 plugins/harness/scripts/experience（由 __dirname 推导，并非 ~/.codebuddy/）
  * 理由: 失败模式（如 "task-dag 应用 title 而非 name"）是 Harness 流程本身的规范，
  *       与具体项目无关，应在所有项目间共享。
  */

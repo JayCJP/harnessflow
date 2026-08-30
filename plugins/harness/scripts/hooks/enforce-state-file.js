@@ -1,15 +1,39 @@
 #!/usr/bin/env node
 /**
- * PreToolUse Hook — e2e-state.json / dev-pass.json 写入保护
+ * enforce-state-file.js — e2e-state.json / dev-pass.json 写入保护（状态文件单写者）
  *
- * 参考: 阿里 Harness 工程化实践 — 状态文件单写者模式 + hook 拦截
+ * 职责:
+ *   - 拦截 Agent（主 Agent 与子 Agent）对 e2e-state.json、dev-pass.json 的一切直接写入
+ *   - 同时守住文件工具通道与 shell 通道（Bash / execute_command / apply_patch），只放行授权脚本
+ *   - 拒绝时携带 recordFailure 结构化失败信息，指引改用 advance-phase.js 推进 Phase
  *
- * 规则: e2e-state.json 和 dev-pass.json 只能通过 advance-phase.js 脚本更新，
- *       Agent (无论是主 Agent 还是子 Agent) 禁止直接写入。
- * 原理: 拦截所有 Write/Edit 操作，检查目标文件是否为状态文件，
- *       如果是 → 拒绝，提示使用 advance-phase.js。
+ * 用法:
+ *   由宿主自动触发，无需手动执行。
+ *   注册事件: PreToolUse
+ *   输入: stdin JSON（{ tool_name, tool_input: { file_path | filePath | command } }）
+ *   输出: stdout JSON（放行 { continue: true }；拒绝 { continue: false, stopReason, hookSpecificOutput.permissionDecision: 'deny', recordFailure }）
+ *   退出码: 0=放行，2=阻止
+ *   手动调试: echo '{"tool_name":"Write","tool_input":{"file_path":"<plans>/<storyId>/e2e-state.json"}}' | node enforce-state-file.js
  *
- * 设计: fail-closed — 默认拒绝，只放行显式允许的操作。
+ * 使用场景:
+ *   - 子 Agent 在完成 Phase 2 后顺手把 e2e-state.json 的 phase 改成 3：
+ *     不拦截会出现「产出物未落地但状态已推进」的幽灵进度，门控校验、Phase 摘要、经验沉淀全部基于错误状态运行。
+ *   - Agent 用 shell 写入状态文件（node -e fs.writeFileSync / echo > / sed -i / tee / PowerShell Set-Content）：
+ *     只拦文件工具的话，「状态文件单写者」仅在一条通道上成立，等于形同虚设——shell 是绕过的默认选择。
+ *   - 多个 Agent/多轮会话并发改写状态文件：
+ *     不拦截会产生互相覆盖的状态漂移，dev-pass 限域与 phase 进度失去可信度。
+ *
+ * 说明:
+ *   - 参考: 阿里 Harness 工程化实践 — 状态文件单写者模式 + hook 拦截。
+ *   - 设计: fail-closed — 默认拒绝，只放行显式允许的操作。
+ *   - 受保护文件: e2e-state.json、dev-pass.json（匹配规则: 路径位于 .codebuddy/plans/ 下且文件名精确命中）。
+ *   - 唯一授权改写者（AUTHORIZED_SCRIPTS）: advance-phase.js / create-workflow.js / archive-story.js / harness-workflow.js。
+ *     命令中命中上述脚本名即放行，这是推进 Phase 的正常路径。
+ *   - shell 通道采用「写意图白名单的反面」判定: 命令未提及受保护文件放行；命中 WRITE_PATTERNS
+ *     （重定向、writeFileSync/appendFileSync/createWriteStream、sed -i、rm/mv/cp/del/move/copy、tee、Set-Content/Add-Content/Out-File）则拒绝；
+ *     其余（cat、grep、jq 等只读查询）放行，避免误伤正常的状态查看。
+ *   - 文件工具通道拦截工具: Write / Edit / write_to_file / replace_in_file；filePath 为空时放行。
+ *   - recordFailure.failureType = 'state_file_violation'。
  */
 const fs = require('fs')
 const path = require('path')

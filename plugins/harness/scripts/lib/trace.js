@@ -1,9 +1,37 @@
 #!/usr/bin/env node
 /**
- * trace.js — 全链路 Trace 记录模块
+ * trace.js — 全链路 Trace 事件的追加写入器
  *
- * 记录 Agent 间消息、工具调用、门控决策、协调事件到 trace.jsonl
- * 供调试、审计、经验沉淀使用。
+ * 职责:
+ *   - 记录 Agent 间消息、工具调用、门控决策、协调事件到 story 目录下的 trace.jsonl
+ *   - 供调试、审计、经验沉淀使用
+ *   - 提供 CLI 入口，让 AI / 人工在无 hook 自动采集的场景下手动补记 Agent 与 Git 事件
+ *
+ * 用法:
+ *   作为模块引用:
+ *     const { traceGateDecision, traceToolCall } = require('../lib/trace')
+ *   独立执行:
+ *     node plugins/harness/scripts/lib/trace.js agent-spawn  <storyId> <agentName> [taskId] [phase]
+ *     node plugins/harness/scripts/lib/trace.js agent-result <storyId> <agentName> <completed|failed> [detailsJSON]
+ *     node plugins/harness/scripts/lib/trace.js git          <storyId> <init|add|commit|push|mr> [success|failed] [detailsJSON]
+ *     不带子命令时打印 usage JSON
+ *
+ * 使用场景:
+ *   - 被 hooks/enforce-dev-pass.js、hooks/enforce-artifact.js require: 记录守卫放行 / 拒绝事件，
+ *     供事后复盘「为什么这次编辑被拦下」
+ *   - 被 commands/advance-phase.js require: 记录门控决策、Phase 转换、fix-loop 与经验事件
+ *   - 被 commands/archive-story.js require: Story 归档时补记收尾事件
+ *   - 人工 / AI 手动执行 CLI: hook 未覆盖的手工 Agent 调用、手工 git 操作，用 CLI 补记进证据链
+ *
+ * 说明:
+ *   - trace.jsonl 每行一条 JSON，字段含 ts / storyId / type，type 覆盖
+ *     agent_spawn、agent_result、tool_call、agent_message、gate_decision、
+ *     phase_transition、error_recovery、experience、git
+ *   - tool_call 与 agent_message 互补: tool_call 记录「调了什么工具」，
+ *     agent_message 记录「产出/消费了哪些产物、命中了哪些知识库域」，两者结合才能还原完整证据链
+ *   - tool_call 的 ts 与 resourceHash 是「时间戳前置校验」与「特征指纹」的依据，
+ *     用于判断注入的教训/设计是否真正影响了产物
+ *   - storyId 为空或 Story 目录不存在时静默跳过，不抛错打断主流程
  *
  * @module trace
  */

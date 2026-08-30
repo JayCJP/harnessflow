@@ -1,14 +1,30 @@
 #!/usr/bin/env node
 /**
- * context-refresh.js — 上下文刷新模块
+ * context-refresh.js — Phase 完成后生成上下文摘要，供下个 Agent 替代完整对话历史
  *
- * 每个 Phase 完成后生成 summary，供下个 Agent 加载时替代完整历史。
- * 实现 Claude Code Level 4 Autocompact 的简化版: 保存关键决策 + 契约路径 + 待办。
+ * 职责:
+ *   - Phase 完成后生成 phase-N-summary.md（关键产出物 + 关键决策 + 待确认项状态 + 契约文件清单）
+ *   - Phase 1 完成时把历史教训转成 mustCheck 清单注入 task-dag.json，
+ *     让「注入的教训是否被规避」可被确定性检查（而非靠 LLM 自我诊断）
+ *   - 提供摘要加载（loadLatestSummary）与契约文件枚举（getContractFiles），供下一轮上下文组装
  *
- * 设计原则 (来自 Harness Engineering 指南):
- *   - 对话历史占 60-80% context，是压缩核心
- *   - 渐进式: 先轻量摘要，必要时升级
- *   - 预算跟踪跨压缩边界
+ * 用法:
+ *   作为模块引用:
+ *     const { generatePhaseSummary, loadLatestSummary } = require('./services/context-refresh')
+ *
+ * 使用场景:
+ *   - commands/advance-phase.js Phase 推进成功后调用 generatePhaseSummary 落盘本 Phase 摘要
+ *   - hooks/session-start.js 会话启动时用 loadLatestSummary 恢复上一 Phase 摘要，
+ *     :175 用 getContractFiles 列出已完成 Phase 的契约文件注入上下文
+ *   - services/prompt-builder.js 构造 Agent prompt 时加载摘要与契约清单作为下一轮输入
+ *   - 本模块 injectMustCheck 依赖 services/experience.js 的 getLessonsAsChecklist 取已确认失败模式
+ *
+ * 说明:
+ *   - 实现 Claude Code Level 4 Autocompact 的简化版: 只保存关键决策 + 契约路径 + 待办，不保存完整对话
+ *   - 设计原则 (来自 Harness Engineering 指南): 对话历史占 60-80% context，是压缩核心；
+ *     渐进式压缩（先轻量摘要，必要时升级）；预算跟踪需跨压缩边界
+ *   - 无落盘产出物的 Phase（2/5/6/7）改从运行时真相源取证（getRuntimeEvidence），否则产出物段落为空
+ *   - mustCheck 注入是「声明-消费一致性」在教训维度的落地：教训结构化写入，检查层确定性验证
  *
  * @module context-refresh
  */

@@ -1,17 +1,47 @@
 #!/usr/bin/env node
 /**
- * archive-story.js — Story 归档与复档
+ * archive-story.js — Story 归档（清空 root）与复档（复原 root）
  *
- * 将 story 根目录所有文件归档到 archive/round-{N}/，保持根目录整洁。
- * 支持复档（restore）将归档文件恢复到 story 根目录（最外层）。
- *
- * 归档后 root 目录清空。
+ * 职责:
+ *   - archive: 把 Story 根目录所有文件移入 archive/round-{N}/，清空 root 目录
+ *   - restore: 把指定轮次的归档文件恢复到 Story 根目录
+ *   - list: 列出所有归档轮次（文件数、体积、当时到达的 Phase）
+ *   - status: 查询当前是否处于归档状态及归档轮次信息
+ *   - 归档/复档均同步维护 e2e-state.json 的 archived* / restored* 字段，并写入 trace
  *
  * 用法:
- *   node archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]
- *   node archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]
- *   node archive-story.js <storyId> list
- *   node archive-story.js <storyId> status
+ *   node plugins/harness/scripts/commands/archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]
+ *     归档: root 全部文件（含 e2e-state.json / trace.jsonl / repos.json）移入 archive/round-{N}/
+ *   node plugins/harness/scripts/commands/archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]
+ *     复档: archive/round-{N}/ 全部文件恢复到 root
+ *   node plugins/harness/scripts/commands/archive-story.js <storyId> list
+ *     列出所有归档轮次
+ *   node plugins/harness/scripts/commands/archive-story.js <storyId> status
+ *     查看当前归档状态
+ *   --dry-run       预览将要归档的文件清单，不实际移动
+ *   --round <N>     archive 缺省自动取最大轮次 +1，restore 缺省自动取最新轮次
+ *   --force         archive: 未达终态 (phase < 8) 时强制归档；restore: 覆盖 root 同名文件
+ *   --keep-archive  restore 时保留归档副本（默认移动，归档目录会被清空）
+ *
+ * 使用场景:
+ *   - 工作流走完 Phase 7、dispatch.js 输出 status=terminal 后，主 Agent 执行 archive 收尾，
+ *     把 Story 目录清空以免污染下一次开发
+ *   - advance-phase.js 以"Story 已归档"拒绝 --rollback / --fix-loop 时，先执行 restore 复档
+ *     恢复操作能力，再继续推进
+ *   - 归档前用 --dry-run 核对将要移走的文件清单；中途放弃的 Story (phase < 8) 用 --force 强制归档
+ *   - 用 list / status 排查"这个 Story 归档了没、归档在第几轮"，尤其 root 已被清空、
+ *     e2e-state.json 不可见时
+ *
+ * 说明:
+ *   - 归档后 root 目录清空，所有文件（含 e2e-state.json / trace.jsonl / repos.json）都进入
+ *     archive/round-{N}/；dev-pass.json 属于残留文件，不进入归档而是直接删除。
+ *   - 防重复归档：root 无文件即判定为已归档，拒绝再次 archive，需先执行 restore。
+ *   - 终态检查：phase < 8 时默认拒绝归档，需 --force；归档会写入 state.status='archived'
+ *     以及 archivedAt / archiveRound / archiveDir。
+ *   - restore 默认移动（归档目录随之清空），--keep-archive 改为复制以保留归档副本；
+ *     root 存在同名文件时需 --force 覆盖，否则先报冲突清单。
+ *   - 复档后 state 恢复 status='running' 并写入 restoredAt / restoredFromRound，同时清除 archived* 字段。
+ *   - 本文件无 module.exports，仅作为 CLI 被主 Agent 调用（harness-archive skill）。
  *
  * @module archive-story
  */

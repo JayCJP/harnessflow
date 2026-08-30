@@ -1,19 +1,48 @@
 #!/usr/bin/env node
 /**
- * /harness 工作流管理脚本
+ * harness-workflow.js — /harness 模式激活与关闭（dev-pass 门控总开关）
  *
- * 控制 harness engineering 流程的激活/关闭，通过 .harness-active 标记文件实现。
+ * 职责:
+ *   - 通过 .codebuddy/plans/.harness-active 标记文件控制 harness 模式的激活/关闭
+ *   - start: 生成或采用 storyId，写标记文件，并内部调用 createWorkflow 同步创建 e2e-state.json
+ *   - end: 删除标记文件，恢复 src/ 的自由编辑
+ *   - status: 输出激活状态、当前 Phase、主仓库与涉及仓库
  *
  * 用法:
- *   node harness-workflow.js start <storyId> "<标题>"   ← 激活 harness 模式
- *   node harness-workflow.js end                          ← 关闭 harness 模式
- *   node harness-workflow.js status                       ← 查看当前状态
+ *   node plugins/harness/scripts/commands/harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs]
+ *     激活 harness 模式（写 .harness-active 标记文件）
+ *   node plugins/harness/scripts/commands/harness-workflow.js end
+ *     关闭 harness 模式（删除标记文件）
+ *   node plugins/harness/scripts/commands/harness-workflow.js status
+ *     查看当前状态
+ *   storyId 可省略，缺省自动生成 STORY-YYYYMMDD-NN（扫描当日已有目录取最大序号 +1）
+ *   --mode=fixbugs  Bug 修复模式：免除原型文档要求，Phase 0 改由需求分析师产出 Bug 分析报告
  *
- * 设计思路:
- *   - 用户输入 /harness 时，AI 调用 `start` 创建标记文件
- *   - enforce-dev-pass.js 检查标记文件：有 → 需 dev-pass，无 → 直接放行
- *   - 工作流完成后，AI 调用 `end` 删除标记文件
- *   - 标记文件内容记录当前 activated story，方便 status 查询
+ * 使用场景:
+ *   - 用户输入 /harness 时主 Agent 执行 start：开启 dev-pass 强制校验（此后编辑 src/ 需持 pass），
+ *     同时建好工作流状态文件
+ *   - 工作流走到 Phase 7 完成、归档收尾后，用户执行 /harness end，主 Agent 调用 end 删除标记，
+ *     解除编辑限制
+ *   - 主 Agent 或用户想确认「harness 是否还开着、当前 Story 停在哪一 Phase、涉及哪些仓库」时执行 status
+ *   - 已有 Story 未走 /harness 激活流程时，可直接用 start 补一次激活；若已激活则拒绝并提示先 end
+ *
+ * 说明:
+ *   - 设计思路:
+ *       - 用户输入 /harness 时，AI 调用 `start` 创建标记文件
+ *       - enforce-dev-pass.js 检查标记文件：有 → 需 dev-pass，无 → 直接放行
+ *       - 工作流完成后，AI 调用 `end` 删除标记文件
+ *       - 标记文件内容记录当前 activated story，方便 status 查询
+ *   - 标记文件是 dev-pass 门控的总开关：删除标记等于整体解除 src/ 编辑限制，
+ *     因此 end 只在确认工作流收尾后执行。
+ *   - start 内部调用 create-workflow.js 的 createWorkflow 创建 e2e-state.json（断链修复）；
+ *     该调用失败不阻塞 start，脚本会在输出里给出手工补救命令。
+ *   - 多仓库唯一真实信源 = story 级 repos.json（由 AI 在 Phase 0/1 通过 ensureReposJson 预配置）。
+ *     不再依赖任何宿主环境变量（CODEBUDDY_WORKSPACES/CLAUDE_WORKSPACES 均非官方变量，
+ *     且原实现存在变量名不一致 bug）。
+ *   - status 的 Phase 从 e2e-state.json 读取（唯一信源），避免与 .harness-active 中记录的 phase 不同步。
+ *   - 本文件无 module.exports，仅作为 CLI 被主 Agent 调用。
+ *
+ * @module harness-workflow
  */
 
 const fs = require('fs')

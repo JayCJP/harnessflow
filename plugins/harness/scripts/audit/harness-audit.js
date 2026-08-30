@@ -1,4 +1,44 @@
 #!/usr/bin/env node
+/**
+ * harness-audit.js — Harness 工作流健康体检与自修复
+ *
+ * 职责:
+ *   - 核心脚本语法体检: 对 scripts/{lib,services,audit,commands} 全量 .js/.cjs 跑 node --check
+ *   - 悬空引用扫描: 抓「调用但未定义 / 未导入」的裸函数引用（运行时 ReferenceError 元凶），报 WARNING
+ *   - 工作流状态审计: .harness-active 与 e2e-state.json 一致性、活跃工作流数、dev-pass 有效性与限域精度
+ *   - 契约与产出物审计: 未完成 Story 的 acceptance-criteria / open-questions / task-dag /
+ *     acceptance-verification 校验，以及已越过 Phase 的产出物缺失
+ *   - 声明-消费一致性: story-input.json 声明了 Figma 链接但 Phase 1 未产出有效 frame 清单 → 告警
+ *
+ * 用法:
+ *   独立执行:
+ *     node plugins/harness/scripts/audit/harness-audit.js           # 人类可读报告
+ *     node plugins/harness/scripts/audit/harness-audit.js --json    # 只输出 JSON，供 AI / 脚本解析
+ *     node plugins/harness/scripts/audit/harness-audit.js --fix     # 自动修复（当前仅清理过期 dev-pass）
+ *     flag 可组合，如 --json --fix
+ *
+ * 输出:
+ *   - --json: { summary, issues, warnings, fixed }，其中 issues 为 BLOCKER、warnings 为 WARNING
+ *   - 默认: 先打印 Harness 激活状态 / 活跃工作流数 / dev-pass 状态，
+ *     再分段列出 BLOCKERS / WARNINGS / FIXED 及计数
+ *   - 退出码: 存在 BLOCKER 时为 1，其余为 0
+ *
+ * 使用场景:
+ *   - 人工诊断: /harness-evolve 的 Step 0 体检；或流程卡住时手动跑一遍，
+ *     先分清是「脚本坏了」还是「状态/产出物缺失」再决定修哪边
+ *   - 改脚本后的自检: 修改 scripts/ 下任一脚本后立刻跑，确认无语法错误与悬空引用再提交
+ *   - 工作流卡死排查: 用 --json 拿到结构化结果，按 cat 字段定位 BLOCKER 类别
+ *     （core-scripts / state / contract / artifact / decl-consume / dev-pass）
+ *
+ * 说明:
+ *   - 语法体检覆盖 scripts/{lib,services,audit,commands}；悬空引用扫描额外覆盖 hooks/
+ *   - 悬空引用为启发式检测: 先剥离字符串、注释与正则字面量，再扫描裸标识符调用点，
+ *     只报高置信命中，仍可能误报，故一律降为 WARNING 而非 BLOCKER
+ *   - --fix 目前只清理过期的 dev-pass.json，不会改动 e2e-state.json 或任何契约文件
+ *   - 有 BLOCKER 时 exit 1，可直接用作提交前门禁或 CI 检查
+ *
+ * @module harness-audit
+ */
 const fs = require("fs")
 const path = require("path")
 const { execSync } = require("child_process")

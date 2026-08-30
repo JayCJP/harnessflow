@@ -1,27 +1,55 @@
 #!/usr/bin/env node
 /**
- * dispatch.js — 工作流调度器（只读）
+ * dispatch.js — 工作流调度器（只读，零写权限）
  *
- * ┌─ 职责边界（本插件控制流的核心约定）────────────────────────────┐
- * │  dispatch.js      = 读状态 + 说下一步   （只读，零写权限）      │
- * │  advance-phase.js = 判门控 + 写状态     （相位跃迁唯一执行者）  │
- * │  主 Agent         = 触发                （无判断权，机械执行）  │
- * └───────────────────────────────────────────────────────────────┘
- *
- * 为什么用脚本取代原 dispatcher Agent:
- *   1. dispatcher.md 自己承认 "Phase→Agent 映射是确定的，不需要判断，只需要查表"
- *      —— 查表不该花一次 LLM 往返，更不该承担幻觉风险。
- *   2. dispatcher.md 声称"只读"却持有 Bash 工具，是状态文件保护的唯一无人看守通道。
- *      脚本的只读性由代码本身保证，可审计。
- *   3. 输出里混有自然语言 TODO（如 "从 task-dag.json 提取并行任务列表"），
- *      迫使主 Agent 自己去读文件、自己判断——判断权回流即失控。
+ * 职责:
+ *   - 读取 e2e-state.json，只读地给出「下一步做什么」: status / nextAgent / agentPrompt / advanceCommand / recovery
+ *   - 预跑 policy.js 门控，用于决定「该干活还是该推进」，但不写任何状态
+ *   - 识别终态（未建流 / 状态解析失败 / 已归档 / 已完成）并给出对应的 recovery 命令
+ *   - 汇总 open-questions.json 未确认项与 fix-request.json 修复回路状态，作为不阻塞的告警输出
  *
  * 用法:
- *   node dispatch.js <storyId>
+ *   node plugins/harness/scripts/commands/dispatch.js <storyId>
+ *     storyId 可带 plans/ 或 .codebuddy/plans/ 前缀，脚本会自动剥离
+ *   输出为纯 JSON，主 Agent 按 status 分支机械执行:
+ *     ready     Spawn nextAgent 注入 agentPrompt 干活，或执行 advanceCommand 推进
+ *     blocked   状态异常，按 recovery.command / description 修复
+ *     fix_loop  Phase 3/4 存在 BLOCKER，执行 recovery.command 回退 Phase 2 修复
+ *     terminal  冷启动未建流 / 已归档 / 已完成，recovery 给出创建、复档或归档命令
  *
- * 输出: 纯 JSON
- *   status: 'ready' | 'blocked' | 'fix_loop' | 'terminal'
- *   三态互斥且穷尽，主 Agent 按 status 分支，不做任何自行判断。
+ * 使用场景:
+ *   - harness-run / harness-fixbugs 流程每一次循环的 Step 1 都执行它，主 Agent 只按 status 分支执行，
+ *     不自行判断当前 Phase，也不直接读 e2e-state.json
+ *   - 某 Phase 的 Agent 汇报完成后，重新执行 dispatch.js 取新 Phase 的指令与 advanceCommand，
+ *     而不是自己算 targetPhase
+ *   - 不确定 Story 停在哪个 Phase、该 Spawn 哪个 Agent 时，用它查表（Phase→Agent 映射的唯一出口）
+ *   - 冷启动（e2e-state.json 尚不存在）时，用它的 recovery.command 拿到创建工作流的命令
+ *
+ * 说明:
+ *   - ┌─ 职责边界（本插件控制流的核心约定）────────────────────────────┐
+ *     │  dispatch.js      = 读状态 + 说下一步   （只读，零写权限）      │
+ *     │  advance-phase.js = 判门控 + 写状态     （相位跃迁唯一执行者）  │
+ *     │  主 Agent         = 触发                （无判断权，机械执行）  │
+ *     └───────────────────────────────────────────────────────────────┘
+ *   - 为什么用脚本取代原 dispatcher Agent:
+ *     1. dispatcher.md 自己承认 "Phase→Agent 映射是确定的，不需要判断，只需要查表"
+ *        —— 查表不该花一次 LLM 往返，更不该承担幻觉风险。
+ *     2. dispatcher.md 声称"只读"却持有 Bash 工具，是状态文件保护的唯一无人看守通道。
+ *        脚本的只读性由代码本身保证，可审计。
+ *     3. 输出里混有自然语言 TODO（如 "从 task-dag.json 提取并行任务列表"），
+ *        迫使主 Agent 自己去读文件、自己判断——判断权回流即失控。
+ *   - 门控预检只是"预读"，真正的裁定权在 advance-phase.js。dispatch.js 的门控结论仅用于
+ *     决定"该干活还是该修复"，绝不代替 advance-phase.js 写状态。
+ *   - fix_loop 分支会一并给出回退后要 Spawn 的 Phase 2 Agent 与 prompt，否则主 Agent 执行完
+ *     --fix-loop 只能自行判断该 Spawn 谁 —— 判断权回流即失控。
+ *   - agentPrompt 统一由 services/prompt-builder.js 构造，与 advance-phase.js 共用同一信源。
+ *   - 冷启动处理: 状态文件不存在时不再静默失败，而是返回 terminal + 创建工作流的 recovery 命令，
+ *     避免 Phase 0 之前无法调度的死锁。
+ *   - 三态互斥且穷尽（ready / blocked / fix_loop / terminal），主 Agent 按 status 分支，不做任何自行判断。
+ *   - module.exports = { dispatch }: 当前无其他脚本 require，主要作为 CLI 被 harness-run /
+ *     harness-conductor / harness-fixbugs 的 Step 1 调用；导出保留供后续编排层复用。
+ *
+ * @module dispatch
  */
 
 const fs = require('fs')

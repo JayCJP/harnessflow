@@ -1,22 +1,43 @@
 #!/usr/bin/env node
 /**
- * metrics-aggregator.js — 度量聚合引擎
+ * metrics-aggregator.js — 跨 Story 度量聚合与全局洞察生成
  *
- * 职责：
- * 1. 读取当前项目所有 Story 的 trace.jsonl + e2e-state.json
- * 2. 计算 8 项核心指标（Phase 耗时、门控通过率、Fix-loop 触发率等）
- * 3. 生成跨项目通用的流程级洞察（非项目特定逻辑）
- * 4. 合并到全局经验库 ~/.codebuddy/experience/metrics-insights.json
- * 5. 供 advance-phase.js 和 session-start.js 注入到 Agent prompt
+ * 职责:
+ *   1. 读取当前项目所有 Story 的 trace.jsonl + e2e-state.json
+ *   2. 计算 8 项核心指标（Phase 耗时、门控通过率、Fix-loop 触发率等）
+ *   3. 生成跨项目通用的流程级洞察（非项目特定逻辑）
+ *   4. 合并到全局经验库 ~/.codebuddy/experience/metrics-insights.json
+ *   5. 供 advance-phase.js 和 session-start.js 注入到 Agent prompt
  *
- * 用法：
- *   node metrics-aggregator.js                    # 聚合当前项目 + 合并到全局
- *   node metrics-aggregator.js --json             # JSON 输出（不写入全局）
- *   node metrics-aggregator.js --global-stats     # 查看全局统计
+ * 用法:
+ *   独立执行:
+ *     node plugins/harness/scripts/audit/metrics-aggregator.js                 # 聚合当前项目 + 合并到全局
+ *     node plugins/harness/scripts/audit/metrics-aggregator.js --json          # JSON 输出（不写入全局）
+ *     node plugins/harness/scripts/audit/metrics-aggregator.js --global-stats  # 查看全局统计
  *
- * 触发时机：
- *   - Phase 7 完成时由 advance-phase.js 自动触发
- *   - 手动执行
+ * 输出:
+ *   - --json: { project, metrics, insights }
+ *   - --global-stats: 全局洞察库摘要（totalProjects / totalStories / insights 列表）
+ *   - 默认: 人读报告（Story 数 / Phase 耗时 / 门控一次通过率 / Fix-loop 触发率与成功率 /
+ *     dev-pass 限域精度 / Skill 与 MCP 资源使用），并合并洞察到全局经验库
+ *
+ * 使用场景:
+ *   - 自动触发: Phase 7 完成时由 commands/advance-phase.js 通过 execSync 调用，
+ *     把本 Story 的洞察合并进全局经验库（超时或失败均非阻塞）
+ *   - 自动消费: hooks/session-start.js 与 services/prompt-builder.js 通过
+ *     experience.getMetricsInsights(phase) 读取全局洞察，按 targetPhase 注入 Agent prompt
+ *   - 人工诊断: /harness-evolve 的 Step 1 度量；或想定位本项目流程瓶颈
+ *     （哪个 Phase 最慢、门控是否一次通过、fix-loop 是否反复触发）时手动跑
+ *
+ * 说明:
+ *   - 8 项核心指标: phaseDurations、gateFirstTryRate、fixLoopTriggerRate、fixLoopSuccessRate、
+ *     blockerCount、devPassPrecision、storyCompletionRate、resourceUsage
+ *   - 洞察按 targetPhase 定向注入，触发规则见 THRESHOLDS（如 Phase 平均耗时 > 20min、
+ *     门控一次通过率 < 80%、Fix-loop 触发率 > 40%、dev-pass 限域精度 < 70%）
+ *   - Fix-loop 触发率会扣除「全部 issue 均为 skipped 误报、fix-verification.json 中无任何
+ *     status=fixed」的空转轮次，避免误报把指标拉高
+ *   - dev-pass 限域精度只从 trace 的 dev_pass 事件读取，因为 dev-pass.json
+ *     在 Phase 2 → 3 撤销后即被删除，事后无法追溯
  *
  * @module metrics-aggregator
  */

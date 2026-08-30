@@ -1,19 +1,34 @@
 #!/usr/bin/env node
 /**
- * policy.js — 风险门控层 (Policy Runtime)
+ * policy.js — 风险门控层 (Policy Runtime)，产出物校验 + 契约一致性 + 恢复建议
  *
- * 三层解耦中的"门控层"——独立于编排逻辑，是推理链条之外不受污染的检查点。
- * 职责: 产出物校验 + 契约一致性 + 权限边界 + 错误恢复建议
+ * 职责:
+ *   - runGateCheck: 按 Phase 执行门控（产出物存在性 → JSON Schema → Phase 特定契约 → 资源完整性）
+ *   - 产出结构化 blocker（携带 failureType），供 experience.js 直接沉淀，无需从文本反推类型
+ *   - matchRecoverySuggestion / attemptAutoRecovery: 为 blocker 匹配分级恢复建议并尝试自动修复
+ *   - checkContractRegression: 契约回归检查（增量 lint + build）
  *
- * v2.0: 结构化 blocker — 每个 blocker 携带 failureType，
- *       直接用于经验沉淀，无需从文本关键词反推类型。
- *       兜底: 无匹配类型 → 'unknown' → 自动沉淀 + 人工补录。
+ * 用法:
+ *   作为模块引用:
+ *     const { runGateCheck, attemptAutoRecovery } = require('./services/policy')
  *
- * 设计原则 (来自腾讯云 MAS Harness 文章):
- *   - 门控层的价值在于它是整条 agent 推理链条之外不受链条污染的决策节点
- *   - 硬性规则不可绕过 (数据访问边界、操作黑名单)
- *   - 软性规则触发审批/降级 (风险评分、低置信度二次确认)
- *   - 动态规则来自经验沉淀 (历史失败模式)
+ * 使用场景:
+ *   - commands/advance-phase.js 每次 Phase 推进前调用 runGateCheck 裁定能否推进
+ *     （:893 失败时先 attemptAutoRecovery 再重跑，:928 为残余 blocker 取恢复建议）
+ *   - commands/dispatch.js 调度前的门控「预检」，仅用于决定该干活还是该修复，
+ *     裁定权始终在 advance-phase.js，dispatch 不写状态
+ *   - 内部依赖 services/schema-validator.js 做 JSON 产出物的 Schema 校验
+ *   - 未登记 failureType 会命中 RECOVERY_SUGGESTIONS.unknown 并产生 warning，提示补录独立条目
+ *
+ * 说明:
+ *   - 三层解耦中的「门控层」——独立于编排逻辑，是推理链条之外不受污染的检查点：
+ *     门控层的价值正在于它是整条 agent 推理链条之外的决策节点，不参与推理、不受推理结果影响
+ *   - v2.0 结构化 blocker: 每个 blocker 携带 failureType，直接用于经验沉淀；
+ *     兜底策略为无匹配类型 → unknown → 自动沉淀 + 人工补录
+ *   - 设计原则 (来自腾讯云 MAS Harness 文章): 硬性规则不可绕过（数据访问边界、操作黑名单）；
+ *     软性规则触发审批/降级（风险评分、低置信度二次确认）；动态规则来自经验沉淀（历史失败模式）
+ *   - RECOVERY_SUGGESTIONS 分 4 级: Level 1 自动修复 / Level 2 提示修复 / Level 3 降级通过 /
+ *     Level 4 阻止并人工介入
  *
  * @module policy
  */

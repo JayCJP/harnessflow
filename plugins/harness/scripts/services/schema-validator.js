@@ -1,11 +1,31 @@
 #!/usr/bin/env node
 /**
- * schema-validator.js — JSON Schema 校验服务
+ * schema-validator.js — JSON 产出物的 JSON Schema 校验服务
  *
- * 参考: 阿里 Harness 工程化实践 — state.json schema 前置校验
+ * 职责:
+ *   - 用 Ajv 校验 8 类 JSON 产出物（e2e-state / acceptance-criteria / open-questions / task-dag /
+ *     code-review / acceptance-verification / fix-request / fix-verification）是否符合 schemas/ 下的定义
+ *   - 按 Phase 给出需校验的产出物清单（getPhaseArtifacts），供门控逐项校验
+ *   - 把 Ajv 错误结构化成可读的 `文件 + 字段路径 + 原因` 错误列表
  *
- * 为每个 JSON 产出物提供 schema 校验，在门控推进前检测格式错误。
- * 设计: fail-closed — 校验失败 → BLOCKER，阻止推进。
+ * 用法:
+ *   作为模块引用:
+ *     const { validateArtifact, getPhaseArtifacts } = require('./services/schema-validator')
+ *   安装自检:
+ *     node -e "const sv = require('<插件安装路径>/plugins/harness/scripts/services/schema-validator');
+ *       console.log('schemas:', Object.keys(sv.SCHEMA_MAP).length)"
+ *
+ * 使用场景:
+ *   - services/policy.js 门控流程第 1.5 步，产出物存在时先做 Schema 校验再走 Phase 契约检查
+ *   - INSTALL.md:100 安装后自检依赖是否可用（本插件不依赖 node_modules）
+ *
+ * 说明:
+ *   - 设计: fail-closed —— 校验失败即产出 BLOCKER 阻止 Phase 推进（参考阿里 Harness 工程化实践的
+ *     state.json schema 前置校验），不做「跳过/降级放行」
+ *   - Ajv 来自 vendor/ajv.bundle.js（6 系），不依赖 node_modules；错误位置字段是 dataPath，
+ *     只读 Ajv 8 的 instancePath 会让所有错误退化成 (root)
+ *   - logger 关闭 + 自注册 date-time/date/uri format：避免 unknown format 告警污染调用方 stdout
+ *   - 文件不存在时不报错（视为 valid），存在性由 lib/state.js 的 checkPhaseArtifact 负责
  *
  * @module schema-validator
  */

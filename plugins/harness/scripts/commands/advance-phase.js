@@ -1,20 +1,60 @@
 #!/usr/bin/env node
 /**
- * advance-phase.js — Harness Phase 推进 (Workflow 控制层)
+ * advance-phase.js — Phase 门控裁定与状态跃迁的唯一执行者
  *
- * 三层解耦后的职责:
- *   本文件 = Stateful Workflow (确定性状态控制，不应被自主化接管)
- *   policy.js = Policy Runtime (门控校验，独立于编排)
- *   trace.js = Trace 记录 (全链路可观测性)
- *   experience.js = 经验沉淀 (失败模式记录)
- *   context-refresh.js = 上下文刷新 (Phase summary)
+ * 职责:
+ *   - 独立校验 targetPhase 入参合法性（范围 0~7、步长必须为 +1），越权一律拒绝
+ *   - 委托 policy.js 执行门控校验，失败时输出结构化 blockers 与 nextAction
+ *   - 门控通过后在 e2e-state.json 中完成相位跃迁，并签发/撤销 dev-pass
+ *   - 生成 phase-N-summary.md 上下文摘要、委托 prompt-builder 构造下个 Agent 的 prompt
+ *   - 处理 --rollback 回退与 --fix-loop 修复回路两条特殊分支
  *
  * 用法:
- *   node advance-phase.js <storyId> <phase>              # 推进到指定 Phase
- *   node advance-phase.js <storyId> 2 --renew-pass       # Phase 2 续签 dev-pass
- *   node advance-phase.js <storyId> 3 --lint-fix         # Phase 2→3 自动 eslint
- *   node advance-phase.js <storyId> 2 --fix-loop          # 修复回路：提取BLOCKER→回退Phase2→签发dev-pass→输出修复指令
- *   node advance-phase.js <storyId> <phase> --auto-fix   # 门控失败时自动修复
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase>
+ *     推进到指定 Phase（必须等于 currentPhase + 1）
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 2 --renew-pass
+ *     Phase 2 续签 dev-pass，不推进相位
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 3 --lint-fix
+ *     Phase 2→3 时按 task-dag.json 涉及的仓库逐个执行 eslint --fix
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase> --auto-fix
+ *     门控失败时先让 policy.js 尝试自动恢复，再重跑一遍门控
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase> --rollback
+ *     回退到更早 Phase：归档中间产出物；targetPhase <= 2 时重置修复预算
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 2 --fix-loop
+ *     修复回路：提取 BLOCKER → 回退 Phase 2 → 签发限域 dev-pass → 输出 spawnPrompt
+ *   参数解析：第一个纯数字视为 storyId，最后一个纯数字视为 targetPhase；
+ *   非数字参数（可带 plans/ 或 .codebuddy/plans/ 前缀）优先作为 storyId。
+ *
+ * 使用场景:
+ *   - 某 Phase 的 Agent 汇报产出完成、且 dispatch.js 的 status=ready 给出 advanceCommand 后，
+ *     主 Agent 执行本命令裁断门控并真正写入 phase
+ *   - Phase 3 代码审查 / Phase 4 功能测试出现未修复 BLOCKER 时，主 Agent 执行 --fix-loop
+ *     取回 spawnPrompt，交给前端开发工程师做限域修复
+ *   - Phase 2 开发未完成但 dev-pass 已过期时，用 --renew-pass 续签，避免回退重来
+ *   - 发现前一 Phase 方向错误（如任务拆解不合理）需要重做时，用 --rollback 归档中间产物并回退
+ *   - 门控因格式类问题（如 acceptance-criteria.json 字段缺失）失败时，加 --auto-fix 先尝试自动恢复
+ *
+ * 说明:
+ *   - 三层解耦后的职责划分:
+ *       本文件 = Stateful Workflow (确定性状态控制，不应被自主化接管)
+ *       policy.js = Policy Runtime (门控校验，独立于编排)
+ *       trace.js = Trace 记录 (全链路可观测性)
+ *       experience.js = 经验沉淀 (失败模式记录)
+ *       context-refresh.js = 上下文刷新 (Phase summary)
+ *   - 相位跃迁唯一执行者：只有本文件能改写 state.phase。主 Agent 与 dispatch.js 只有"触发权"，
+ *     没有"决定权"——命令可以由任何人敲，但是否合法由本脚本独立裁定。
+ *   - targetPhase 入参独立校验：越界会写出 phase: 99 / phases["99_undefined"] 这类污染状态；
+ *     跨 Phase 会跳过中间 Phase 的门控、dev-pass 签发/撤销与 phase-N-summary.md 生成；
+ *     倒退会使已完成 Phase 的产出物与状态不一致（那是 --rollback 的职责）。
+ *   - e2e-state 完整性校验：若 state.phases 中某 Phase 已标记 completed 但 state.phase 仍在其之前，
+ *     判定为 Agent 绕过脚本直接改状态（历史教训 STORY-20260710-01），拒绝推进并输出人工修复指引，
+ *     同时写入 phase_integrity_violation 事件到 trace。
+ *   - 归档状态守卫：Story 已归档时禁止 --rollback / --fix-loop，需先执行 archive-story.js restore。
+ *   - 持久化顺序：writeStateFile 先于 trace 写入，确保 trace 不会领先于 state；
+ *     summary 生成、trace 记录、度量聚合失败均不阻塞推进。
+ *   - Agent prompt 统一委托 services/prompt-builder.js 构造，与 dispatch.js 共用同一信源，
+ *     避免出现两份自称权威的 prompt 来源迫使主 Agent 自行拼接。
+ *   - Phase 7 完成时自动触发 audit/metrics-aggregator.js 聚合度量，并标记工作流为 completed 终态。
  *
  * @module advance-phase
  */

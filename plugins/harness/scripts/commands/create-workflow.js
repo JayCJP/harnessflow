@@ -1,27 +1,49 @@
 #!/usr/bin/env node
 /**
- * create-workflow.js — 创建工作流统一入口
+ * create-workflow.js — 创建工作流状态文件并判定原型/Figma 门控
+ *
+ * 职责:
+ *   - 创建 .codebuddy/plans/<storyId>/e2e-state.json，初始化 8 个 Phase 的状态与门控默认项
+ *   - 判定并记录 prototypeRequired（是否要求 prototype-analysis.md）与 hasFigmaDesign（Figma 硬门控开关）
+ *   - 确保 story 级 repos.json 存在；--bypass 时直接进入 Phase 2 并立即签发 dev-pass
+ *   - --refresh-input: 在 story-input.json 写入后补算上述两项判定，不触碰 phase / status
  *
  * 用法:
- *   node create-workflow.js <storyId> "<title>" [--bypass] [--figma] [--mode=run|fixbugs]
+ *   node plugins/harness/scripts/commands/create-workflow.js <storyId> "<title>" [--bypass] [--figma] [--mode=run|fixbugs]
+ *   node plugins/harness/scripts/commands/create-workflow.js <storyId> --refresh-input [--figma]
+ *   --bypass         跳过 Phase 0-1，直接进入 Phase 2（hotfix 场景），并立即签发 dev-pass
+ *   --figma          手工强制开启 Figma 硬门控，覆盖自动推导（任何模式生效）
+ *   --mode=<m>       工作流模式: run（默认，新功能开发）/ fixbugs（Bug 修复，免除原型文档要求）
+ *   --refresh-input  story-input.json 写入后补算原型/Figma 判定，只改这两项，不改 phase
  *
- * 参数:
- *   storyId       - Story 唯一标识
- *   title         - 需求标题
- *   --bypass      - 跳过 Phase 0-1，直接进入 Phase 2（用于 hotfix）
- *   --figma       - 标注有 Figma 设计稿
- *   --mode=<m>    - 工作流模式: run（默认，新功能开发）/ fixbugs（Bug 修复）
+ * 使用场景:
+ *   - 用户输入 /harness 后，由 harness-workflow.js start 内部调用 createWorkflow 创建状态文件；
+ *     本命令是该调用的等价手工入口
+ *   - harness-workflow.js 先建工作流、主 Agent 此后才写 story-input.json，导致原型/Figma 判定失真时，
+ *     主 Agent 执行 --refresh-input 回填（createWorkflow 返回时会提示执行本命令）
+ *   - hotfix 场景不需要需求分析与任务规划时，加 --bypass 让 Story 直接落到 Phase 2 并拿到 dev-pass
+ *   - 不走 /harness 激活流程、需要单独为一个 Story 建流时，主 Agent 或用户手动执行本命令
  *
- * 关于原型文档:
- *   旧实现无条件检查 prototype-analysis.md，缺失即写入 Greenfield stub，
- *   导致 fixbugs 场景每个 Story 都留下一个空壳文件，还会被 context-refresh
- *   当成 Phase 0 产出物收集。
- *   现改为按需判定 —— 只有 story-input.json 里真的给了原型/Figma 链接时才要求
- *   产出该文档，且由需求分析师产出，create-workflow 不再代写任何内容。
+ * 说明:
+ *   - 关于原型文档: 旧实现无条件检查 prototype-analysis.md，缺失即写入 Greenfield stub，
+ *     导致 fixbugs 场景每个 Story 都留下一个空壳文件，还会被 context-refresh 当成 Phase 0 产出物收集。
+ *     现改为按需判定 —— 只有 story-input.json 里真的给了原型/Figma 链接时才要求产出该文档，
+ *     且由需求分析师产出，create-workflow 不再代写任何内容。
+ *   - Figma 硬门控分模式处理: run 模式照设计稿从零搭 UI，需要完整 frame 清单 + 全量组件映射 → 按
+ *     story-input.json 的 figmaUrls 自动推导开关；fixbugs 模式只碰个别页面，强制全量清单会卡死
+ *     修复流程 → 默认关闭；--figma 是手工覆盖开关，无 story-input.json 时的兜底入口。
+ *   - 门控开关不影响 prompt 注入。子 Agent 是否被提示解析 Figma 由 prompt-builder 直接读
+ *     story-input.json 的 figmaUrls 决定，两种模式都注入。
+ *   - --refresh-input 为何是显式命令而非惰性重算: 状态文件只能由授权脚本改写（enforce-state-file.js），
+ *     在 dispatch 通道隐式改写会破坏"状态机单写者"这条铁律；且它只回填原型/Figma 两项，
+ *     相位跃迁仍归 advance-phase.js 独有。
+ *   - 工作流已存在（e2e-state.json 可读）时直接返回错误，不覆盖既有状态。
+ *   - 输出: 成功 → 输出含 stateFile / message 的 JSON 并以退出码 0 结束；
+ *     失败 → 输出 errors 数组并以退出码 1 结束。
+ *   - module.exports = { createWorkflow, refreshStoryInput }，被同目录的 harness-workflow.js
+ *     require，用于 start 时同步创建 e2e-state.json；CLI 分支由 require.main === module 守卫。
  *
- * 输出:
- *   成功 → 创建状态文件 + 输出 JSON 结果
- *   失败 → 输出错误信息 + 退出码 1
+ * @module create-workflow
  */
 
 const path = require('path')

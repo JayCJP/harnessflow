@@ -1,17 +1,36 @@
 #!/usr/bin/env node
 /**
- * prompt-builder.js — Agent Prompt 构造服务
+ * prompt-builder.js — Agent Prompt 构造服务，prompt 的唯一出口
  *
- * 职责: 把"下一个 Phase 的 Agent 需要知道的一切"组装成一段完整 prompt。
+ * 职责:
+ *   - buildAgentPrompt: 把「下一个 Phase 的 Agent 需要知道的一切」组装成一段完整 prompt
+ *     （角色与约束 / 上一 Phase 摘要 / 契约文件路径 / Story 背景 / 历史教训 / 修复回路上下文）
+ *   - buildFixLoopContext: 修复回路场景追加 BLOCKER 清单与回退轮次上下文
+ *   - 提供 Figma 对齐指令与任务规划 Figma 指令等 Phase 专属片段
  *
- * 设计原则 — 单一信源:
- *   历史上 prompt 有两个来源（advance-phase.js 的 suggestedAgentPrompt 与
- *   dispatcher Agent 的 instruction/inputFiles），主 Agent 面对两个都自称权威的
- *   来源只能自行拼接，而"拼接"就是判断——判断权回到主 Agent 手里，正是流程失控的成因。
- *   本模块是 prompt 的唯一出口: advance-phase.js 与 dispatch.js 都调用它，
- *   主 Agent 只做原样注入，不做任何拼装。
+ * 用法:
+ *   作为模块引用:
+ *     const { buildAgentPrompt } = require('./services/prompt-builder')
  *
- * 本模块为纯只读: 只读产出物文件，不写任何文件、不改状态。
+ * 使用场景:
+ *   - commands/dispatch.js 决定该 Spawn 哪个 Agent 时，一并产出 agentPrompt，
+ *     使主 Agent 只需原样注入，无需自行判断该拼什么
+ *   - commands/advance-phase.js Phase 推进成功后构造下一 Phase 的 Agent prompt
+ *   - 内部依赖 services/context-refresh.js 取摘要与契约清单、services/experience.js 取历史教训
+ *   - 回归测试 __tests__/fixbugs-regression.test.js、figma-detection.test.js 直接断言其输出
+ *
+ * 说明:
+ *   - 设计原则 — 单一信源: 历史上 prompt 有两个来源（advance-phase.js 的 suggestedAgentPrompt 与
+ *     dispatcher Agent 的 instruction/inputFiles），主 Agent 面对两个都自称权威的来源只能自行拼接，
+ *     而「拼接」就是判断——判断权回到主 Agent 手里，正是流程失控的成因。
+ *     本模块是 prompt 的唯一出口: advance-phase.js 与 dispatch.js 都调用它，
+ *     主 Agent 只做原样注入，不做任何拼装
+ *   - 本模块为纯只读: 只读产出物文件，不写任何文件、不改状态
+ *   - v2（需求10）: 不再内联截断契约内容——截断会导致关键信息（AC 全表、task-dag 全量文件、
+ *     跨仓字段）丢失，让下游 Agent 基于残缺信息越做越错。改为只给完整文件路径，
+ *     token 由「内联截断」让位给「按需读取」，信息完整性不再受注入上限约束
+ *
+ * @module prompt-builder
  */
 
 const fs = require('fs')

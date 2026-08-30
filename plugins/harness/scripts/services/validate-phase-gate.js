@@ -1,34 +1,41 @@
 #!/usr/bin/env node
 /**
- * 端到端工作流门控验证脚本
+ * validate-phase-gate.js — 端到端工作流门控验证脚本（人工诊断工具）
  *
  * ⚠️ 已废弃（DEPRECATED，2026-08-14）—— 本文件不在生效路径上。
  *
- * 真正生效的门控是 `services/policy.js` 的 `runGateCheck`，由
- * `advance-phase.js` 在每次 Phase 推进时调用。本文件全仓无任何 .js 调用方，
- * 仅可作为人工诊断工具手动执行。
+ * 真正生效的门控是 services/policy.js 的 runGateCheck，由 advance-phase.js 在每次 Phase 推进时调用。
+ * 本文件全仓无任何 .js 调用方，仅可作为人工诊断工具手动执行。
  *
- * 两者的 phase 编号语义不同，切勿混用：
- *   - policy.runGateCheck(storyId, phaseNum, state) → phaseNum 是**来源** phase（检查 phaseNum → phaseNum+1）
- *   - 本文件 validateGate(storyId, targetPhase)     → targetPhase 是**目标** phase
+ * 职责:
+ *   - 按 PHASE_GATE_CONDITIONS 逐项检查目标 Phase 的前置条件与完成条件
+ *   - 输出 JSON 格式的 { pass, blockers, warnings, details }，供人工定位卡点
  *
- * 已迁入 policy.js 的检查（此处保留仅为对照）：
- *   - hasFigmaMapIfDesign      → PHASE_ARTIFACTS[1] 的 requiredWhen: 'hasFigmaDesign'
- *   - contractReferencesValid  → checkPhase1Gate / validateContractReferences
- *   - noLintErrors             → checkPhase2Gate（且修正了语义：原本 key 在 target=2，
- *                                意为"代码还没写就 lint"；现改为 Phase 2→3 增量 lint）
- *   - validateTaskFigmaReferences → checkPhase1Gate（invalidRefs→BLOCKER, unmatched→WARNING）
+ * 用法:
+ *   独立执行（仅人工诊断）:
+ *     node plugins/harness/scripts/services/validate-phase-gate.js <storyId> <targetPhase>
+ *     退出码 0 = pass，1 = 存在 blocker
  *
- * 尚未迁入 policy.js 的检查（保留本文件的唯一价值，勿删）：
- *   - checkPrototypeConfirmation（userConfirmedPrototype 原型确认）
- *   - checkStateConsistency（state 与产出物一致性）
- *   - checkBugAnalysisReport（Bug 类 Story 的分析报告）
+ * 使用场景:
+ *   - 人工诊断尚未迁入 policy.js 的三项检查（保留本文件的唯一价值，勿删）:
+ *     checkPrototypeConfirmation（原型确认）、checkStateConsistency（state 与产出物一致性）、
+ *     checkBugAnalysisReport（Bug 类 Story 的分析报告）
+ *   - 需要离线复核某个 Story 的 Phase 前置条件时手动执行
  *
- * 使用方式（仅人工诊断）：
- *   node validate-phase-gate.js <storyId> <targetPhase>
+ * 说明:
+ *   - 本文件无 module.exports，require 会立即执行 CLI 逻辑，只能独立执行、不能被引用
+ *   - 两者的 phase 编号语义不同，切勿混用:
+ *     - policy.runGateCheck(storyId, phaseNum, state) → phaseNum 是「来源」phase（检查 phaseNum → phaseNum+1）
+ *     - 本文件 validateGate(storyId, targetPhase)   → targetPhase 是「目标」phase
+ *   - 已迁入 policy.js 的检查（此处保留仅为对照）:
+ *     - hasFigmaMapIfDesign      → PHASE_ARTIFACTS[1] 的 requiredWhen: hasFigmaDesign
+ *     - contractReferencesValid  → checkPhase1Gate / validateContractReferences
+ *     - noLintErrors             → checkPhase2Gate（并修正了语义：原本 key 在 target=2，
+ *                                  意为「代码还没写就 lint」；现改为 Phase 2→3 增量 lint）
+ *     - validateTaskFigmaReferences → checkPhase1Gate（invalidRefs→BLOCKER, unmatched→WARNING）
+ *   - 执行时会向 stderr 打印 DEPRECATED 提示与上述语义差异说明
  *
- * 输出：JSON 格式的验证结果
- *   { pass: boolean, blockers: string[], warnings: string[] }
+ * @module validate-phase-gate
  */
 
 const fs = require('fs')
