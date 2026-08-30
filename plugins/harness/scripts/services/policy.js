@@ -737,7 +737,7 @@ function checkPhase1Gate (storyId, state, result) {
 }
 
 /**
- * Phase 2→3 门控: 增量 lint + 编译校验
+ * Phase 2→3 门控: 增量 lint（编译校验默认关闭）
  *
  * 历史缺陷: Phase 2 此前无任何专项检查（PHASE_ARTIFACTS[2].fileName 为 null，
  *   产出物存在性检查被跳过），Phase 2→3 等价于无条件通过。结果是 SCSS
@@ -745,8 +745,10 @@ function checkPhase1Gate (storyId, state, result) {
  *
  * 设计取舍:
  *   - lint 只跑**本次变更文件**，避免仓库存量问题导致门控永久阻塞
- *   - build 无法增量，但存量代码本应可编译，失败即可归因于本次变更
- *   - `HARNESS_SKIP_BUILD=1` 可跳过编译，但会留 warning 痕迹
+ *   - 编译校验默认关闭: 构建无法增量，大项目/多项目单次耗时不可控（上限 900s），
+ *     且 fix-loop 每轮回退 Phase 2 都会再触发一次全量构建，是流程阻塞的主因。
+ *     需要时设 `HARNESS_RUN_BUILD=1` 显式启用。
+ *   - 代价: 关闭后 SCSS/模板编译错误失去本地拦截，只能到 Phase 7 云端构建暴露
  *   - 未检测到变更时降级为 warning（可能代码已提交或本 Story 无代码改动），不误阻塞
  */
 function checkPhase2Gate (storyId, state, result) {
@@ -785,10 +787,8 @@ function checkPhase2Gate (storyId, state, result) {
       }
     }
 
-    // 2. 编译校验
-    if (process.env.HARNESS_SKIP_BUILD === '1') {
-      result.warnings.push(`${label}HARNESS_SKIP_BUILD=1 已跳过编译校验（SCSS/模板编译错误将只能在云端构建暴露）`)
-    } else {
+    // 2. 编译校验: 默认关闭，仅当显式设 HARNESS_RUN_BUILD=1 时执行
+    if (process.env.HARNESS_RUN_BUILD === '1') {
       const build = runBuildCheck(repoRoot)
       if (build.skipped) {
         result.warnings.push(`${label}package.json 未找到可用的 build script，已跳过编译校验`)
@@ -805,7 +805,13 @@ function checkPhase2Gate (storyId, state, result) {
   }
 
   if (!anyChange) {
-    result.warnings.push('Phase 2 未检测到未提交的代码变更（可能已提交或本 Story 无代码改动），已跳过 lint/编译校验')
+    result.warnings.push('Phase 2 未检测到未提交的代码变更（可能已提交或本 Story 无代码改动），已跳过 lint 校验')
+  }
+
+  // 编译校验关闭是全局默认行为，与是否检测到变更无关，故在循环外只提示一次 ——
+  // 放在循环内会随仓库数重复出现，淹没真正的 warning。
+  if (process.env.HARNESS_RUN_BUILD !== '1') {
+    result.warnings.push('编译校验默认关闭（设 HARNESS_RUN_BUILD=1 启用），SCSS/模板编译错误将只能在 Phase 7 云端构建暴露')
   }
 }
 

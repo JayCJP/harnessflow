@@ -256,27 +256,31 @@ AI 只需要在 Phase 2 时 Spawn 前端开发工程师 `frontend-developer`，�
 > 有 Figma 时 Phase 1（任务规划）额外产出 `figma-frame-inventory.json`（唯一 Figma 产出物，frame 可含可选 `designSpec`），需求分析阶段不处理设计稿
 > 每个 Phase 完成后 `advance-phase.js` 自动生成 `phase-N-summary.md`
 
-### Phase 2→3 的 lint / 编译门控
+### Phase 2→3 的 lint 门控
 
-Phase 2 此前没有任何专项检查，`ESLint 0 error` 只是一句口头约定 —— 结果 SCSS 编译错误
-一路逃到 Phase 7 云端构建才暴露。现在 `checkPhase2Gate` 会真跑：
+Phase 2 此前没有任何专项检查，`ESLint 0 error` 只是一句口头约定。现在 `checkPhase2Gate` 会真跑：
 
 - **增量 lint**：只 lint `git status --porcelain` 列出的变更文件（`.js/.jsx/.ts/.tsx/.vue`），
   用 `npx eslint --format compact`。只 lint 变更是为了不让仓库存量 lint 债永久卡住门控；
   用 `npx` 而非 `npm run lint` 是为了保证门控绝不会 `--fix` 改动代码。
-- **编译校验**：按 `build:dev` → `build:test` → `build` 顺序取第一个存在的 script 执行。
-  编译无法增量，但存量代码本应可编译，失败即可归因于本次变更。
+- **编译校验**：默认关闭。
 
-降级为 warning 而非阻断的情况：仓库路径不存在、无未提交变更、找不到 eslint、无 build script。
+降级为 warning 而非阻断的情况：仓库路径不存在、无未提交变更、找不到 eslint。
+
+#### 编译校验为什么默认关闭
+
+构建无法增量，大项目/多项目单次耗时不可控（上限 900s），且 fix-loop 每轮回退 Phase 2
+都会再触发一次全量构建 —— 这是流程阻塞的主因。因此默认只跑 lint（增量的、快的）。
+
+**代价**：SCSS/模板编译错误失去本地拦截，只能到 Phase 7 云端构建才暴露。
 
 ```bash
-# 跳过编译校验（会在门控结果里留 warning 痕迹）
-HARNESS_SKIP_BUILD=1 node $HARNESS/advance-phase.js <storyId> 3
+# 需要本地编译校验时显式启用（按 build:dev → build:test → build 取第一个存在的 script）
+HARNESS_RUN_BUILD=1 node $HARNESS/advance-phase.js <storyId> 3
 ```
 
-> 权衡：若项目只有生产构建 script（如 `vue-cli-service build --mode production`），
-> 每次 Phase 2→3（含每轮 fix-loop）都会触发一次全量构建。构建慢的项目建议在
-> `package.json` 补一个更快的 `build:dev`，门控会自动优先选它。
+> 建议：只在明确需要启用编译校验时，才在项目 `package.json` 补一个更快的 `build:dev`，
+> 门控会自动优先选它，避免一开就退化成生产构建。
 
 ## 附录 B：契约文件格式（参考）
 
