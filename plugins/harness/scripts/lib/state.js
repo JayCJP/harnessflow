@@ -1,15 +1,36 @@
 #!/usr/bin/env node
 /**
- * Hook 公共工具模块
+ * state.js — 工作流状态与契约的唯一读写层
  *
- * 提供 stdin 读取、文件路径检查、状态文件操作、dev-pass 管理等公共函数。
- * 被所有 hook 和脚本复用，确保行为一致性。
+ * 职责:
+ *   - 状态文件读写: e2e-state.json / repos.json / dev-pass.json / story-input.json 的 CRUD，按 Story 分目录管理
+ *   - 路径解析: 归一化项目根路径（Windows Git Bash 兼容）、Story 目录、多仓库 repo 根路径反查
+ *   - 契约校验: acceptance-criteria / open-questions / task-dag / acceptance-verification 等 JSON 契约的结构校验与交叉引用校验
+ *   - 门控数据: PHASE_ARTIFACTS（产出物清单唯一信源）、PHASE_AGENTS（Phase→Agent 映射）、dev-pass 签发/撤销/续签
  *
- * v2.0: 按 Story 分目录存储，文件命名去掉 storyId 前缀
- *   旧: plans/STORY-002-e2e-state.json
- *   新: plans/STORY-002/e2e-state.json
+ * 用法:
+ *   作为模块引用:
+ *     const { readStateFile, writeStateFile, checkPhaseArtifact } = require('../lib/state')
  *
- * @module hook-utils
+ * 使用场景:
+ *   - 被 hooks/ 复用（enforce-dev-pass / enforce-artifact / session-start / session-stop）:
+ *     读 dev-pass 判断 src/ 编辑是否放行、读 e2e-state 判断是否跳 Phase
+ *   - 被 services/ 复用（validate-phase-gate / validate-contracts / policy / schema-validator /
+ *     prompt-builder / context-refresh / experience）: 做门控校验、契约校验、产出物清单与 prompt 组装
+ *   - 被 commands/ 复用（create-workflow / advance-phase / dispatch / archive-story / harness-workflow）:
+ *     做状态流转、dev-pass 生命周期管理、Story 目录创建与清理
+ *   - 被 audit/ 三个脚本复用同一套校验逻辑，保证人工诊断与自动门控口径一致
+ *
+ * 说明:
+ *   - v2.0 按 Story 分目录存储，文件命名去掉 storyId 前缀
+ *     旧: plans/STORY-002-e2e-state.json
+ *     新: plans/STORY-002/e2e-state.json
+ *   - PHASE_ARTIFACTS 是产出物清单的**唯一信源**: 门控校验（checkPhaseArtifact）、
+ *     prompt 产出要求（prompt-builder）、上下文摘要（context-refresh）都从此读取
+ *   - PHASE_AGENTS 的 agent 字段是 Agent 注册名（frontmatter 的 name，英文），
+ *     label 仅供人类阅读，禁止用于 Spawn
+ *
+ * @module state
  */
 
 const fs = require('fs')
@@ -694,19 +715,6 @@ function findBugAnalysisReports (storyId) {
     exists: files.length > 0,
     files,
     paths: files.map(f => path.join(dir, f))
-  }
-}
-
-/**
- * 检查原型分析文档是否存在
- * @param {string} storyId - Story ID
- * @returns {{ exists: boolean, path: string }}
- */
-function checkPrototypeDoc (storyId) {
-  const filePath = path.join(getStoryDir(storyId), 'prototype-analysis.md')
-  return {
-    exists: fs.existsSync(filePath),
-    path: filePath
   }
 }
 
@@ -1550,7 +1558,6 @@ module.exports = {
 
   // 产出物检查
   checkPhaseArtifact,
-  checkPrototypeDoc,
   isPrototypeRequired,
   detectFigmaSource,
   findBugAnalysisReports,

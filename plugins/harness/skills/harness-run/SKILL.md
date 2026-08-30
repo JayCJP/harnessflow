@@ -424,5 +424,4 @@ HARNESS_RUN_BUILD=1 node $HARNESS/advance-phase.js <storyId> 3
 | 脚本 | 用途 |
 |------|------|
 | `audit/harness-audit.js` | 工作流健康审计：检查 settings.json / e2e-state / 产出物完整性 |
-| `audit/check-prototype-doc.js` | 原型文档检查：create-workflow 前置校验 prototype-analysis.md 存在性 |
 | `audit/metrics-aggregator.js` | 指标聚合：工作流统计数据汇总 |

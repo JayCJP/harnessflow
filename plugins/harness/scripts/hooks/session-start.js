@@ -1,20 +1,37 @@
 #!/usr/bin/env node
 /**
- * SessionStart Hook — 会话启动时自动检查工作流状态 + 注入上下文
+ * session-start.js — 会话启动时扫描工作流状态并注入上下文
  *
- * 功能：
- * 1. 扫描 .codebuddy/plans/ 子目录下的 e2e-state.json（新版 Story 目录结构）
- * 2. 对每个活跃的工作流执行门控验证脚本
- * 3. 检查 open-questions.json 是否有未解决项
- * 4. 加载最新 Phase summary（上轮产出物摘要）替代完整对话历史
- * 5. 注入经验教训（历史失败模式提醒）
- * 6. 注入契约文件清单（当前 Phase 应优先加载的文件）
- * 7. 将所有内容作为 additionalContext 注入到 Agent 上下文中
+ * 职责:
+ *   - 扫描 .codebuddy/plans/ 下所有 Story 的 e2e-state.json，找出活跃工作流
+ *   - 执行门控验证、汇总未解决确认项，并注入上轮产出物摘要 / 经验教训 / 契约文件清单
+ *   - 输出 additionalContext，让新会话无需回放完整对话历史即可接续工作
  *
- * 输入：stdin JSON（SessionStart 事件数据）
- * 输出：stdout JSON（包含 additionalContext）
+ * 用法:
+ *   由宿主自动触发，无需手动执行。
+ *   注册事件: SessionStart
+ *   输入: stdin JSON（SessionStart 事件数据；为空或非法 JSON 时按空输入降级）
+ *   输出: stdout JSON（{ continue: true, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }）
+ *   手动调试: echo '{}' | node session-start.js
  *
- * @module session-start-hook
+ * 使用场景:
+ *   - 新会话/断点续跑时 Agent 不知道当前 Story 停在哪个 Phase：
+ *     不注入会让 Agent 凭猜测继续，可能重复已完成的工作，或从错误的 Phase 往下推进。
+ *   - 上一轮遗留了未确认的 open-questions 或门控 blocker：
+ *     不注入会让 Agent 无视阻断项直接推进 Phase 1，把未定稿的需求带进开发阶段。
+ *
+ * 说明:
+ *   - 功能清单:
+ *       1. 扫描 .codebuddy/plans/ 子目录下的 e2e-state.json（新版 Story 目录结构）
+ *       2. 对每个活跃的工作流执行门控验证脚本（services/validate-phase-gate）
+ *       3. 检查 open-questions.json 是否有未解决项
+ *       4. 加载最新 Phase summary（上轮产出物摘要）替代完整对话历史
+ *       5. 注入经验教训（历史失败模式提醒）
+ *       6. 注入契约文件清单（当前 Phase 应优先加载的文件）
+ *       7. 将所有内容作为 additionalContext 注入到 Agent 上下文中
+ *   - 注入文本末尾附带强制规则（禁止推进到 Phase 1 的条件、状态文件由 advance-phase.js 独占维护等），不可违反。
+ *   - 无活跃工作流时 additionalContext 只输出一行提示，保持低成本。
+ *   - @module session-start-hook
  */
 
 const fs = require('fs')
@@ -171,10 +188,9 @@ function buildAdditionalContext (workflowResults) {
   lines.push('')
   lines.push('⛔ 强制规则（不可违反）:')
   lines.push('1. open-questions.json 中存在 resolved=false → 禁止推进到 Phase 1')
-  lines.push('2. gateChecks.prototypeConfirmed=false 且涉及 UI 变更 → 禁止推进')
-  lines.push('3. 主 Agent 不亲自编写代码 → 必须 spawn 专用 Agent 执行')
-  lines.push('4. 禁止直接写/改 e2e-state.json 和 dev-pass.json → 状态机由 advance-phase.js 独占维护')
-  lines.push('5. 推进 Phase → 必须执行 node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/advance-phase.js <storyId> <targetPhase>')
+  lines.push('2. 主 Agent 不亲自编写代码 → 必须 spawn 专用 Agent 执行')
+  lines.push('3. 禁止直接写/改 e2e-state.json 和 dev-pass.json → 状态机由 advance-phase.js 独占维护')
+  lines.push('4. 推进 Phase → 必须执行 node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/advance-phase.js <storyId> <targetPhase>')
   lines.push('')
   lines.push('如果门控验证失败 → 向用户报告 blockers，等待用户解决，不可自行推进')
 
