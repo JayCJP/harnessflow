@@ -1,128 +1,6 @@
 {
   "patterns": [
     {
-      "phase": 0,
-      "failureType": "artifact_missing",
-      "rootCause": "1 个 artifact_missing 问题 (示例: Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md))",
-      "resolution": "请先完成 Phase 0 的产出物 requirement-analysis.md",
-      "storyId": "TEST-001",
-      "blockers": [
-        "Phase 0(需求分析) 产出物缺失: 需求分析文档 (requirement-analysis.md)"
-      ],
-      "occurrences": 21,
-      "firstSeen": "2026-07-29T15:08:26.631Z",
-      "lastSeen": "2026-07-31T16:43:44.825Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 0,
-      "failureType": "ac_format_error",
-      "rootCause": "1 个 ac_format_error 问题 (示例: 缺少 criteria 数组)",
-      "resolution": "检查 acceptance-criteria.json 格式",
-      "storyId": "TEST-002",
-      "blockers": [
-        "缺少 criteria 数组"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-29T15:09:16.425Z",
-      "lastSeen": "2026-07-29T15:09:16.425Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 1,
-      "failureType": "artifact_missing",
-      "rootCause": "1 个 artifact_missing 问题 (示例: Phase 1(任务规划) 产出物缺失: 任务 DAG 文档 (task-dag.md))",
-      "resolution": "请先完成 Phase 1 的产出物 task-dag.md",
-      "storyId": "TEST-002",
-      "blockers": [
-        "Phase 1(任务规划) 产出物缺失: 任务 DAG 文档 (task-dag.md)"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-29T15:09:39.256Z",
-      "lastSeen": "2026-07-29T15:09:39.256Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 1,
-      "failureType": "task_missing_title",
-      "rootCause": "1 个 task_missing_title 问题 (示例: Task[T1]: 缺少 title)",
-      "resolution": "为每个 task 添加 title 字段（使用 title 而非 name）",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "Task[T1]: 缺少 title",
-        "Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-30T07:05:19.428Z",
-      "lastSeen": "2026-07-30T07:05:19.428Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 1,
-      "failureType": "empty_ac_ref",
-      "rootCause": "1 个 empty_ac_ref 问题 (示例: Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）)",
-      "resolution": "每个 task 的 acceptanceCriteria 至少引用 1 条 AC",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "Task[T1]: 缺少 title",
-        "Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-30T07:05:19.437Z",
-      "lastSeen": "2026-07-30T07:05:19.437Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 1,
-      "failureType": "agent_direct_state_mutation",
-      "rootCause": "Agent在完成任务后自行修改了e2e-state.json（phase: 1→2），未通过advance-phase.js推进，导致门控被跳过",
-      "resolution": "① Spawn Agent的prompt中必须包含禁止修改e2e-state.json/dev-pass.json的约束 ② Agent只产出本Phase产出物，由主Agent调用advance-phase.js推进Phase ③ advance-phase.js 增加 e2e-state.json 完整性校验",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "advance-phase.js 门控被跳过"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-30T09:39:41.139Z",
-      "lastSeen": "2026-07-30T09:39:41.140Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 3,
-      "failureType": "code_review_stale_blocker_rows",
-      "rootCause": "增量审查Agent覆盖code-review.md时，旧的BLOCKER表格行(| B1 | ... |)未被清除，advance-phase.js门控脚本用正则检测到残留的| Bd+ |模式，误判为未修复的BLOCKER",
-      "resolution": "① 主Agent在Phase 3→4推进前检查code-review.md的BLOCKER表格行是否实际已修复 ② 如表格行残留但BLOCKER已修复，手动清理表格行 ③ advance-phase.js门控脚本改为解析FIX_DATA块而非正则匹配表格行",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "门控误判：code-review.md 中有 2 个未修复的 BLOCKER"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-30T09:39:41.152Z",
-      "lastSeen": "2026-07-30T09:39:41.152Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 5,
-      "failureType": "eslint_auto_import_config_missing",
-      "rootCause": ".eslintrc-auto-import.json由vite build时unplugin-auto-import生成，但eslintrc.enabled=false导致文件缺失，pre-commit hook中ESLint直接报错",
-      "resolution": "① .eslintrc.cjs改为条件引用(existsSync判断)，文件缺失时不阻断ESLint ② 临时设vite.config.js中eslintrc.enabled=true → npx vite build --mode dev → 恢复enabled=false ③ 将.eslintrc-auto-import.json加入.gitignore",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "pre-commit hook ESLint失败"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-30T09:39:41.159Z",
-      "lastSeen": "2026-07-30T09:39:41.159Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
       "phase": 5,
       "failureType": "open_questions_never_resolved",
       "rootCause": "2个待确认问题(Q-1 roleName需后端, Q-2 getSelfTakeStoreList参数)贯穿全流程未标记resolved，主Agent在Phase 5提交前未检查open-questions.json",
@@ -145,51 +23,6 @@
       "occurrences": 1,
       "firstSeen": "2026-07-30T09:39:41.174Z",
       "lastSeen": "2026-07-30T09:39:41.174Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 3,
-      "failureType": "event_listener_leak",
-      "rootCause": "前端组件中bus.on/addEventListener注册的事件监听器在组件销毁时未清理，导致内存泄漏。常见于弹窗/抽屉在打开状态下被路由切换销毁时，watch的else分支不执行",
-      "resolution": "① 组件中注册的事件监听器必须在onBeforeUnmount中清理(bus.off/removeEventListener) ② 弹窗打开状态下被销毁时清理逻辑必须兜底生效 ③ 前端开发工程师Agent prompt中已增加事件清理强制要求",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "FIX-01: watch中bus.on注册的监听器未清理"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-31T03:06:13.937Z",
-      "lastSeen": "2026-07-31T03:06:13.938Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 3,
-      "failureType": "v_loading_scroll_conflict",
-      "rootCause": "v-loading指令与@scroll事件绑定在同一元素上，Element Plus遮罩层可能拦截滚动事件导致无限滚动失效",
-      "resolution": "① 外层元素承载v-loading，内层实际滚动容器承载@scroll ② 内层设置height:100%+overflow-y:auto，外层设置overflow:hidden+position:relative ③ 前端开发工程师Agent prompt中已增加分离要求",
-      "storyId": "STORY-20260710-01",
-      "blockers": [
-        "FIX-02/FIX-03: v-loading与@scroll绑定同一元素"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-07-31T03:06:13.965Z",
-      "lastSeen": "2026-07-31T03:06:13.965Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 0,
-      "failureType": "schema_validation_failed",
-      "rootCause": "acceptance-criteria.schema.json 的 criteria items 未声明 project/repoPath 字段，多项目场景（userlive+vzanlivemobile）下 AC 追加 project 字段触发 additionalProperties 校验失败",
-      "resolution": "① schema 已扩展: acceptance-criteria.schema.json 的 criteria items 增加 project/repoPath 字段（与 task-dag.schema.json 保持一致，type 为 [string, null]）② 多项目归属改用结构化 project 字段表达，description 中不再使用 [userlive]/[vzanlivemobile] 前缀 ③ requirement-analyst 生成 AC 时必须遵循 schemas/ 定义，禁止添加 schema 未声明的字段",
-      "storyId": "STORY-20260801-01",
-      "blockers": [
-        "Schema 校验失败: acceptance-criteria.json/criteria/0: must NOT have additional properties"
-      ],
-      "occurrences": 2,
-      "firstSeen": "2026-08-01T00:38:27.014Z",
-      "lastSeen": "2026-08-03T11:08:01.954Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -230,9 +63,9 @@
       "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 119,
+      "occurrences": 155,
       "firstSeen": "2026-08-13T02:02:23.008Z",
-      "lastSeen": "2026-08-25T02:34:58.098Z",
+      "lastSeen": "2026-09-02T09:55:15.124Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -243,56 +76,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 1434,
+      "occurrences": 1866,
       "firstSeen": "2026-08-05T02:36:44.009Z",
-      "lastSeen": "2026-08-25T02:34:58.089Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 2,
-      "failureType": "build_failed",
-      "rootCause": "1 个 build_failed 问题 (示例: [userlive] 本地编译失败（npm run build）:\n   - while fulfilling desired order of chunk group(s) trainContent\n * css ./node_modules/css-loader/dist/cjs.js??clonedRuleSet-22.use[1]!./node_modules/@vue/vue-loade)",
-      "resolution": "在 D:/workfile/userlive 执行 npm run build 复现并修复编译错误后重新执行 advance-phase.js 门店工单 3",
-      "storyId": "门店工单",
-      "blockers": [
-        "[userlive] 本地编译失败（npm run build）: 详见第一次读取的原始报错"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-08-23T01:08:15.126Z",
-      "lastSeen": "2026-08-23T01:08:15.126Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 4,
-      "failureType": "ac_verification_failed",
-      "rootCause": "1 个 ac_verification_failed 问题 (示例: AC AC-13: failed)",
-      "resolution": "验收标准 AC-13 未通过，执行修复回路: advance-phase.js 门店工单 2 --fix-loop",
-      "storyId": "门店工单",
-      "blockers": [
-        "AC AC-13: failed",
-        "AC AC-1(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-08-23T13:38:27.090Z",
-      "lastSeen": "2026-08-23T13:38:27.090Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
-      "phase": 4,
-      "failureType": "static_evidence_for_ui_ac",
-      "rootCause": "1 个 static_evidence_for_ui_ac 问题 (示例: AC AC-1(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码)",
-      "resolution": "二选一: ① 用 Playwright 实跑或人工点验后把 evidenceType 改为 playwright/manual 并补运行时证据；② 把 AC-1 的 status 改为 unverifiable 并写明环境限制",
-      "storyId": "门店工单",
-      "blockers": [
-        "AC AC-13: failed",
-        "AC AC-1(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码"
-      ],
-      "occurrences": 1,
-      "firstSeen": "2026-08-23T13:38:27.100Z",
-      "lastSeen": "2026-08-23T13:38:27.100Z",
+      "lastSeen": "2026-09-02T09:55:15.079Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -303,13 +89,26 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 8,
+      "occurrences": 80,
       "firstSeen": "2026-08-24T08:15:39.905Z",
-      "lastSeen": "2026-08-25T02:34:58.033Z",
+      "lastSeen": "2026-09-02T09:55:14.791Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:/test-blanch/msg-coupon/userlive/src/utils/http/modules/Scrm/storeMsg.request.js",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "msg-coupon",
+      "blockers": [],
+      "occurrences": 10,
+      "firstSeen": "2026-09-01T11:42:22.192Z",
+      "lastSeen": "2026-09-02T03:18:49.043Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     }
   ],
   "version": "2.1",
-  "lastUpdated": "2026-08-25T02:34:58.098Z"
+  "lastUpdated": "2026-09-02T09:55:15.124Z"
 }
