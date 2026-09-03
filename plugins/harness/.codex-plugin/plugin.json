@@ -32,8 +32,8 @@
     ],
     "websiteURL": "https://github.com/JayCJP/harnessflow",
     "defaultPrompt": [
-      "Use $harness-run to plan and implement this feature.",
-      "Use $harness-fixbugs to investigate and fix these bugs.",
+      "Use $harness-start to plan and implement this feature.",
+      "Use $harness-start to investigate and fix these bugs.",
       "Audit the current Harness workflow and suggest improvements."
     ],
     "brandColor": "#2563EB"

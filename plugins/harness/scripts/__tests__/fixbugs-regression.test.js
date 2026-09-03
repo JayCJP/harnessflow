@@ -156,11 +156,25 @@ ok('P0 产出要求文字含 bug分析报告', p0.agentPrompt.includes('bug分�
 
 const p1 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 1 })
 ok('P1 不重复注入 story-input 原文', !p1.agentPrompt.includes('"tapdUrl"'))
-ok('P1 给出 Bug 报告文件路径（路径化，不内联全文）', p1.agentPrompt.includes('bug分析报告') && /读取该文件获取完整内容/.test(p1.agentPrompt))
+ok('P1 给出 Bug 报告文件路径', /测试需求_bug分析报告\.md/.test(p1.agentPrompt) && /请读取/.test(p1.agentPrompt))
+// 路径化而非内联：报告正文的特征串（根因描述）不应出现在 prompt 里
+ok('P1 不内联报告正文', !p1.agentPrompt.includes('userInfo 在 onMounted 前被 computed 读取'))
+
+// v3 token 优化：报告只在 Phase 0-1 注入。Phase 2+ 靠 task-dag.json / AC 等契约产出物，
+// 不再被要求回头读 10~27KB 的原始报告（实测真实项目体积）。
+for (const ph of [2, 3, 4, 5, 6, 7]) {
+  const pn = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: ph })
+  ok(`P${ph} 不再注入 Bug 报告路径`, !/bug分析报告/i.test(pn.agentPrompt))
+}
 
 const p2 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 2 })
 ok('P2 含「Bug 修复说明」', p2.agentPrompt.includes('Bug 修复说明'))
 ok('P2 含 kb-query ∥ graphify 双源', /kb-query[\s\S]{0,80}graphify|graphify[\s\S]{0,80}kb-query/.test(p2.agentPrompt))
+ok('P2 修复说明指向契约文件而非原始报告', /task-dag\.json/.test(p2.agentPrompt))
+
+// v3：约束段只留 agent .md 未覆盖的 2 条，删掉的 3 条不应再出现
+ok('约束段已精简为 2 条', p2.agentConstraints.length === 2, JSON.stringify(p2.agentConstraints))
+ok('不再重复 agent .md 已有的 advance-phase 约束', !/- 🚫 由主 Agent 调用 advance-phase/.test(p2.agentPrompt))
 
 // ════════════════════════════════════════════════════════════
 section('4. run 模式回归（不受 fixbugs 改造影响）')

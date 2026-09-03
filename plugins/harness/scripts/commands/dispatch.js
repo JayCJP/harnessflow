@@ -18,7 +18,7 @@
  *     terminal  冷启动未建流 / 已归档 / 已完成，recovery 给出创建、复档或归档命令
  *
  * 使用场景:
- *   - harness-run / harness-fixbugs 流程每一次循环的 Step 1 都执行它，主 Agent 只按 status 分支执行，
+ *   - harness-conductor 三步循环的 Step 1 每一次都执行它，主 Agent 只按 status 分支执行，
  *     不自行判断当前 Phase，也不直接读 e2e-state.json
  *   - 某 Phase 的 Agent 汇报完成后，重新执行 dispatch.js 取新 Phase 的指令与 advanceCommand，
  *     而不是自己算 targetPhase
@@ -46,8 +46,8 @@
  *   - 冷启动处理: 状态文件不存在时不再静默失败，而是返回 terminal + 创建工作流的 recovery 命令，
  *     避免 Phase 0 之前无法调度的死锁。
  *   - 三态互斥且穷尽（ready / blocked / fix_loop / terminal），主 Agent 按 status 分支，不做任何自行判断。
- *   - module.exports = { dispatch }: 当前无其他脚本 require，主要作为 CLI 被 harness-run /
- *     harness-conductor / harness-fixbugs 的 Step 1 调用；导出保留供后续编排层复用。
+ *   - module.exports = { dispatch }: 当前无其他脚本 require，主要作为 CLI 被 harness-conductor
+ *     三步循环的 Step 1 调用；导出保留供后续编排层复用。
  *
  * @module dispatch
  */

@@ -3,20 +3,27 @@
  * schema-validator.js — JSON 产出物的 JSON Schema 校验服务
  *
  * 职责:
- *   - 用 Ajv 校验 8 类 JSON 产出物（e2e-state / acceptance-criteria / open-questions / task-dag /
- *     code-review / acceptance-verification / fix-request / fix-verification）是否符合 schemas/ 下的定义
+ *   - 用 Ajv 校验 9 类 JSON 契约文件（e2e-state / acceptance-criteria / open-questions / task-dag /
+ *     code-review / acceptance-verification / fix-request / fix-verification / story-input）
+ *     是否符合 schemas/ 下的定义
  *   - 按 Phase 给出需校验的产出物清单（getPhaseArtifacts），供门控逐项校验
  *   - 把 Ajv 错误结构化成可读的 `文件 + 字段路径 + 原因` 错误列表
  *
  * 用法:
  *   作为模块引用:
- *     const { validateArtifact, getPhaseArtifacts } = require('./services/schema-validator')
+ *     const { validateArtifact, validateFile, getPhaseArtifacts } = require('./services/schema-validator')
+ *   校验 Story 目录下的固定产出物（按 storyId 定位）:
+ *     validateArtifact(storyId, 'task-dag.json')
+ *   校验任意路径的 JSON（文件名/位置不固定时用它）:
+ *     validateFile('/tmp/foo.json', 'story-input.schema.json')
  *   安装自检:
  *     node -e "const sv = require('<插件安装路径>/plugins/harness/scripts/services/schema-validator');
  *       console.log('schemas:', Object.keys(sv.SCHEMA_MAP).length)"
  *
  * 使用场景:
  *   - services/policy.js 门控流程第 1.5 步，产出物存在时先做 Schema 校验再走 Phase 契约检查
+ *   - commands/create-workflow.js 的 --input ingest：建流之前校验用户给的 story-input.json，
+ *     不合法则拒绝建流（用 validateFile，因为此时文件可能还在 Story 目录之外）
  *   - INSTALL.md:100 安装后自检依赖是否可用（本插件不依赖 node_modules）
  *
  * 说明:
@@ -25,7 +32,8 @@
  *   - Ajv 来自 vendor/ajv.bundle.js（6 系），不依赖 node_modules；错误位置字段是 dataPath，
  *     只读 Ajv 8 的 instancePath 会让所有错误退化成 (root)
  *   - logger 关闭 + 自注册 date-time/date/uri format：避免 unknown format 告警污染调用方 stdout
- *   - 文件不存在时不报错（视为 valid），存在性由 lib/state.js 的 checkPhaseArtifact 负责
+ *   - validateArtifact 在文件不存在时视为 valid（存在性由 lib/state.js 的 checkPhaseArtifact 负责）；
+ *     validateFile 相反 —— 显式指名一个文件却找不到，必然是调用方参数错，直接判 invalid
  *
  * @module schema-validator
  */
@@ -47,7 +55,10 @@ const SCHEMA_MAP = {
   'code-review.schema.json': 'code-review.json',
   'acceptance-verification.schema.json': 'acceptance-verification.json',
   'fix-request.schema.json': 'fix-request.json',
-  'fix-verification.schema.json': 'fix-verification.json'
+  'fix-verification.schema.json': 'fix-verification.json',
+  // story-input.json 不是 Phase 产出物，不进 getPhaseArtifacts，因此注册它不改变任何门控行为；
+  // 注册的目的是让 create-workflow.js 的 --input ingest 能在建流前用 validateFile 校验它。
+  'story-input.schema.json': 'story-input.json'
 }
 
 /** 缓存已编译的 schema 校验器 */
@@ -151,17 +162,68 @@ function validateArtifact (storyId, artifactFileName, storyDir) {
   // 执行校验
   const valid = schemaResult.validate(data)
   if (!valid) {
-    const errors = (schemaResult.validate.errors || []).map(err => {
-      // vendor/ajv.bundle.js 是 Ajv 6 系（错误位置字段为 dataPath）；
-      // instancePath 是 Ajv 8 的字段名，只读它会让所有错误都退化成 (root)，定位不到具体条目。
-      const field = err.instancePath || err.dataPath || '(root)'
-      const missing = err.params && err.params.missingProperty ? ` [${err.params.missingProperty}]` : ''
-      return `${artifactFileName}${field}: ${err.message}${missing}`
-    })
-    return { valid: false, errors }
+    return { valid: false, errors: formatAjvErrors(schemaResult.validate, artifactFileName) }
   }
 
   return { valid: true, errors: [] }
+}
+
+/**
+ * 把 Ajv 错误列表格式化成可读的 `标签 + 字段路径 + 原因` 字符串
+ *
+ * vendor/ajv.bundle.js 是 Ajv 6 系（错误位置字段为 dataPath）；instancePath 是 Ajv 8 的字段名，
+ * 只读它会让所有错误都退化成 (root)，定位不到具体条目 —— 故两者都读。
+ *
+ * @param {Function} validate - 已执行过的 Ajv 校验函数（读其 .errors）
+ * @param {string} label - 错误前缀，通常是文件名
+ * @returns {string[]}
+ */
+function formatAjvErrors (validate, label) {
+  return (validate.errors || []).map(err => {
+    const field = err.instancePath || err.dataPath || '(root)'
+    const missing = err.params && err.params.missingProperty ? ` [${err.params.missingProperty}]` : ''
+    return `${label}${field}: ${err.message}${missing}`
+  })
+}
+
+/**
+ * 校验任意路径的 JSON 文件是否符合指定 schema
+ *
+ * 与 validateArtifact 的区别: 后者按 storyId + 固定产出物文件名定位（Story 目录内），
+ * 本函数直接收文件路径，用于文件位置/名称不固定的场景 —— 典型是 create-workflow.js
+ * 的 `--input <file>`，用户给的 story-input.json 可能还在 Story 目录之外。
+ *
+ * 文件不存在即判 invalid（不同于 validateArtifact 的「视为 valid」）: 调用方显式指名了
+ * 一个文件路径，找不到必然是参数写错，静默放行会让错误一路漂到建流之后才暴露。
+ *
+ * @param {string} filePath - 待校验的 JSON 文件绝对/相对路径
+ * @param {string} schemaName - schemas/ 下的 schema 文件名（如 'story-input.schema.json'）
+ * @returns {{ valid: boolean, errors: string[], data?: Object }} valid 时 data 为解析后的对象
+ */
+function validateFile (filePath, schemaName) {
+  const schemaResult = loadSchema(schemaName)
+  if (!schemaResult.valid) {
+    return { valid: false, errors: [`Schema 加载失败: ${schemaResult.error}`] }
+  }
+
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { valid: false, errors: [`文件不存在: ${filePath}`] }
+  }
+
+  const label = path.basename(filePath)
+
+  let data
+  try {
+    data = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch (e) {
+    return { valid: false, errors: [`${label} JSON 解析失败: ${e.message}`] }
+  }
+
+  if (!schemaResult.validate(data)) {
+    return { valid: false, errors: formatAjvErrors(schemaResult.validate, label) }
+  }
+
+  return { valid: true, errors: [], data }
 }
 
 /**
@@ -212,6 +274,7 @@ module.exports = {
   SCHEMA_MAP,
   validateArtifact,
   validateArtifacts,
+  validateFile,
   getPhaseArtifacts,
   getRegisteredSchemas
 }

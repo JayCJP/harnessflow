@@ -5,11 +5,12 @@
  * 职责:
  *   - 通过 .codebuddy/plans/.harness-active 标记文件控制 harness 模式的激活/关闭
  *   - start: 生成或采用 storyId，写标记文件，并内部调用 createWorkflow 同步创建 e2e-state.json
+ *   - start --input: 建流前摄入并校验 story-input.json，使原型/Figma 判定一次算准
  *   - end: 删除标记文件，恢复 src/ 的自由编辑
  *   - status: 输出激活状态、当前 Phase、主仓库与涉及仓库
  *
  * 用法:
- *   node plugins/harness/scripts/commands/harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs]
+ *   node plugins/harness/scripts/commands/harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs] [--input <file>]
  *     激活 harness 模式（写 .harness-active 标记文件）
  *   node plugins/harness/scripts/commands/harness-workflow.js end
  *     关闭 harness 模式（删除标记文件）
@@ -17,10 +18,13 @@
  *     查看当前状态
  *   storyId 可省略，缺省自动生成 STORY-YYYYMMDD-NN（扫描当日已有目录取最大序号 +1）
  *   --mode=fixbugs  Bug 修复模式：免除原型文档要求，Phase 0 改由需求分析师产出 Bug 分析报告
+ *   --input <file>  摄入 story-input.json（也支持 --input=<file>）。文件内 mode 为准，
+ *                   与 --mode 冲突或 schema 不符时拒绝启动，不写标记文件
  *
  * 使用场景:
  *   - 用户输入 /harness 时主 Agent 执行 start：开启 dev-pass 强制校验（此后编辑 src/ 需持 pass），
  *     同时建好工作流状态文件
+ *   - harness-start skill 的两步初始化：先写 story-input.json，再 start --input 一步建流
  *   - 工作流走到 Phase 7 完成、归档收尾后，用户执行 /harness end，主 Agent 调用 end 删除标记，
  *     解除编辑限制
  *   - 主 Agent 或用户想确认「harness 是否还开着、当前 Story 停在哪一 Phase、涉及哪些仓库」时执行 status
@@ -48,7 +52,7 @@
 const fs = require('fs')
 const path = require('path')
 const { ensureReposJson, readStateFile, loadRepos, PROJECT_ROOT, PLANS_DIR } = require('../lib/state')
-const { createWorkflow } = require('./create-workflow')
+const { createWorkflow, precheckStoryInput, takeFlagValue } = require('./create-workflow')
 
 // ─── 路径常量 ──────────────────────────────────────────────────
 // PROJECT_ROOT / PLANS_DIR 单一信源: lib/state.js（含 CLAUDE_PROJECT_DIR 跨宿主回退）
@@ -126,9 +130,24 @@ function generateStoryId() {
  * @param {string} [storyId] - Story ID，不提供则自动生成
  * @param {string} [title] - 需求标题，不提供则标记为"待定"
  * @param {'run'|'fixbugs'} [mode='run'] - 工作流模式
+ * @param {Object} [opts] - 可选项
+ * @param {string} [opts.inputFile] - story-input.json 路径（--input），建流前摄入
+ * @param {boolean} [opts.modeExplicit] - --mode 是否由用户显式给出
  */
-function cmdStart(storyId, title, mode) {
-  const workflowMode = mode === 'fixbugs' ? 'fixbugs' : 'run'
+function cmdStart(storyId, title, mode, opts = {}) {
+  let workflowMode = mode === 'fixbugs' ? 'fixbugs' : 'run'
+
+  // --input 先做无副作用校验，早于一切写操作。
+  // 不能等 createWorkflow 里报错: 它被 try/catch 包住且失败不阻塞 start，
+  // 那时 .harness-active 已经写下去了，会留下「标记已写、工作流未建」的半激活状态。
+  if (opts.inputFile) {
+    const pre = precheckStoryInput(opts.inputFile, workflowMode, opts.modeExplicit)
+    if (!pre.ok) {
+      console.error(JSON.stringify({ ok: false, errors: pre.errors }, null, 2))
+      process.exit(1)
+    }
+    workflowMode = pre.mode
+  }
 
   // 检查是否已有激活的 harness
   const existing = readFlag()
@@ -164,10 +183,14 @@ function cmdStart(storyId, title, mode) {
   // 内部调用 create-workflow.js 创建 e2e-state.json（断链修复）
   let workflowResult = null
   try {
-    workflowResult = createWorkflow(id, name, false, false, workflowMode)
+    workflowResult = createWorkflow(id, name, false, false, workflowMode, {
+      inputFile: opts.inputFile,
+      modeExplicit: opts.modeExplicit
+    })
     if (workflowResult && workflowResult.success) {
       data.phase = workflowResult.phase
       data.e2eStateCreated = true
+      if (workflowResult.storyInputFile) data.storyInputFile = workflowResult.storyInputFile
     }
   } catch (e) {
     // createWorkflow 失败不阻塞 start，AI 可后续手动补执行
@@ -178,7 +201,8 @@ function cmdStart(storyId, title, mode) {
   console.log(JSON.stringify({
     ok: true,
     message: `✅ Harness 模式已激活\n   Story: ${id} "${name}"\n   模式: ${workflowMode}${workflowMode === 'fixbugs' ? ' (Bug 修复，免原型文档)' : ''}\n   Phase: 0 (需求分析)\n   标记文件: .codebuddy/plans/.harness-active` +
-      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '" --mode=' + workflowMode),
+      (workflowResult?.success ? '\n   e2e-state.json: ✅ 已创建' : '\n   ⚠ e2e-state.json 创建失败，请手动执行: node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/create-workflow.js ' + id + ' "' + name + '" --mode=' + workflowMode) +
+      (workflowResult?.storyInputFile ? '\n   story-input.json: ✅ 已摄入，原型/Figma 判定已算准，无需 --refresh-input' : ''),
     data
   }))
 }
@@ -240,7 +264,9 @@ function cmdStatus() {
 
 // ─── 入口 ──────────────────────────────────────────────────────
 
-const args = process.argv.slice(2)
+// --input 支持 `--input=<p>` 与 `--input <p>`。空格形式的值 token 不以 -- 开头，
+// 必须先摘掉，否则下面的 positional 过滤会把路径当成标题的一部分。
+const { value: cliInput, rest: args } = takeFlagValue(process.argv.slice(2), '--input')
 const command = args[0]
 
 // --mode=run|fixbugs 可出现在任意位置，先摘出来再解析位置参数
@@ -254,7 +280,10 @@ switch (command) {
       console.error(`❌ 无效的 --mode 值: ${cliMode}（仅支持 run / fixbugs）`)
       process.exit(1)
     }
-    cmdStart(positional[1], positional.slice(2).join(' ').replace(/^["']|["']$/g, ''), cliMode)
+    cmdStart(positional[1], positional.slice(2).join(' ').replace(/^["']|["']$/g, ''), cliMode, {
+      inputFile: cliInput,
+      modeExplicit: Boolean(modeArg)
+    })
     break
 
   case 'end':
@@ -270,11 +299,13 @@ switch (command) {
       '/harness 工作流管理脚本',
       '',
       '用法:',
-      '  node harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs]   激活 harness 模式',
+      '  node harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs] [--input <file>]   激活 harness 模式',
       '  node harness-workflow.js end                          关闭 harness 模式',
       '  node harness-workflow.js status                       查看当前状态',
       '',
       '  --mode=fixbugs   Bug 修复模式：免除原型文档要求，Phase 0 需求分析师负责产出 Bug 分析报告',
+      '  --input <file>   建流前摄入 story-input.json，原型/Figma 判定一次算准（免去 --refresh-input）；',
+      '                   文件内的 mode 为准，与 --mode 冲突则拒绝启动',
       '',
       '详细文档见: CODEBUDDY.md § /harness 工作流'
     ].join('\n'))

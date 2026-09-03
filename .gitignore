@@ -6,3 +6,4 @@ graphify-out/
 
 # Harness 运行时状态目录（Story plans / 激活标记 / 测试残留），不入库
 .codebuddy/
+.plugins-cache.json

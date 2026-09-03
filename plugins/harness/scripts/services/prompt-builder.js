@@ -29,6 +29,16 @@
  *   - v2（需求10）: 不再内联截断契约内容——截断会导致关键信息（AC 全表、task-dag 全量文件、
  *     跨仓字段）丢失，让下游 Agent 基于残缺信息越做越错。改为只给完整文件路径，
  *     token 由「内联截断」让位给「按需读取」，信息完整性不再受注入上限约束
+ *   - v3 token 优化（2026-09）: v2 把成本从 prompt 挪到了工具调用，于是「让谁去读什么」
+ *     成了新的成本项。三处收敛，判据都是「这个 Phase 到底用不用得上」:
+ *       1. Story 背景资料（bug 分析报告，实测真实项目 10.5~27.5 KB）只在 Phase 0-1 注入。
+ *          原实现无 Phase 过滤，Phase 5/6/7 的发布助手也被要求去读它 —— 做 git commit /
+ *          知识库更新 / 云端部署根本用不上。报告在 Phase 0-1 已消化进契约文件。
+ *       2. AGENT_CONSTRAINTS 从 5 条减到 2 条，删掉的 3 条已在 6/6 个 agent .md 里写明
+ *          （agent .md 是子 Agent 的 system prompt，重复一遍不会更被遵守，只是重复计费）。
+ *       3. 契约文件路径只打一次（原来相对 + 绝对各打一遍）。
+ *     实测口径: agentPrompt 本身只占单次 spawn payload 的 7~17%（agent .md 是它的 6~13 倍），
+ *     所以真正的收益来自「少一次大文件读」，不是「prompt 少几个字」。
  *
  * @module prompt-builder
  */
@@ -56,13 +66,19 @@ const experience = require('./experience')
 
 /**
  * Agent 通用约束（所有 Phase 的 Agent 都必须遵守）
- * 与 session-start.js 注入的铁律保持一致。
+ *
+ * 只保留 agent 定义文件里**没有**覆盖到的条目 —— 逐条核对 agents/*.md 的结果:
+ *   - 禁止改 e2e-state.json / dev-pass.json → 6/6 个 agent .md 都已写明 → 已删
+ *   - 由主 Agent 调 advance-phase.js 推进 phase → 6/6 都已写明 → 已删
+ *   - 只产出本 Phase 产出物 + 汇报路径 → 本 prompt 末尾「## 完成后」段已单独写 → 已删
+ *   - 禁止 shell 绕过写状态文件 → 只有 1/6（前端开发工程师）写了 → **保留**
+ *   - kb-query + graphify 双源交叉验证 → 5/6 写了，发布助手 0 处 → **保留**（补它的缺口）
+ *
+ * 每条约束都会在 8 次 spawn 里各计费一次，而重复一遍并不会让已经写在 system prompt
+ * 里的规则更被遵守 —— 所以这里的判据是「agent .md 有没有」，不是「重要不重要」。
  */
 const AGENT_CONSTRAINTS = [
-  '禁止修改 e2e-state.json 和 dev-pass.json，状态机由 advance-phase.js 独占维护',
-  '禁止通过 shell 命令绕过上述限制写状态文件（hook 会拦截并记录违规）',
-  '只产出本 Phase 的产出物，完成后汇报产出物路径',
-  '由主 Agent 调用 advance-phase.js 推进 Phase，禁止自行修改 phase',
+  '禁止通过 shell 命令绕过限制写 e2e-state.json / dev-pass.json（hook 会拦截并记录违规）',
   '查找/定位代码时必须使用 kb-query + graphify 双源交叉验证，禁止仅用 Explore agent 或仅文本搜索'
 ]
 
@@ -74,6 +90,10 @@ const AGENT_CONSTRAINTS = [
  * 改为只给出**完整文件路径**，由 Agent 自行读取完整内容。token 由「内联截断」
  * 让位给「按需读取」，信息完整性不再受注入上限约束。
  *
+ * v3：只打印一次路径。原实现相对路径 + 绝对路径各打一遍，同一个位置说两次，
+ * 既不增加信息也让 Agent 需要判断该用哪个。统一给绝对路径（Agent 直接可用，
+ * 不依赖它的当前工作目录）。
+ *
  * @param {string} storyId - Story ID
  * @param {string[]} contractFiles - 契约文件路径列表（形如 .codebuddy/plans/<id>/xxx.json）
  * @returns {string[]} 已格式化的 markdown 片段（每个文件一条路径提示）
@@ -83,23 +103,34 @@ function readContractContents (storyId, contractFiles) {
   for (const cf of contractFiles || []) {
     const cfPath = path.join(PLANS_DIR, storyId, cf.replace(/^\.codebuddy\/plans\/[^/]+\//, ''))
     if (!fs.existsSync(cfPath)) continue
-    lines.push(`- \`${cf}\` — 请读取该文件获取完整内容（路径: ${cfPath}）`)
+    lines.push(`- \`${cfPath}\``)
   }
   return lines
 }
 
 /**
- * 读取 Story 级背景资料文件清单，注入到每个 Phase 的 prompt。
+ * 读取 Story 级背景资料文件清单（bug 分析报告 / story-context.md），注入到 prompt。
  *
  * v2（需求10）：不再内联截断背景资料（如 bug 分析报告可能很长，截断后丢失
  * 代码定位/根因等关键事实），改为只给文件路径，Agent 自行读取完整内容。
  *
+ * v3：**只在 Phase 0-1 注入**。原实现无 Phase 过滤，Phase 1~7 全都被要求去读同一份
+ * 报告 —— 实测真实项目里 bug 分析报告 10.5~27.5 KB（约 3.5~9.2K token），
+ * 而 Phase 5/6/7 的发布助手在做 git commit / 知识库更新 / 云端部署，压根用不上它。
+ * 报告的价值在 Phase 0（产出事实）与 Phase 1（据此拆 task）就已经被消化进
+ * requirement-analysis.md / acceptance-criteria.json / task-dag.json，
+ * 后续 Phase 读这些产出物即可，不必回头读原始报告。
+ * （Phase 0 通常还没有报告，返回空数组；重试/修复回路场景下报告已存在则仍注入。）
+ *
  * 约定文件名: `*bug分析报告.md` 或 `story-context.md`
  *
  * @param {string} storyId - Story ID
+ * @param {number} targetPhase - 目标 Phase；> 1 时返回空数组
  * @returns {string[]} 已格式化的 markdown 片段（每个文件一条路径提示）
  */
-function readStoryContext (storyId) {
+function readStoryContext (storyId, targetPhase) {
+  if (typeof targetPhase === 'number' && targetPhase > 1) return []
+
   const storyDir = path.join(PLANS_DIR, storyId)
   if (!fs.existsSync(storyDir)) return []
 
@@ -116,8 +147,7 @@ function readStoryContext (storyId) {
 
   const contents = []
   for (const name of matched) {
-    const fullPath = path.join(storyDir, name)
-    contents.push(`- \`${name}\` — 请读取该文件获取完整内容（路径: ${fullPath}）`)
+    contents.push(`- \`${path.join(storyDir, name)}\``)
   }
   return contents
 }
@@ -389,8 +419,8 @@ function buildAgentPrompt (opts) {
   const lessons = experience.getLessonsForPhase(targetPhase)
   const metricsInsights = experience.getMetricsInsights(targetPhase)
 
-  // Story 级背景资料（如 bug 分析报告）
-  const storyContext = readStoryContext(storyId)
+  // Story 级背景资料（如 bug 分析报告）—— 只在 Phase 0-1 注入，见 readStoryContext 说明
+  const storyContext = readStoryContext(storyId, targetPhase)
 
   // 本 Story 原始输入（仅 Phase 0 注入完整内容）
   const storyInputSection = buildStoryInputSection(storyId, targetPhase)
@@ -431,7 +461,7 @@ function buildAgentPrompt (opts) {
     agentInfo ? `\n## 你的任务\n${agentInfo.instruction}` : '',
     '',
     storyInputSection,
-    storyContext.length > 0 ? `## Story 背景资料\n${storyContext.join('\n\n')}\n` : '',
+    storyContext.length > 0 ? `## Story 背景资料\n请读取以下文件获取完整内容：\n${storyContext.join('\n')}\n` : '',
     (targetPhase === 1 && taskPlannerFigmaInstruction.length > 0) ? taskPlannerFigmaInstruction.join('\n') : '',
     figmaAlignInstruction.length > 0 ? figmaAlignInstruction.join('\n') : '',
     figmaDesignSpec.length > 0 ? figmaDesignSpec.join('\n') : '',
@@ -449,7 +479,7 @@ function buildAgentPrompt (opts) {
       : '',
     '',
     (storyMode === 'fixbugs' && targetPhase === 2)
-      ? '## Bug 修复说明\nBug 分析报告只提供**事实**（问题复述 / 复现步骤 / 代码定位 / 根因），**不含修复方案**。\n修复怎么做由你设计: 先按报告的「代码定位」用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再自行给出修复实现。\n'
+      ? '## Bug 修复说明\nBug 事实（问题复述 / 复现步骤 / 代码定位 / 根因）已在 Phase 0 分析完毕、并在 Phase 1 消化进 `task-dag.json` 与 `acceptance-criteria.json`。\n**以契约文件为准动手**: `task-dag.json` 的 `files[]` 就是改动范围，`acceptanceCriteria` 关联的 AC 描述里带 Bug 编号。\n修复怎么改由你设计: 先用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再给出实现。\n'
       : '',
     '## 约束',
     ...AGENT_CONSTRAINTS.map(c => `- 🚫 ${c}`),
