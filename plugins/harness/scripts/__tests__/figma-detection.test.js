@@ -8,6 +8,8 @@
  *   3. Figma 处理从 Phase 0 移到 Phase 1（任务规划师拆 task 时处理，需求分析阶段不拉设计稿）
  *   4. 任务规划师只用 get_metadata 扫结构，设计稿内容（get_design_context）仅开发工程师拉取
  *   5. --refresh-input 在 story-input.json 后写场景下回填判定
+ *   6. Phase 2 对齐指令只指路 task-dag.json 的 figmaRefs，不内联逐 task 的 node 清单
+ *      （2026-09 token 收敛：task-dag.json 本就是 Phase 2 契约文件，agent 必读）
  *
  * 无外部依赖，用临时沙箱（同时覆盖 CODEBUDDY/CLAUDE_PROJECT_DIR），跑完自动清理。
  *
@@ -203,6 +205,47 @@ ok('fixbugs refresh + --figma 强制开', refreshStoryInput('FG-LATE-FIX', true)
 const missing = refreshStoryInput('FG-NO-WORKFLOW')
 ok('工作流不存在 -> 失败且给出原因', missing.success === false && missing.errors.length > 0,
   JSON.stringify(missing))
+
+// ════════════════════════════════════════════════════════════
+section('9. Phase 2 对齐指令：指路 task-dag.json，不内联 node 清单')
+
+// FG-RUN 已是 run + figmaUrls（hasFigmaDesign=true），补一份带 figmaRefs 的 task-dag
+fs.writeFileSync(path.join(storyDir('FG-RUN'), 'task-dag.json'), JSON.stringify({
+  tasks: [
+    {
+      id: 'T-1',
+      title: '订单列表页',
+      files: ['src/views/order/List.vue'],
+      figmaRefs: [{ nodeId: '3020:83533', link: 'https://www.figma.com/design/AbC123/订单中心?node-id=3020-83533&m=dev' }]
+    },
+    {
+      id: 'T-2',
+      title: '详情弹窗',
+      files: ['src/views/order/Detail.vue'],
+      figmaRefs: [{ nodeId: '3020:78242', link: 'https://www.figma.com/design/AbC123/订单中心?node-id=3020-78242&m=dev' }]
+    }
+  ]
+}, null, 2))
+
+const p2 = buildAgentPrompt({ storyId: 'FG-RUN', targetPhase: 2 }).agentPrompt
+ok('P2 注入对齐指令', /Figma 设计稿对齐/.test(p2))
+ok('P2 指路 task-dag.json 的 figmaRefs', /task-dag\.json/.test(p2) && /figmaRefs/.test(p2))
+ok('P2 给出需 Figma 的 task 数量', /2 个 task 需要 Figma/.test(p2), p2.slice(0, 400))
+ok('P2 保留「不要全量探索」行为要求', /不要全量探索/.test(p2))
+// 逐 task 的 node-id 与完整链接是 task-dag.json（Phase 2 契约文件，prompt 已强制读）的拷贝
+ok('P2 不内联逐 task node 清单', !/Task T-1 .*→ node/.test(p2))
+ok('P2 不内联 node-id', !/3020:83533/.test(p2), p2)
+ok('P2 仍给设计稿文件链接', p2.includes(FIGMA_URL))
+// task-dag.json 本身必须在契约清单里，否则 node 清单就真的丢了
+ok('P2 契约清单含 task-dag.json 路径',
+  buildAgentPrompt({ storyId: 'FG-RUN', targetPhase: 2 }).contractFilesToLoad.some(f => f.endsWith('task-dag.json')))
+
+// 无 UI task -> 不强求对齐（既有行为，回归）
+fs.writeFileSync(path.join(storyDir('FG-DETECT'), 'task-dag.json'), JSON.stringify({
+  tasks: [{ id: 'T-1', title: '纯接口改造', files: ['src/api/order.ts'] }]
+}, null, 2))
+ok('无 UI task -> 不注入对齐段',
+  !/Figma 设计稿对齐/.test(buildAgentPrompt({ storyId: 'FG-DETECT', targetPhase: 2 }).agentPrompt))
 
 // ════════════════════════════════════════════════════════════
 try {

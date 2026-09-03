@@ -48,8 +48,10 @@ HARNESS_RUN_BUILD=1 node $HARNESS/advance-phase.js <id> 3     # 启用本地编�
 - `true` → 回 Step 1 重新 dispatch
 - `false` → `recovery.command` 存在则原样执行后回 Step 1；为 null 则转人工
 
-输出中的 `phaseSummaryContent` / `contractFilesToLoad` / `lessonsFromHistory` 是给
-`prompt-builder.js` 用的中间数据，**主 Agent 不消费、不解析、不注入**。
+输出契约只有两类字段：**推进结果**（`success` / `fromPhase` / `toPhase` / `gateChecks` /
+`devPass` / `recovery`）与**下一步怎么 Spawn**（`nextAgent` / `nextAgentLabel` /
+`expectedOutputs` / `agentPrompt`，修复回路时另有 `fixLoopContext`）。
+主 Agent 拿 `nextAgent` + `agentPrompt` 就够 Spawn，不需要自己拼装任何东西。
 
 独立校验的入参约束：targetPhase 范围 0~7、步长必须 +1。越界会写出 `phase: 99` 这类污染状态；
 跨阶会跳过中间门控与 summary 生成；倒退是 `--rollback` 的职责。

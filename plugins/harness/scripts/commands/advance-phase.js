@@ -1194,12 +1194,6 @@ if (devPass) {
   result.devPass = { expiresAt: devPass.expiresAt, allowedFiles: devPass.allowedPaths.length, source: devPass.pathSource }
 }
 
-// 注入上轮摘要内容（供主 Agent 注入到下个 Agent 的 prompt）
-if (summaryInfo) {
-  result.phaseSummaryContent = summaryInfo.content
-  result.phaseSummaryPhase = summaryInfo.phase
-}
-
 // 🆕 Agent Prompt 构造统一委托给 prompt-builder（单一信源）
 // 说明: prompt 的组装逻辑（摘要 + 教训 + 度量 + 契约内容 + 修复回路 + 约束）
 //       原先内联在此处，现抽到 services/prompt-builder.js，与 dispatch.js 共用，
@@ -1211,13 +1205,19 @@ const promptResult = promptBuilder.buildAgentPrompt({
   summaryInfo
 })
 
+// 输出契约（v3，2026-09 收敛）:「本次推进的结果」+「下一步怎么 Spawn」，不再回吐 prompt 素材。
+// 已删除 phaseSummaryContent / phaseSummaryPhase / contractFilesToLoad / agentConstraints /
+// lessonsFromHistory / metricsInsights —— 它们都是 agentPrompt 里已有内容的第二份拷贝：
+//   - 摘要正文落盘在 phase-<N>-summary.md，agentPrompt 给的是它的路径，
+//     断点恢复另有 hooks/session-start.js 自己 loadLatestSummary 注入；
+//   - 契约文件清单、约束、教训、度量在 agentPrompt 中已逐条展开。
+// 全仓没有任何 .js 解析本脚本的 stdout，主 Agent 也只需 nextAgent + agentPrompt 就能 Spawn，
+// 多一份拷贝只是让主 Agent 上下文里同一段话出现两次。
+// fixLoopContext 保留: 它是结构化回路状态（round / maxRounds），编排层可能据此判断预算，
+// 与上面几项「纯 prompt 文本」性质不同。
 result.nextAgent = promptResult.agent
 result.nextAgentLabel = promptResult.agentLabel
-result.contractFilesToLoad = promptResult.contractFilesToLoad
-result.agentConstraints = promptResult.agentConstraints
 result.expectedOutputs = promptResult.expectedOutputs
-if (promptResult.lessonsFromHistory) result.lessonsFromHistory = promptResult.lessonsFromHistory
-if (promptResult.metricsInsights) result.metricsInsights = promptResult.metricsInsights
 if (promptResult.fixLoopContext) result.fixLoopContext = promptResult.fixLoopContext
 
 // 完整可直接注入的 Agent prompt（无占位符，主 Agent 原样使用）

@@ -57,8 +57,7 @@ const {
   detectFigmaSource,
   readStateFile,
   getMaxFixRounds,
-  getTasksRequiringFigma,
-  readJsonArtifact
+  getTasksRequiringFigma
 } = require('../lib/state')
 
 const contextRefresh = require('./context-refresh')
@@ -194,6 +193,12 @@ function readFigmaDesignSpec (storyId) {
  * 细节（CSS class / ::v-deep / 逐条核对等）——那些 agent 自会从 Figma MCP 获取，
  * 写在 prompt 里只会常驻占用上下文（原为 924 字符固定文案，多轮 fix-loop 反复计费）。
  *
+ * v3（2026-09）: 逐 task 的 node-id 清单也不再内联。task-dag.json 是 Phase 2 的契约文件
+ * （`context-refresh.js:getContractFiles` 对 nextPhase=2 必列），prompt 里已强制要求
+ * 「逐个读取契约文件、不要依赖摘要」，因此 node 清单是 agent 无论如何都会读到的数据的
+ * 第二份拷贝 —— UI task 多时（每 task 一行含完整链接）反而是 fix-loop 里最贵的重复段。
+ * 保留的是**行为要求**（按 task 精准拉取、不做全量探索）与字段指路。
+ *
  * @param {string} storyId - Story ID
  * @param {number} targetPhase - 目标 Phase
  * @returns {string[]} markdown 行，无 Figma 或非 Phase 2 时返回空数组
@@ -206,34 +211,13 @@ function buildFigmaAlignInstruction (storyId, targetPhase) {
   const figmaTasks = getTasksRequiringFigma(storyId)
   if (figmaTasks.length === 0) return []
 
-  // 从 task-dag 读取精确的 node 拉取清单（figmaRefs 优先，其次 figmaNodeId）
-  // 每个 UI task 列出它要拉取的精确 node-id + 完整链接，开发 agent 一次精准拉取，不做全量探索
-  const dag = readJsonArtifact(storyId, 'task-dag.json')
-  const taskNodeLines = []
-  if (dag && !dag._parseError && Array.isArray(dag.tasks)) {
-    for (const task of dag.tasks) {
-      const refs = task.figmaRefs || []
-      const nodes = refs.length > 0
-        ? refs.filter(r => r && r.nodeId).map(r => ({ nodeId: r.nodeId, link: r.link }))
-        : (Array.isArray(task.figmaNodeId)
-            ? task.figmaNodeId.filter(Boolean).map(n => ({ nodeId: n, link: '' }))
-            : (typeof task.figmaNodeId === 'string' && task.figmaNodeId.trim()
-                ? [{ nodeId: task.figmaNodeId.trim(), link: '' }]
-                : []))
-      for (const n of nodes) {
-        taskNodeLines.push(`  - Task ${task.id} (${task.title || ''}) → node ${n.nodeId}${n.link ? ' | ' + n.link : ''}`)
-      }
-    }
-  }
-
   return [
     '## 🎨 Figma 设计稿对齐（强制）',
     '',
     '- UI 必须严格对齐设计稿，禁止使用默认/直觉样式。',
     '- 每个 UI 任务**自行调用 Figma MCP** 拉取该节点的完整设计上下文（`get_design_context` 为主，`get_screenshot` 为辅）——设计稿内容以 MCP 返回为准，不要凭截图/摘要推测。',
     '- **开工前先校验 Figma MCP 可用性**；若无法使用（工具不可用 / Figma 桌面端未运行 / 返回错误）——**立即停下当前任务并上报主 Agent，禁止硬做**（设计稿未对齐就开发会导致大量返工）。',
-    '- **本 Story 涉及的精确 Figma 节点（按 task 绑定，逐个拉取，不要全量探索）：**',
-    ...taskNodeLines,
+    `- **精确节点清单在 \`task-dag.json\` 里**: 本 Story 有 ${figmaTasks.length} 个 task 需要 Figma，逐个读 task 的 \`figmaRefs[]\`（\`nodeId\` + \`link\`，旧数据回落 \`figmaNodeId\`），按 task 精准拉取对应 node，**不要全量探索整个设计稿文件**。`,
     ...(detected.urls.length > 0 ? ['- 设计稿文件链接：', ...detected.urls.map(u => `  - ${u}`)] : []),
     ''
   ]

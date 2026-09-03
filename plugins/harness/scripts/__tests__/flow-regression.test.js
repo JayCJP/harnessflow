@@ -4,6 +4,10 @@
  *   1. fixloop 按失败源独立预算（code-review/test 各 2 次，不共享）
  *   2. unverifiable 不阻塞门控（需求4：无法验证就跳过）
  *   3. 目录级 glob 限域（需求2：files 支持目录 glob）
+ *   4. Phase 1→2 门控：figma-frame-inventory 存在性与完整性
+ *   5. advance-phase.js 输出契约（2026-09）：只给推进结果 + 怎么 Spawn，
+ *      不再回吐 phaseSummaryContent / contractFilesToLoad / agentConstraints /
+ *      lessonsFromHistory / metricsInsights（都是 agentPrompt 里已有内容的拷贝）
  *
  * 无外部依赖，用临时沙箱（同时覆盖 CODEBUDDY/CLAUDE_PROJECT_DIR），跑完自动清理。
  *
@@ -15,6 +19,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { spawnSync } = require('child_process')
 
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
@@ -183,6 +188,38 @@ const g3 = policy.runGateCheck('FG1-OK', 1, state.readStateFile('FG1-OK'))
 const hasFrameIncomplete = g3.blockers.some(b => b.type === 'figma_frame_incomplete')
 ok('frame-inventory 完整（含 link）-> 无 figma_frame_incomplete BLOCKER', !hasFrameIncomplete,
   JSON.stringify(g3.blockers.map(b => b.type + ':' + b.message)))
+
+// ════════════════════════════════════════════════════════════
+section('5. advance-phase.js 输出契约（2026-09 收敛）')
+
+// FG1-OK 的 Phase 1 产出物齐备且门控通过，直接推到 Phase 2 验真实输出。
+// 契约: 只给「推进结果」+「下一步怎么 Spawn」，不回吐 prompt 素材 ——
+// 那些内容已在 agentPrompt 里展开，多一份拷贝只是让主 Agent 上下文里同一段话出现两次。
+const adv = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'commands/advance-phase.js'), 'FG1-OK', '2'], {
+  encoding: 'utf-8',
+  env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
+})
+const advJsonAt = (adv.stdout || '').lastIndexOf('{\n  "success"')
+let out = null
+try { out = JSON.parse(adv.stdout.slice(advJsonAt)) } catch (e) { /* 下面断言会报 */ }
+ok('advance-phase 1→2 输出可解析的 JSON', !!out, (adv.stdout || '').slice(-300) + (adv.stderr || ''))
+ok('advance-phase 1→2 推进成功', out && out.success === true,
+  out ? JSON.stringify(out.blockers || out.gateChecks) : '')
+
+if (out && out.success === true) {
+  ok('保留 nextAgent', out.nextAgent === 'frontend-developer', String(out.nextAgent))
+  ok('保留 agentPrompt', typeof out.agentPrompt === 'string' && out.agentPrompt.length > 0)
+  ok('保留 expectedOutputs', Array.isArray(out.expectedOutputs))
+  for (const dropped of ['phaseSummaryContent', 'phaseSummaryPhase', 'contractFilesToLoad',
+    'agentConstraints', 'lessonsFromHistory', 'metricsInsights']) {
+    ok(`不再输出 ${dropped}`, !(dropped in out), JSON.stringify(Object.keys(out)))
+  }
+  // 删掉的只是拷贝，本体仍进 agentPrompt / 落盘
+  ok('摘要正文落盘为 phase-1-summary.md', fs.existsSync(path.join(dir4c, 'phase-1-summary.md')))
+  ok('agentPrompt 给出摘要文件路径', /phase-1-summary\.md/.test(out.agentPrompt))
+  ok('agentPrompt 展开契约文件清单', /task-dag\.json/.test(out.agentPrompt))
+  ok('agentPrompt 展开约束段', /## 约束/.test(out.agentPrompt))
+}
 
 // ════════════════════════════════════════════════════════════
 try {

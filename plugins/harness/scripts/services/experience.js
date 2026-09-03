@@ -24,6 +24,10 @@
  *     同一 failureType 下不同根因不再被合并；unknown 类型自动沉淀并标记 needsManualReview
  *     （reviewStatus=pending），待人工用 confirmUnknownPattern 补录正确类型
  *   - getLessonsForPhase 输出时区分 unknown 类型，提醒人工补录到 policy.js 的 RECOVERY_SUGGESTIONS
+ *   - v3.1 注入侧归并: 库里按根因分条留档（v2.0 的决定不变），但 getLessonsForPhase 注入前
+ *     把 failureType + resolution 相同的条目合成一条。原因是模板化根因（消息里嵌绝对路径，
+ *     如 dev_pass_scope_violation）每换一个文件就新开一条，occurrences 又极高，
+ *     会稳定霸占 Top N 把别的教训挤出注入窗口
  *   - 实现「执行→观测→评估→提纯→知识→门控」闭环
  *   - 经验库目录由 EXPERIENCE_DIR 解析（scripts/experience），全局跨项目共享：
  *     失败模式（如「task-dag 应用 title 而非 name」）是 Harness 流程本身的规范，与具体项目无关
@@ -146,6 +150,15 @@ function recordFailurePattern (pattern) {
  * v3: 只取当前阶段（phase 精确匹配）的教训，并按出现次数取 Top N，
  *     避免经验库增长导致 prompt 膨胀（对照腾讯 Multi-Agent 成本优化：
  *     只给 AI 当前需要的上下文，不把整个经验库灌进去）。
+ * v3.1: 注入前按 failureType + resolution 归并同类项。
+ *     写入侧的去重键是 phase+failureType+rootCause 前 50 字符（见文件头 v2.0 说明），
+ *     这对「不同根因」是对的，但对 rootCause 里嵌了变量的模板化消息失效 ——
+ *     如 dev_pass_scope_violation 的根因是「Agent 试图编辑 dev-pass 限域外的文件: <绝对路径>」，
+ *     每个新文件路径都会新开一条 pattern，对策却完全相同。它们 occurrences 极高、
+ *     恒排 Top N 之首，会把真正不同的教训挤出注入窗口。
+ *     归并只在**读取/注入**这一侧做: 不改库里的数据（不同根因仍各自留档），
+ *     只在同 failureType + 同 resolution 时合成一条、occurrences 相加、
+ *     根因取代表值并标注「另 N 个」。
  * @param {number} phase - Phase 编号
  * @param {number} [maxItems=5] - 最多注入几条教训，超出按 occurrences 取 Top N
  * @returns {string} 注入到 prompt 的教训文本，无则返回空字符串
@@ -157,14 +170,40 @@ function getLessonsForPhase (phase, maxItems = 5) {
   if (relevant.length === 0) return ''
 
   // 分为已确认和待审查两组
-  const confirmed = relevant
-    .filter(p => !p.needsManualReview || p.reviewStatus === 'confirmed')
-    .sort((a, b) => (b.occurrences || 1) - (a.occurrences || 1)) // 按出现次数降序，取最常踩的坑
-    .slice(0, maxItems)
+  const confirmedRaw = relevant.filter(p => !p.needsManualReview || p.reviewStatus === 'confirmed')
   const pending = relevant.filter(p => p.needsManualReview && p.reviewStatus === 'pending')
 
+  // 同 failureType + 同 resolution 视为同一条教训（根因只是主语不同）
+  const merged = []
+  const byKey = new Map()
+  for (const p of confirmedRaw) {
+    const key = `${p.failureType} ${p.resolution}`
+    const hit = byKey.get(key)
+    if (hit) {
+      hit.occurrences += (p.occurrences || 1)
+      hit.variants += 1
+      continue
+    }
+    const entry = {
+      failureType: p.failureType,
+      resolution: p.resolution,
+      rootCause: p.rootCause,
+      occurrences: p.occurrences || 1,
+      variants: 1
+    }
+    byKey.set(key, entry)
+    merged.push(entry)
+  }
+
+  const confirmed = merged
+    .sort((a, b) => b.occurrences - a.occurrences) // 按出现次数降序，取最常踩的坑
+    .slice(0, maxItems)
+
   const lines = confirmed.map(p => {
-    return `  ⚠️ 历史教训 (${p.occurrences}次): ${p.failureType}\n     根因: ${p.rootCause}\n     对策: ${p.resolution}`
+    const rootCause = p.variants > 1
+      ? `${p.rootCause}（另有 ${p.variants - 1} 个同类根因，对策相同）`
+      : p.rootCause
+    return `  ⚠️ 历史教训 (${p.occurrences}次): ${p.failureType}\n     根因: ${rootCause}\n     对策: ${p.resolution}`
   })
 
   // unknown 类型提醒人工补录

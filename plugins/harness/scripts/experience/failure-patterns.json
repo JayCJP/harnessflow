@@ -14,19 +14,6 @@
       "reviewStatus": "confirmed"
     },
     {
-      "phase": 2,
-      "failureType": "agent_prompt_missing_context",
-      "rootCause": "主Agent Spawn下游Agent时未将advance-phase.js输出的phaseSummaryContent和contractFilesToLoad注入prompt，Agent启动后缺少上一Phase的上下文信息",
-      "resolution": "① 主Agent每次Spawn前读取advance-phase.js输出的phaseSummaryContent+contractFilesToLoad文件内容 ② 将以上内容+lessonsFromHistory注入Agent prompt ③ advance-phase.js输出增加promptInjectionTemplate字段，供主Agent直接使用",
-      "storyId": "STORY-20260710-01",
-      "blockers": [],
-      "occurrences": 1,
-      "firstSeen": "2026-07-30T09:39:41.174Z",
-      "lastSeen": "2026-07-30T09:39:41.174Z",
-      "needsManualReview": false,
-      "reviewStatus": "confirmed"
-    },
-    {
       "phase": 0,
       "failureType": "schema_validation_failed",
       "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: open-questions.json(root): should NOT have additional properties)",
@@ -63,9 +50,9 @@
       "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 157,
+      "occurrences": 159,
       "firstSeen": "2026-08-13T02:02:23.008Z",
-      "lastSeen": "2026-09-03T03:46:16.146Z",
+      "lastSeen": "2026-09-03T09:16:41.681Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -76,9 +63,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 1890,
+      "occurrences": 1914,
       "firstSeen": "2026-08-05T02:36:44.009Z",
-      "lastSeen": "2026-09-03T03:46:16.141Z",
+      "lastSeen": "2026-09-03T09:16:41.677Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -89,9 +76,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 84,
+      "occurrences": 88,
       "firstSeen": "2026-08-24T08:15:39.905Z",
-      "lastSeen": "2026-09-03T03:46:16.067Z",
+      "lastSeen": "2026-09-03T09:16:41.641Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -107,8 +94,23 @@
       "lastSeen": "2026-09-02T03:18:49.043Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "blocking_unresolved",
+      "rootCause": "1 个 blocking_unresolved 问题 (示例: 6 项阻塞级待确认问题未解决 (open-questions: 6))",
+      "resolution": "请用户逐项确认 open-questions 中的 blocking 项",
+      "storyId": "门店工单",
+      "blockers": [
+        "6 项阻塞级待确认问题未解决 (open-questions: 6)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-03T09:15:51.795Z",
+      "lastSeen": "2026-09-03T09:15:51.795Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.1",
-  "lastUpdated": "2026-09-03T03:46:16.146Z"
+  "lastUpdated": "2026-09-03T09:16:41.681Z"
 }

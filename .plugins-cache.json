@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1788397056096,
+  "createdAt": 1788427352036,
   "plugins": [
     {
       "name": "harness",
@@ -58,7 +58,7 @@
         },
         {
           "name": "requirement-analyst",
-          "description": "Product requirements analyst and technical solution architect. Unifies multiple input types (prototype URLs, TAPD links, bug analysis reports, requirements docs, text) into executable technical plans. Outputs affected domains, files, APIs, changes, and risk items. Uses kb-query + graphify for deep project context understanding. Delivers structured solution docs to the task planner.",
+          "description": "Phase 0 需求分析。读取 story-input.json 并按 mode 分流（run 分析需求 / fixbugs 先做 Bug 分析），产出需求分析文档、可测试的验收标准与待确认问题，交接任务规划师。",
           "path": "agents\\需求分析师.md"
         }
       ],
@@ -159,13 +159,18 @@
         },
         {
           "name": "harness-conductor",
-          "description": "Harness 工作流编排器 — 调度 Agent、管理 Phase 推进、错误恢复决策。 当用户使用 /harness 命令时自动加载。包含 Agent prompt 编写规范、 常见失败模式对策、组件边界声明模板。",
+          "description": "Harness 工作流编排器 — 调度 Agent、管理 Phase 推进、错误恢复决策。 由 harness-start 交棒后加载，也可在已有工作流中途直接加载继续编排。 骨架含三步循环与铁律；8 Phase 门控详情与脚本 API 文档在 references/ 下按需读取。",
           "path": "skills/harness-conductor"
         },
         {
           "name": "harness-evolve",
           "description": "Harness 自进化分析 — 体检(audit) → 度量(metrics) → 诊断(mining) → 治疗(proposal) → 验证(validation) 五步闭环",
           "path": "skills/harness-evolve"
+        },
+        {
+          "name": "harness-start",
+          "description": "Harness 工作流统一入口 — 识别意图（新功能开发 run / Bug 修复 fixbugs）、 把用户输入梳理成 story-input.json、启动工作流，然后把编排交给 harness-conductor。 用户说「做个需求 / 开发功能 / 实现某页面」「修 bug / 处理 TAPD 缺陷 / 某功能报错」 或直接调用 /harness 时使用本 skill。",
+          "path": "skills/harness-start"
         },
         {
           "name": "kb-init",
