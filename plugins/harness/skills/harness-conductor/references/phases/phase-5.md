@@ -23,6 +23,13 @@ commit + push + MR（无文件型产出物）。
 推进 Phase 5→6 前，dev-pass 已在 Phase 4→5 被兜底撤销，此时 `src/` 处于不可编辑状态 ——
 若发现还需改代码，走 `--rollback` 回 Phase 2，不要设法绕过 hook。
 
+## 发布前确认（P2-4，2026-09）
+
+Phase 4→5 推进结果的 warnings 若含「⚠️ [强告警] unverifiable AC 占比 …% ≥ 50%」——
+说明过半验收标准因环境限制（无法登录的第三方系统等）未实际验证，仅代码逻辑审读通过
+（实跑曾出现 1 passed / 0 failed / 14 unverifiable 仍静默放行到部署）。
+发布与创建 MR 时必须向用户明示本 Story 的实际验证覆盖面，由用户决定是否接受后再发布。
+
 ## 常见失败与对策
 
 - **pre-commit hook 报错**：修问题，不要 `--no-verify`。若 hook 本身坏了，

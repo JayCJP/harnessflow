@@ -89,6 +89,17 @@ const experience = require('../services/experience')
 const contextRefresh = require('../services/context-refresh')
 const promptBuilder = require('../services/prompt-builder')
 
+/**
+ * advance-phase.js 自身的绝对调用形式（P0-3: 运行时由脚本位置动态推导，
+ * 输出给主 Agent 的 fixCommand / nextSteps / hint 在任何 cwd、任何 shell 下可直接执行，
+ * 消除「文档统一用 ${CLAUDE_PLUGIN_ROOT} 但 PowerShell 下不可执行」的缺陷 D9）。
+ * 正斜杠形式：规避 markdown 渲染层吃 `\.` 造成显示缺分隔符（2026-09 实跑反馈）
+ */
+const ADVANCE_CMD = `node "${path.resolve(__dirname, 'advance-phase.js').replace(/\\/g, '/')}"`
+
+/** archive-story.js 的绝对调用形式（同上，动态推导 + 正斜杠，无需手工改写路径） */
+const ARCHIVE_CMD = `node "${path.resolve(__dirname, 'archive-story.js').replace(/\\/g, '/')}"`
+
 // ========================
 // CLI 参数解析
 // ========================
@@ -225,6 +236,52 @@ function validatePhaseIntegrity (state) {
 }
 
 const integrityCheck = validatePhaseIntegrity(state)
+
+/**
+ * 对账 dispatch 预检留痕（P2-1: 修复「预检失败不入库」的飞轮盲区，D3）
+ *
+ * dispatch.js 预检报出 blocker 时会落盘 .dispatch-precheck.json（诊断类文件）。
+ * 此前这些 blocker 被子 Agent 修复后直接 advance 成功，失败从未进入经验库 ——
+ * 预检越好用，飞轮越饿。本函数在推进成功路径对账：上次预检有 blocker 且本次
+ * 门控通过 → 补记一条 preGateBlocked 教训并清除留痕文件。
+ * 失败路径不阻塞推进（对账是经验沉淀，不是门控）。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} completedPhase - 刚完成门控的 Phase（currentPhase）
+ * @returns {void}
+ */
+function reconcileDispatchPrecheck (storyId, completedPhase) {
+  const precheckPath = path.join(PLANS_DIR, storyId, '.dispatch-precheck.json')
+  if (!fs.existsSync(precheckPath)) return
+  try {
+    const precheck = JSON.parse(fs.readFileSync(precheckPath, 'utf-8'))
+    if (Array.isArray(precheck.blockers) && precheck.blockers.length > 0) {
+      const blockerTypes = [...new Set(precheck.blockers.map(b => b.type || 'unknown'))]
+      experience.recordFailurePattern({
+        phase: completedPhase,
+        failureType: 'preGateBlocked',
+        rootCause: `dispatch 预检曾报 ${precheck.blockers.length} 个 blocker（类型: ${blockerTypes.join(', ')}，示例: ${String(precheck.blockers[0].message || '').slice(0, 150)}），修复后被门控放行`,
+        resolution: '预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS',
+        storyId,
+        blockers: precheck.blockers.map(b => String(b.message || b))
+      })
+      trace.appendTrace(storyId, {
+        type: 'experience',
+        phase: String(completedPhase),
+        result: 'captured',
+        reason: 'preGateBlocked',
+        details: { blockerCount: precheck.blockers.length, blockerTypes }
+      })
+    }
+  } catch (e) {
+    // 对账失败不阻塞推进（留痕文件损坏时按无记录处理）
+  }
+  try {
+    fs.unlinkSync(precheckPath)
+  } catch (e) {
+    // 清除失败不影响（下次推进会重新对账）
+  }
+}
 if (!integrityCheck.valid) {
   const errorOutput = {
     error: 'e2e-state.json 完整性校验失败: 检测到 Agent 越权修改状态文件',
@@ -240,12 +297,12 @@ if (!integrityCheck.valid) {
         '4. trace.jsonl 缺失关键事件记录，审计链断裂'
       ]
     },
-    fixCommand: `node advance-phase.js ${storyId} ${integrityCheck.actualPhase}`,
+    fixCommand: `${ADVANCE_CMD} ${storyId} ${integrityCheck.actualPhase}`,
     fixSteps: [
       `1. 确认 Phases ${integrityCheck.declaredPhase + 1}~${integrityCheck.actualPhase} 的产出物是否已由 Agent 生成`,
       `2. 手动将 e2e-state.json 的 phase 改回 ${integrityCheck.declaredPhase}`,
       `3. 逐 Phase 执行 advance-phase.js 推进（从 ${integrityCheck.declaredPhase} 到 ${integrityCheck.actualPhase}），让脚本重新执行门控`,
-      `4. 或者直接执行: node advance-phase.js ${storyId} ${integrityCheck.actualPhase}（跳过的 Phase 门控将无法追溯）`
+      `4. 或者直接执行: ${ADVANCE_CMD} ${storyId} ${integrityCheck.actualPhase}（跳过的 Phase 门控将无法追溯）`
     ],
     prevention: [
       'Agent prompt 中必须包含: "禁止修改 e2e-state.json，Phase 推进由主 Agent 调用 advance-phase.js 完成"',
@@ -275,7 +332,7 @@ if (rollbackFlag) {
   if (state.status === 'archived') {
     console.log(JSON.stringify({
       error: `Story 已归档 (round ${state.archiveRound || '?'})，禁止 --rollback`,
-      hint: '归档后的 Story 不支持回退操作。如需恢复，请先执行: node archive-story.js ' + storyId + ' restore'
+      hint: '归档后的 Story 不支持回退操作。如需恢复，请先执行: ' + ARCHIVE_CMD + ' ' + storyId + ' restore'
     }, null, 2))
     process.exit(1)
   }
@@ -446,7 +503,7 @@ if (fixLoopFlag) {
   if (state.status === 'archived') {
     console.log(JSON.stringify({
       error: `Story 已归档 (round ${state.archiveRound || '?'})，禁止 --fix-loop`,
-      hint: '归档后的 Story 不支持修复回路。如需恢复，请先执行: node archive-story.js ' + storyId + ' restore'
+      hint: '归档后的 Story 不支持修复回路。如需恢复，请先执行: ' + ARCHIVE_CMD + ' ' + storyId + ' restore'
     }, null, 2))
     process.exit(1)
   }
@@ -710,42 +767,16 @@ if (fixLoopFlag) {
   ].join('\n')
   fs.writeFileSync(fixContextPath, fixContextContent, 'utf-8')
 
-  // 10. 构造 spawnPrompt（主 Agent 直接注入给前端开发工程师）
-  const issueList = issues.map((i, idx) =>
-    `\n**${i.id}** [${i.severity}]${i.file ? ` \`${i.file}${i.line ? ':' + i.line : ''}\`` : ''}\n` +
-    `- 问题: ${i.description}\n` +
-    `- 建议: ${i.suggestion || '请根据上下文分析并修复'}\n`
-  ).join('\n')
-
-  const spawnPrompt = [
-    `## 🔧 修复任务 (第 ${nextRound}/${MAX_FIX_ROUNDS} 轮)`,
-    '',
-    `你正在接收来自 **${sourcePhase === 3 ? '代码审查 (Phase 3)' : '功能测试 (Phase 4)'}** 的修复请求。`,
-    '',
-    `### 待修复问题 (共 ${issues.length} 个)`,
-    issueList,
-    `### 受影响文件`,
-    affectedFiles.length > 0
-      ? affectedFiles.map(f => `- \`${f}\``).join('\n')
-      : '- 未明确（从 fix-request.json 获取）',
-    '',
-    '### 约束',
-    '- ⛔ 仅修复以上列出的文件，禁止修改其他文件',
-    '- ⛔ 禁止顺手重构不相关的代码',
-    '- ✅ 每修复一个问题后输出 `✅ [问题ID] 已修复: <实际改动说明>`',
-    `- ✅ 修复完成后执行 \`npx eslint --fix <修改的文件路径>\`（执行前询问用户）`,
-    `- ✅ 修复完成后生成 \`fix-report-round${nextRound}.md\`（记录实际改动）`,
-    '',
-    `### 修复请求详情文件`,
-    `- 完整修复请求: \`.codebuddy/plans/${storyId}/fix-request.json\``,
-    `- 请先读取该文件了解完整上下文`,
-    '',
-    `### 修复完成后`,
-    `- 产出 \`fix-verification.json\`（逐项核对修复结果），格式:`,
-    `  \`{"round": ${nextRound}, "source": "${sourcePhase === 3 ? 'code-review' : 'acceptance-test'}", "fixes": [{"id":"FIX-01","status":"fixed|partially|skipped","actualChange":"改动说明","filesModified":["src/xxx"]}], "summary":{"total":N,"fixed":N,"partially":N,"skipped":N}}\``,
-    `- 通知主 Agent 执行: \`advance-phase.js ${storyId} 3\`（会自动注入修复上下文给审查师）`,
-    ''
-  ].join('\n')
+  // 10. 构造 spawnPrompt —— P1-2: 统一委托 prompt-builder（单一信源），
+  //     收编原先在此手写拼装的 prompt 体（「主 Agent 手写 prompt」缺陷的脚本侧变体）
+  const spawnPrompt = promptBuilder.buildFixLoopSpawnPrompt({
+    storyId,
+    round: nextRound,
+    maxRounds: MAX_FIX_ROUNDS,
+    sourcePhase,
+    issues,
+    affectedFiles
+  })
 
   // 11. 输出结构化结果
   console.log(JSON.stringify({
@@ -763,8 +794,8 @@ if (fixLoopFlag) {
     spawnPrompt,
     nextSteps: [
       `1. 主 Agent 将上述 spawnPrompt 作为 Prompt Spawn 前端开发工程师 (agent 注册名: frontend-developer)`,
-      `2. 开发者修复完成后 → 主 Agent 执行: advance-phase.js ${storyId} 3`,
-      `3. 如果 Phase 3/4 仍失败 → 再次执行: advance-phase.js ${storyId} 2 --fix-loop`,
+      `2. 开发者修复完成后 → 主 Agent 执行: ${ADVANCE_CMD} ${storyId} 3`,
+      `3. 如果 Phase 3/4 仍失败 → 再次执行: ${ADVANCE_CMD} ${storyId} 2 --fix-loop`,
       `4. 达到 ${MAX_FIX_ROUNDS} 轮上限 → 人工介入处理`
     ]
   }, null, 2))
@@ -818,8 +849,8 @@ if (targetPhase !== currentPhase + 1) {
           '跳过了中间 Phase 的 phase-N-summary.md 生成，上下文链断裂'
         ],
     fixCommand: isBackward
-      ? `node advance-phase.js ${storyId} ${targetPhase} --rollback`
-      : `node advance-phase.js ${storyId} ${currentPhase + 1}`,
+      ? `${ADVANCE_CMD} ${storyId} ${targetPhase} --rollback`
+      : `${ADVANCE_CMD} ${storyId} ${currentPhase + 1}`,
     hint: isBackward
       ? '如需回退，请加 --rollback'
       : `请逐 Phase 推进：先执行到 Phase ${currentPhase + 1}，完成产出物后再推进下一个`
@@ -979,7 +1010,7 @@ if (!combinedResult.passed) {
       ? { action: 'run_fix_loop', command: combinedResult._meta.fixLoopHint, description: '执行修复回路: 提取问题 → 回退 Phase 2 → 签发限域 dev-pass → Spawn 开发者修复' }
       : (autoFixFlag
         ? { action: 'manual_fix', command: null, description: '自动修复未能解决所有 blockers，需人工分析处理' }
-        : { action: 'retry_with_auto_fix', command: `node advance-phase.js ${storyId} ${targetPhase} --auto-fix`, description: '可尝试 --auto-fix 自动修复格式类问题' })
+        : { action: 'retry_with_auto_fix', command: `${ADVANCE_CMD} ${storyId} ${targetPhase} --auto-fix`, description: '可尝试 --auto-fix 自动修复格式类问题' })
 
     console.log(JSON.stringify({
       success: false,
@@ -1166,6 +1197,10 @@ try {
 // 持久化 — 最关键的步骤，必须在 trace 之前完成
 writeStateFile(storyId, state)
 
+// P2-1: dispatch 预检对账补记 —— 上次预检报过 blocker 且本次门控通过，
+// 补记 preGateBlocked 教训并清除留痕（见 reconcileDispatchPrecheck 说明）
+reconcileDispatchPrecheck(storyId, currentPhase)
+
 // 记录 trace（state 写入成功后才记录，确保 trace 不会领先于 state）
 try {
   trace.tracePhaseTransition(storyId, currentPhase, targetPhase)
@@ -1222,6 +1257,33 @@ if (promptResult.fixLoopContext) result.fixLoopContext = promptResult.fixLoopCon
 
 // 完整可直接注入的 Agent prompt（无占位符，主 Agent 原样使用）
 result.agentPrompt = promptResult.agentPrompt
+
+// P1-1: 推进到 Phase 2 且 task-dag 声明多个 batch 时，逐 batch 输出 spawn 序列。
+// Phase 2 的 agentPrompt 主通道是本脚本的推进输出 —— 不在此给出 batch 粒度，
+// 主 Agent 就只能拿「整个 Phase 2」一种粒度自行拆批、手写 prompt（实跑 D1 的根因）。
+// 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 白名单」，不内联 task 正文。
+if (targetPhase === 2) {
+  const { batches } = promptBuilder.readTaskBatches(storyId)
+  if (batches.length > 1) {
+    result.batches = batches.map(b => {
+      const bpb = promptBuilder.buildAgentPrompt({
+        storyId,
+        targetPhase: 2,
+        summaryPhase: currentPhase,
+        batchId: b.batchId
+      })
+      return {
+        batchId: b.batchId,
+        taskIds: b.taskIds,
+        agent: bpb.agent,
+        agentLabel: bpb.agentLabel,
+        agentPrompt: bpb.agentPrompt,
+        expectedOutputs: bpb.expectedOutputs
+      }
+    })
+    result.instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${result.nextAgent} 并注入该 batch 的 agentPrompt（files 白名单已注入各 batch prompt），全部 batch 完成后再执行 dispatch 检查推进`
+  }
+}
 
 // Phase 7 完成时自动触发度量聚合 + 标记工作流为 completed（终态）
 if (currentPhase === 7 && targetPhase > 7) {

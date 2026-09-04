@@ -69,6 +69,11 @@ Step 3: 子 Agent 汇报产出物路径 → 回到 Step 1
    - 探测预算兜底：即使有此块，仍写明「环境探测最多允许 2 次工具调用」
    > 为什么必须做：子 Agent 看不到主 Agent 的执行历史，会从零开始探测环境。实测案例：3 个开发 Agent
    > 因误判 graphify 不可用全部耗尽轮次空转；重试时注入环境事实块后一次通过。
+   >
+   > P3-5（2026-09）: 跨仓检索入口（各仓绝对路径、graphify 图谱/知识库存在性预判、
+   > `cd <repo> && graphify query` 标准样例）已由 prompt-builder 生成并注入 `agentPrompt` 正文 ——
+   > 主 Agent 不必再为这些结论手工拼接前缀，前置注入仅保留 prompt 未覆盖的实测结论
+   > （CLI 可用性、本地限制、文件遗留状态等）。
 2. **用户裁决块**——主 Agent 已向用户确认的决议（如「某遗留项本轮不修，登记为开放风险」「某改动保留并随本轮提交」），防止子 Agent 把已裁决项重新当问题上报或擅自改动。
 3. **重试说明块**——重试场景注明上轮失败原因与硬性要求（如「上一轮未落盘任何产出物，必须用 write_to_file 实际落盘，不要只在对话里输出内容」）。
 
@@ -98,6 +103,9 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 - 🚫 AI 不直接写/改 `dev-pass.json`
 - 🚫 AI 不跳过 Phase
 - 🚫 AI 不自标记 `open-questions.json` resolved
+- 🚫 AI（主 Agent）不直接写/改 Phase 契约产出物（`acceptance-criteria.json` / `task-dag.json` /
+  `*-verification.json` 等）—— 门控校验的就是这些文件，主 Agent 手改等于自己放行；要改就派对应
+  子 Agent 增量更新（P3-1，2026-09 实跑诊断：主 Agent 曾手改 AC/task-dag/自写 fix-verification）
 
 ---
 

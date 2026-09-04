@@ -57,11 +57,30 @@ const {
   detectFigmaSource,
   readStateFile,
   getMaxFixRounds,
-  getTasksRequiringFigma
+  getTasksRequiringFigma,
+  readJsonArtifact,
+  TASK_DAG_JSON_FILE,
+  loadRepos
 } = require('../lib/state')
 
 const contextRefresh = require('./context-refresh')
 const experience = require('./experience')
+
+/**
+ * 把 Windows 反斜杠路径转为正斜杠形式（仅用于**注入 prompt / 输出给人与 LLM 看**的路径）
+ *
+ * 为什么：会话 UI 的 markdown 渲染层会把 `\.` 当转义序列吃掉
+ * （`D:\repo\.codebuddy` 渲染成 `D:\repo.codebuddy`），实跑中曾让用户误判
+ * 「脚本拼接的路径错了」并中断流程。正斜杠路径在任何渲染层都原样保留，
+ * 且 Node / PowerShell / Windows API 均兼容正斜杠 —— 一次性消除歧义。
+ * 注意：仅用于输出文本；fs 实际读写仍可用原始反斜杠路径（两者等价）。
+ *
+ * @param {string} p - 任意路径
+ * @returns {string} 正斜杠形式的路径
+ */
+function toPosix (p) {
+  return String(p).replace(/\\/g, '/')
+}
 
 /**
  * Agent 通用约束（所有 Phase 的 Agent 都必须遵守）
@@ -78,7 +97,11 @@ const experience = require('./experience')
  */
 const AGENT_CONSTRAINTS = [
   '禁止通过 shell 命令绕过限制写 e2e-state.json / dev-pass.json（hook 会拦截并记录违规）',
-  '查找/定位代码时必须使用 kb-query + graphify 双源交叉验证，禁止仅用 Explore agent 或仅文本搜索'
+  '查找/定位代码时必须使用 kb-query + graphify 双源交叉验证，禁止仅用 Explore agent 或仅文本搜索',
+  // P3-2（2026-09）: 对齐 buildFigmaAlignInstruction 对 Figma MCP 的「停下上报」语义 ——
+  // 实跑中 Bash/graphify 失败率约 35%，子 Agent 静默降级到文本搜索摸黑穷举（48% 零命中），
+  // 失败被掩盖而非暴露。必须上报主 Agent，由主 Agent 决定替代路径
+  'graphify / Bash 检索失败必须停下上报主 Agent，禁止静默降级到纯文本搜索硬做'
 ]
 
 /**
@@ -102,7 +125,7 @@ function readContractContents (storyId, contractFiles) {
   for (const cf of contractFiles || []) {
     const cfPath = path.join(PLANS_DIR, storyId, cf.replace(/^\.codebuddy\/plans\/[^/]+\//, ''))
     if (!fs.existsSync(cfPath)) continue
-    lines.push(`- \`${cfPath}\``)
+    lines.push(`- \`${toPosix(cfPath)}\``)
   }
   return lines
 }
@@ -146,7 +169,7 @@ function readStoryContext (storyId, targetPhase) {
 
   const contents = []
   for (const name of matched) {
-    contents.push(`- \`${path.join(storyDir, name)}\``)
+    contents.push(`- \`${toPosix(path.join(storyDir, name))}\``)
   }
   return contents
 }
@@ -158,10 +181,17 @@ function readStoryContext (storyId, targetPhase) {
  * 字段（色值/间距/字体/布局等设计规格摘要）。开发 agent 以 Figma MCP 完整拉取为准，
  * designSpec 仅作辅助参考，避免全量探索设计稿。
  *
+ * 只在 Phase 2 注入 —— 与 buildFigmaAlignInstruction 的 Phase 过滤对齐。此前无该过滤，
+ * 导致代码审查（看 git diff）、功能测试（跑 AC）、发布（commit / 部署）的 prompt
+ * 也都带着色值/间距/圆角这类设计规格，纯属噪音（v3 原则：这个 Phase 到底用不用得上）。
+ *
  * @param {string} storyId - Story ID
- * @returns {string[]} 已格式化的 markdown 片段，无 designSpec 时返回空数组
+ * @param {number} targetPhase - 目标 Phase；非 2 时返回空数组
+ * @returns {string[]} 已格式化的 markdown 片段，无 designSpec 或非 Phase 2 时返回空数组
  */
-function readFigmaDesignSpec (storyId) {
+function readFigmaDesignSpec (storyId, targetPhase) {
+  if (targetPhase !== 2) return []
+
   const invPath = path.join(PLANS_DIR, storyId, 'figma-frame-inventory.json')
   if (!fs.existsSync(invPath)) return []
   try {
@@ -245,13 +275,13 @@ function buildStoryInputSection (storyId, targetPhase) {
   if (!input) return ''
 
   if (input._parseError) {
-    return `## 本 Story 原始输入\n⚠️ ${STORY_INPUT_FILE} 解析失败: ${input._parseError}\n请读取源文件 .codebuddy/plans/${storyId}/${STORY_INPUT_FILE} 自行确认，或向主 Agent 索要参数。\n`
+    return `## 本 Story 原始输入\n⚠️ ${STORY_INPUT_FILE} 解析失败: ${input._parseError}\n请读取源文件 ${toPosix(path.join(PLANS_DIR, storyId, STORY_INPUT_FILE))} 自行确认，或向主 Agent 索要参数。\n`
   }
 
   const mode = input.mode === 'fixbugs' ? 'fixbugs' : 'run'
   const lines = [
     '## 本 Story 原始输入',
-    `请读取 .codebuddy/plans/${storyId}/${STORY_INPUT_FILE} 获取完整参数（含 TAPD/原型/Figma 链接等）——此处不内联全文，避免占上下文。`,
+    `请读取 ${toPosix(path.join(PLANS_DIR, storyId, STORY_INPUT_FILE))} 获取完整参数（含 TAPD/原型/Figma 链接等）——此处不内联全文，避免占上下文。`,
     '',
   ]
 
@@ -262,7 +292,7 @@ function buildStoryInputSection (storyId, targetPhase) {
       '- 上述参数由主 Agent 原样搬运，**未经任何分析** —— Bug 分析是你的职责，不是主 Agent 的。',
       '- 你需要自行 `use_skill("tapd-bug-analyzer")`，用 sources 里的 tapdUrl / workspaceId / owner / statusFilter 拉取并分析缺陷。',
       '- Bug 分析报告**只记录事实**: 问题复述、复现步骤、代码定位、根因、责任方分类。',
-      '  🚫 **不要写修复方案**（不写"应该怎么改"、不给伪代码/diff）—— 修复设计属于开发工程师。',
+      '  **不要写修复方案**（不写"应该怎么改"、不给伪代码/diff）—— 修复设计属于开发工程师。',
       '- 产出 `{标题}_bug分析报告.md` 后，再写 `requirement-analysis.md`：只引用 Bug 编号，不复制 Bug 正文。',
       ''
     )
@@ -281,16 +311,6 @@ function buildStoryInputSection (storyId, targetPhase) {
   return lines.join('\n')
 }
 
-/**
- * 构造 Figma 解析指令片段
- *
- * 与 fixbugs 注入 `tapd-bug-analyzer` 对称: 检测到设计稿链接就显式点名要调用的
- * skill，避免子 Agent 拿到链接却不知道该走哪条解析路径。
- *
- * @param {string} storyId - Story ID
- * @param {Object} input - 已解析的 story-input.json
- * @returns {string[]} markdown 行，无 Figma 链接时返回空数组
- */
 /**
  * 构造「任务规划阶段处理 Figma」指令片段（Phase 1 注入）。
  *
@@ -352,7 +372,7 @@ function buildFixLoopContext (storyId, targetPhase) {
       issueCount: fixRequest.issues ? fixRequest.issues.length : 0,
       affectedFiles: fixRequest.affectedFiles || [],
       fixVerificationExists: hasFixVerification,
-      fixContextFile: '.codebuddy/plans/' + storyId + '/fix-context.md',
+      fixContextFile: toPosix(path.join(PLANS_DIR, storyId, 'fix-context.md')),
       instruction: '本次审查为修复回路后的复查。请加载 fix-context.md + fix-request.json' +
         (hasFixVerification ? ' + fix-verification.json' : '') +
         '，逐项核对每个 FIX-XX 是否真正修复，聚焦复查 affectedFiles 的改动，确认未引入新问题。'
@@ -364,6 +384,262 @@ function buildFixLoopContext (storyId, targetPhase) {
 }
 
 /**
+ * 读取 task-dag.json 的 batch 分组与任务列表（P1-1）
+ *
+ * schema 中 batches 为可选数组: [{ batchId: number, taskIds: string[], description?: string }]。
+ * 缺省（无 batches 字段）= 单批，全部 tasks 作为一个批次 —— 与旧数据完全向后兼容。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {{ batches: Array<{batchId:number, taskIds:string[], description?:string}>, tasks: Array<Object> }}
+ *   解析结果；task-dag 不存在或解析失败时返回 { batches: [], tasks: [] }
+ */
+function readTaskBatches (storyId) {
+  const empty = { batches: [], tasks: [] }
+  try {
+    const taskData = readJsonArtifact(storyId, TASK_DAG_JSON_FILE)
+    if (!taskData || taskData._parseError || !Array.isArray(taskData.tasks)) return empty
+    const batches = Array.isArray(taskData.batches) ? taskData.batches : []
+    return { batches, tasks: taskData.tasks }
+  } catch (e) {
+    return empty
+  }
+}
+
+/**
+ * 构造 Phase 2 batch 级任务范围片段（P1-1: 消除主 Agent 手写 batch prompt 的动机）
+ *
+ * 输出「本批次目标仓 + task id 清单 + files[] 白名单」。契约文件仍只给路径 ——
+ * task 的 description / acceptanceCriteria 等正文以 task-dag.json 为唯一信源，
+ * 本片段不内联（遵守 v2「不再内联截断契约内容」的决定）。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} batchId - 批次 ID（task-dag.json 的 batches[].batchId）
+ * @returns {{ lines: string[], taskIds: string[], repos: string[], totalBatches: number }|null}
+ *   无该批次或 task-dag 不可读时返回 null
+ */
+function buildBatchScopeSection (storyId, batchId) {
+  const { batches, tasks } = readTaskBatches(storyId)
+  if (batches.length === 0) return null
+  const batch = batches.find(b => b.batchId === batchId)
+  if (!batch) return null
+
+  const batchTasks = (batch.taskIds || [])
+    .map(id => tasks.find(t => t.id === id))
+    .filter(Boolean)
+
+  // 目标仓归并（project 缺省为主仓；跨仓 task 带 project/repoPath）。
+  // 主仓用 repos.json 里的**真实名称**而非占位符 —— 子 Agent 会拿这个名称去 repos.json
+  // 查路径，占位符（如「主仓(primary)」）在 repos.json 里查不到对应键，等于给了个假名字
+  let primaryName = 'primary'
+  try {
+    const repos = loadRepos(storyId)
+    if (repos && repos.primary) primaryName = repos.primary
+  } catch (e) { /* repos 不可读时回落字面量 */ }
+
+  const repoSet = new Set()
+  for (const t of batchTasks) {
+    repoSet.add(t.project || primaryName)
+  }
+
+  const lines = [
+    `## 本批次任务范围（batch ${batchId}/${batches.length}${batch.description ? `: ${batch.description}` : ''}）`,
+    '',
+    `- 本批次目标仓: ${[...repoSet].join(', ')}`,
+    `- 本批次 task 清单: ${batchTasks.map(t => `${t.id}(${t.title})`).join('、')}`,
+    '- 本批次 files 白名单（只允许修改以下范围，dev-pass 据此限域）:'
+  ]
+  for (const t of batchTasks) {
+    for (const f of (t.files || [])) {
+      lines.push(`  - ${t.id}: ${f}${t.project ? ` (仓: ${t.project}${t.repoPath ? `: ${toPosix(t.repoPath)}` : ''})` : ''}`)
+    }
+  }
+  lines.push('- 其余批次与本批次无交集，不要实现别的批次的 task；task 详情（description / AC 关联）以 task-dag.json 契约文件为准。')
+  lines.push('')
+
+  return { lines, taskIds: batchTasks.map(t => t.id), repos: [...repoSet], totalBatches: batches.length }
+}
+
+/**
+ * 构造增量修复的窄上下文段（P1-2: scope=incremental 时注入）
+ *
+ * 只列被点名的修复契约文件（fix-request.json / fix-context.md / fix-verification.json），
+ * 不注入 Story 背景资料与 Figma 设计摘要 —— 修复场景需要的是「改哪里、为什么、怎么核对」，
+ * 不需要重新消化整份需求（D5: 改 2 行 description 曾耗约 40 次工具调用重读 688 行报告）。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {string} markdown 片段，无可读文件时返回空串
+ */
+function buildIncrementalFixSection (storyId) {
+  const storyDir = path.join(PLANS_DIR, storyId)
+  const candidates = [
+    { file: 'fix-request.json', desc: '本轮修复请求（affectedFiles + issue 清单）' },
+    { file: 'fix-context.md', desc: '修复回路上下文（上轮问题与修复核对指引）' },
+    { file: 'fix-verification.json', desc: '上一轮修复核对结果（若存在，先看上轮改了什么）' }
+  ]
+  const lines = ['## 增量修复上下文（窄范围）', '', '本次为限域修复，只处理被点名的问题，不要重新全量消化需求文档：']
+  let found = false
+  for (const c of candidates) {
+    const p = path.join(storyDir, c.file)
+    if (fs.existsSync(p)) {
+      lines.push(`- \`${toPosix(p)}\` — ${c.desc}`)
+      found = true
+    }
+  }
+  if (!found) return ''
+  lines.push('')
+  return lines.join('\n')
+}
+
+/**
+ * 构造跨仓检索入口片段（P1-3: 修复跨仓检索三重失效，D2）
+ *
+ * 实跑诊断: graphify-out/ 与 .docs/llm-knowledge/ 均按子 Agent cwd 解析，而 cwd 停在主仓，
+ * 目标仓的图谱/知识库永远查不到；无知识库的仓还会被摸黑穷举关键词（48% 检索空转）。
+ * 本片段把「正确的检索姿势」由脚本逐仓下发:
+ *   - 绝对仓路径（不依赖子 Agent cwd）
+ *   - 该仓 graphify-out/graph.json 与 .docs/llm-knowledge/ 的存在性（脚本侧预判，
+ *     子 Agent 不必再探测 —— 主 Agent 本来就在跑的 Test-Path 固化到 prompt）
+ *   - graphify 的标准用法（主仓给全量命令，跨仓给 `cd` + query 的最小样例）
+ *   - 无知识库的仓明写「只走 graphify + 源码精读，不要尝试 kb-query」
+ *
+ * 默认在所有检索相关阶段（Phase 0 需求分析 / 1 任务规划 / 2 开发）注入，**含单仓 Story** ——
+ * 约束里写了「必须用 kb-query + graphify 双源交叉验证」，但只讲要求不给用法时，
+ * 子 Agent 依旧会退回自己熟悉的文本搜索。主仓排在最前: 它是子 Agent 的 cwd，
+ * 也是绝大多数检索目标所在。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} targetPhase - 目标 Phase
+ * @returns {string[]} markdown 行，无需注入时返回空数组
+ */
+function buildRepoSearchEntries (storyId, targetPhase) {
+  if (![0, 1, 2].includes(targetPhase)) return []
+  let repos
+  try {
+    repos = loadRepos(storyId)
+  } catch (e) {
+    return []
+  }
+  if (!repos || !repos.repos) return []
+
+  // 主仓在前（子 Agent 的 cwd），其余非 primary 仓按 repos.json 声明顺序在后
+  const primary = repos.primary
+  const names = [primary, ...Object.keys(repos.repos).filter(n => n !== primary)]
+    .filter(n => repos.repos[n])
+
+  const lines = [
+    '## 🔎 代码检索入口（按仓下发，图谱/知识库存在性已由脚本预判）',
+    '',
+    '> graphify 与知识库均按 **cwd** 解析：检索非主仓必须先 `cd` 到该仓的绝对路径，',
+    '> 在主仓直接跑永远查不到目标仓的图谱/知识库（实跑 48% 检索空转的根因）。',
+    ''
+  ]
+  for (const name of names) {
+    const absPath = repos.repos[name]
+    const isPrimary = name === primary
+    const repoPath = toPosix(absPath)
+    const graphOk = fs.existsSync(path.join(absPath, 'graphify-out', 'graph.json'))
+    const kbOk = fs.existsSync(path.join(absPath, '.docs', 'llm-knowledge'))
+
+    lines.push(`### ${name}${isPrimary ? '（主仓，即当前工作目录）' : ''} → \`${repoPath}\``)
+    lines.push(`- graphify 图谱: ${graphOk ? '✅ 存在 (graphify-out/graph.json)' : '❌ 不存在（先用下方命令建图；建不出来就退回源码精读并上报，不要硬 query）'}`)
+    if (kbOk) {
+      lines.push('- 知识库: ✅ 存在 (.docs/llm-knowledge/)，可用 kb-query 检索业务域文档')
+    } else {
+      lines.push('- 知识库: ❌ 不存在 —— **该仓只走 graphify + 源码精读，不要尝试 kb-query**')
+    }
+
+    // 命令分行给出，不写成 `cd ... && graphify ...`:
+    // `&&` 是 PowerShell 7+ 语法，Windows 默认的 PowerShell 5.1 会直接报
+    // "The token '&&' is not a valid statement separator" —— 而子 Agent 的 tools 里就有 PowerShell。
+    // 这段样例本就是为了修「检索失败率 ~35%」，样例自身不该再引入一次失败
+    if (!graphOk) {
+      // 图谱不存在时还教 `graphify query` 是自相矛盾 —— 没有 graph.json 必然失败。
+      // 先给建图命令；建不出来就按约束停下上报，而不是退回关键词穷举
+      lines.push('- 建图命令（Bash；图谱生成后才能 query）:')
+      lines.push('  ```bash')
+      if (!isPrimary) lines.push(`  cd "${repoPath}"`)
+      lines.push('  graphify .           # 首次: 全量抽取建图')
+      lines.push('  graphify update .    # 已有图谱: 增量更新')
+      lines.push('  ```')
+      lines.push('- 建图不可用（CLI 缺失 / 报错）→ **停下上报主 Agent**，不要退回纯文本搜索硬做')
+    } else if (isPrimary) {
+      // 主仓给全量命令：子 Agent 在这干活最多，一次说清能力边界比让它自己试更省调用
+      lines.push('- 标准用法（Bash）:')
+      lines.push('  ```bash')
+      lines.push('  graphify query "<模块/关键词>"')
+      lines.push('  ```')
+      lines.push('- 其他命令: `graphify path "<模块A>" "<模块B>"`（两者关联路径）、`graphify explain "<概念>"`（单节点详解）、`graphify query "..." --budget 1500`（限制返回 token）')
+    } else {
+      lines.push('- 标准执行样例（在**同一次** Bash 调用中依次执行）:')
+      lines.push('  ```bash')
+      lines.push(`  cd "${repoPath}"`)
+      lines.push('  graphify query "<模块/关键词>"')
+      lines.push('  ```')
+    }
+    lines.push('')
+  }
+  return lines
+}
+
+/**
+ * 构造修复回路的 spawn prompt（P1-2: 收编 advance-phase.js --fix-loop 的手写 prompt 体）
+ *
+ * 原先该 prompt 在 advance-phase.js 内手写拼装，是「主 Agent 手写 prompt」缺陷（D1/D5）的
+ * 脚本侧变体。收编到 prompt-builder 维持「prompt 单一信源」。
+ * 输出与原手写体语义等价：待修复问题清单 + 受影响文件 + 约束 + 产出要求，
+ * 修复请求文件路径为动态解析的绝对路径（P0-2 原则）。
+ *
+ * @param {Object} opts
+ * @param {string} opts.storyId - Story ID
+ * @param {number} opts.round - 当前修复轮次
+ * @param {number} opts.maxRounds - 最大修复轮次
+ * @param {number} opts.sourcePhase - 失败来源 Phase（3=代码审查 / 4=功能测试）
+ * @param {Array<{id:string,severity:string,file?:string,line?:string,description:string,suggestion?:string}>} opts.issues - 待修复问题清单
+ * @param {string[]} opts.affectedFiles - 受影响文件（dev-pass 限域范围）
+ * @returns {string} 完整可注入的修复任务 prompt
+ */
+function buildFixLoopSpawnPrompt (opts) {
+  const { storyId, round, maxRounds, sourcePhase, issues, affectedFiles } = opts
+  const fixRequestPath = toPosix(path.join(PLANS_DIR, storyId, 'fix-request.json'))
+
+  const issueList = issues.map(i =>
+    `\n**${i.id}** [${i.severity}]${i.file ? ` \`${i.file}${i.line ? ':' + i.line : ''}\`` : ''}\n` +
+    `- 问题: ${i.description}\n` +
+    `- 建议: ${i.suggestion || '请根据上下文分析并修复'}\n`
+  ).join('\n')
+
+  return [
+    `## 🔧 修复任务 (第 ${round}/${maxRounds} 轮)`,
+    '',
+    `你正在接收来自 **${sourcePhase === 3 ? '代码审查 (Phase 3)' : '功能测试 (Phase 4)'}** 的修复请求。`,
+    '',
+    `### 待修复问题 (共 ${issues.length} 个)`,
+    issueList,
+    `### 受影响文件`,
+    affectedFiles.length > 0
+      ? affectedFiles.map(f => `- \`${f}\``).join('\n')
+      : '- 未明确（从 fix-request.json 获取）',
+    '',
+    '### 约束',
+    '- ⛔ 仅修复以上列出的文件，禁止修改其他文件',
+    '- ⛔ 禁止顺手重构不相关的代码',
+    '- ✅ 每修复一个问题后输出 `✅ [问题ID] 已修复: <实际改动说明>`',
+    '- ✅ 修复完成后执行 `npx eslint --fix <修改的文件路径>`（执行前询问用户）',
+    `- ✅ 修复完成后生成 \`fix-report-round${round}.md\`（记录实际改动）`,
+    '',
+    '### 修复请求详情文件',
+    `- 完整修复请求: \`${fixRequestPath}\``,
+    '- 请先读取该文件了解完整上下文',
+    '',
+    '### 修复完成后',
+    '- 产出 `fix-verification.json`（逐项核对修复结果），格式:',
+    `  \`{"round": ${round}, "source": "${sourcePhase === 3 ? 'code-review' : 'acceptance-test'}", "fixes": [{"id":"FIX-01","status":"fixed|partially|skipped","actualChange":"改动说明","filesModified":["src/xxx"]}], "summary":{"total":N,"fixed":N,"partially":N,"skipped":N}}\``,
+    '- 通知主 Agent 修复完成；后续推进命令以 dispatch.js 输出的 advanceCommand 为准，不要手写',
+    ''
+  ].join('\n')
+}
+
+/**
  * 构造下一个 Phase 的 Agent Prompt 及其配套元信息。
  *
  * @param {Object} opts
@@ -371,6 +647,10 @@ function buildFixLoopContext (storyId, targetPhase) {
  * @param {number} opts.targetPhase - 即将进入的 Phase（Agent 要干活的那个 Phase）
  * @param {number} opts.summaryPhase - 用于取摘要的 Phase（通常是 targetPhase - 1）
  * @param {Object} [opts.summaryInfo] - 已加载的摘要对象；不传则自行加载
+ * @param {number} [opts.batchId] - P1-1: 批次 ID（仅 Phase 2 生效）。传入时注入
+ *   「本批次目标仓 + task id 清单 + files[] 白名单」段，task 正文仍以 task-dag.json 为唯一信源
+ * @param {string} [opts.scope] - P1-2: 'incremental' 时为增量修复窄上下文 —— 跳过
+ *   Story 背景资料 / Figma 设计摘要，改注入修复契约文件（fix-request 等）；缺省 'full'
  * @returns {{
  *   agent: string|null,
  *   agentLabel: string|null,
@@ -381,6 +661,7 @@ function buildFixLoopContext (storyId, targetPhase) {
  *   lessonsFromHistory?: string,
  *   metricsInsights?: string,
  *   fixLoopContext?: Object,
+ *   batchScope?: { batchId: number, taskIds: string[], repos: string[], totalBatches: number },
  *   expectedOutputs: string[]
  * }}
  */
@@ -403,15 +684,20 @@ function buildAgentPrompt (opts) {
   const lessons = experience.getLessonsForPhase(targetPhase)
   const metricsInsights = experience.getMetricsInsights(targetPhase)
 
+  // P1-2: scope=incremental（增量修复场景）跳过大块背景注入，只保留修复必需信息，
+  // 消除「改 2 行 description 却重读 688 行背景」的上下文浪费（D5）
+  const incremental = opts.scope === 'incremental'
+
   // Story 级背景资料（如 bug 分析报告）—— 只在 Phase 0-1 注入，见 readStoryContext 说明
-  const storyContext = readStoryContext(storyId, targetPhase)
+  const storyContext = incremental ? [] : readStoryContext(storyId, targetPhase)
 
   // 本 Story 原始输入（仅 Phase 0 注入完整内容）
   const storyInputSection = buildStoryInputSection(storyId, targetPhase)
   const storyMode = getStoryMode(storyId)
 
   // Figma 设计规格摘要（frame-inventory 的 designSpec，Phase 2 前端开发注入，辅助参考）
-  const figmaDesignSpec = readFigmaDesignSpec(storyId)
+  // P1-2: 增量修复场景跳过（修复 BLOCKER 不需要重新消化设计规格摘要）
+  const figmaDesignSpec = incremental ? [] : readFigmaDesignSpec(storyId, targetPhase)
   // Figma 对齐指令（Phase 2 前端开发时强制要求按设计稿实现）
   const figmaAlignInstruction = buildFigmaAlignInstruction(storyId, targetPhase)
   // Figma 任务规划指令（Phase 1 任务规划师拆 task 时处理 Figma，产出 frame-inventory + 绑定 figmaRefs）
@@ -419,6 +705,19 @@ function buildAgentPrompt (opts) {
 
   // 修复回路上下文
   const fixLoopContext = buildFixLoopContext(storyId, targetPhase)
+
+  // P1-1: batch 级任务范围（仅 Phase 2 且指定 batchId 时注入）——
+  // 输出「目标仓 + task id 清单 + files[] 白名单」，task 正文仍以 task-dag.json 契约为唯一信源，
+  // 消除主 Agent 在多批次开发时手写 prompt 的动机（D1）
+  const batchScope = (targetPhase === 2 && opts.batchId !== undefined && opts.batchId !== null)
+    ? buildBatchScopeSection(storyId, opts.batchId)
+    : null
+
+  // P1-2: 增量修复的窄上下文 —— 只列被点名的修复契约文件（fix-request / fix-context / fix-verification）
+  const incrementalFixSection = incremental ? buildIncrementalFixSection(storyId) : ''
+
+  // P1-3: 跨仓检索入口（repos.json 有非 primary 条目时逐仓下发，修复 D2 三重失效）
+  const repoSearchEntries = buildRepoSearchEntries(storyId, targetPhase)
 
   // 本 Phase 应产出的文件（来自 PHASE_ARTIFACTS，Phase 2/5/6/7 无文件产出）
   // optional 产出物（原型/Figma）按条件产出，不列入 expectedOutputs——主 Agent 靠该
@@ -450,23 +749,29 @@ function buildAgentPrompt (opts) {
     figmaAlignInstruction.length > 0 ? figmaAlignInstruction.join('\n') : '',
     figmaDesignSpec.length > 0 ? figmaDesignSpec.join('\n') : '',
     '## 上一 Phase 摘要',
-    summaryInfo ? `请读取上轮摘要文件获取完整信息（路径: ${summaryInfo.path}）` : '(无摘要)',
+    summaryInfo ? `请读取上轮摘要文件获取完整信息（路径: ${toPosix(summaryInfo.path)}）` : '(无摘要)',
     '',
     lessons ? `## 历史教训\n${lessons.trim()}\n` : '',
     metricsInsights ? `## 度量洞察\n${metricsInsights.trim()}\n` : '',
     fixLoopContext ? `## 修复回路上下文 (第 ${fixLoopContext.round}/${fixLoopContext.maxRounds} 轮)\n${fixLoopContext.instruction}\n受影响文件: ${fixLoopContext.affectedFiles.join(', ') || '(见 fix-request.json)'}\n` : '',
+    incrementalFixSection,
+    batchScope ? batchScope.lines.join('\n') : '',
     '## 契约文件内容',
     contractContents.length > 0 ? '请逐个读取以下契约文件获取完整内容（不要依赖摘要）：\n' + contractContents.join('\n') : '(无契约文件)',
     '',
     expectedDescriptions.length > 0
-      ? `## 产出要求\n${expectedDescriptions.map(d => `- ${d}`).join('\n')}\n产出目录: .codebuddy/plans/${storyId}/`
+      // P0-2: 产出目录给主仓动态解析的绝对路径（PLANS_DIR 来自 state.js 的 PROJECT_ROOT 推导），
+      // 相对路径会被子 Agent 按自己的 cwd 解析，跨仓场景产出物会写错仓（D8）；
+      // 用正斜杠形式注入 —— markdown 渲染层会把 `\.` 当转义吃掉，反斜杠路径显示会缺分隔符
+      ? `## 产出要求\n${expectedDescriptions.map(d => `- ${d}`).join('\n')}\n产出目录: ${toPosix(path.join(PLANS_DIR, storyId))}`
       : '',
     '',
     (storyMode === 'fixbugs' && targetPhase === 2)
       ? '## Bug 修复说明\nBug 事实（问题复述 / 复现步骤 / 代码定位 / 根因）已在 Phase 0 分析完毕、并在 Phase 1 消化进 `task-dag.json` 与 `acceptance-criteria.json`。\n**以契约文件为准动手**: `task-dag.json` 的 `files[]` 就是改动范围，`acceptanceCriteria` 关联的 AC 描述里带 Bug 编号。\n修复怎么改由你设计: 先用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再给出实现。\n'
       : '',
+    repoSearchEntries.length > 0 ? repoSearchEntries.join('\n') : '',
     '## 约束',
-    ...AGENT_CONSTRAINTS.map(c => `- 🚫 ${c}`),
+    ...AGENT_CONSTRAINTS.map(c => `- ${c}`),
     '',
     '## 完成后',
     '汇报产出物的完整路径，不要自行推进 Phase。'
@@ -486,6 +791,15 @@ function buildAgentPrompt (opts) {
   if (lessons) result.lessonsFromHistory = lessons.trim()
   if (metricsInsights) result.metricsInsights = metricsInsights.trim()
   if (fixLoopContext) result.fixLoopContext = fixLoopContext
+  // P1-1: batch 范围元信息（编排层据此生成逐 batch spawn 序列）
+  if (batchScope) {
+    result.batchScope = {
+      batchId: opts.batchId,
+      taskIds: batchScope.taskIds,
+      repos: batchScope.repos,
+      totalBatches: batchScope.totalBatches
+    }
+  }
 
   return result
 }
@@ -499,5 +813,11 @@ module.exports = {
   readFigmaDesignSpec,
   buildFigmaAlignInstruction,
   buildTaskPlannerFigmaInstruction,
+  // P1-1 / P1-2 / P1-3（2026-09 REAL_RUN 诊断优化）
+  readTaskBatches,
+  buildBatchScopeSection,
+  buildIncrementalFixSection,
+  buildFixLoopSpawnPrompt,
+  buildRepoSearchEntries,
   AGENT_CONSTRAINTS
 }

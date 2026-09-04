@@ -21,9 +21,13 @@ node $HARNESS/dispatch.js <storyId>
 | `nextAgent` | string\|null | Agent **注册名**（英文），原样传给 Spawn 的 name |
 | `agentLabel` | string\|null | 中文名，仅供展示，**禁止用于 Spawn** |
 | `agentPrompt` | string\|null | 完整 prompt，无占位符，原样注入 |
-| `advanceCommand` | string\|null | 已算好 targetPhase 的推进命令，不要手写 |
-| `readyToAdvance` | boolean | true 表示应先执行 `advanceCommand` 再回 Step 1 |
-| `instruction` | string\|null | 人类可读的下一步说明 |
+| `advanceCommand` | string\|null | 已算好 targetPhase 的推进命令（**绝对路径**，运行时动态解析插件根，任何 cwd/shell 可直接执行），不要手写 |
+| `readyToAdvance` | boolean | **条件性**：仅 status=ready 且门控已通过（该推进）时输出 |
+| `instruction` | string\|null | **条件性**：人类可读的下一步说明（推进/fix_loop 分支输出） |
+| `expectedOutputs` | string[] | **条件性**：本 Phase 应产出文件清单，主 Agent 据此校验子 Agent 汇报 |
+| `pendingBlockers` | Array | **条件性**：门控预检未通过时的 blocker 列表 `[{ type, message }]`，`type` 为结构化 failureType（P2-2 起跨仓 task 校验错误不再为 unknown） |
+| `fixLoopContext` | object | **条件性**：修复回路上下文（round / maxRounds / sourcePhase / affectedFiles 等） |
+| `batches` | Array | **条件性**：Phase 2 且 task-dag 声明多个 batch 时输出（P1-1），每项 `{ batchId, taskIds, agent, agentPrompt, expectedOutputs }`，逐 batch Spawn，各 batch 的 agentPrompt 已含目标仓 + task 清单 + files 白名单 |
 | `warnings` | string[] | 不阻塞的告警，转述给用户但不改变分支 |
 | `recovery` | object\|null | `{ type, command, description }`；`command` 为 null 表示转人工 |
 
@@ -31,6 +35,8 @@ node $HARNESS/dispatch.js <storyId>
 回退修复 / `blocked` 状态异常 / `terminal` 未建流、已归档、已完成。
 
 门控预检只是「预读」，裁定权在 `advance-phase.js` —— dispatch 绝不写状态。
+唯一例外（P2-1，2026-09）：预检报出 blocker 时落盘诊断类文件 `.dispatch-precheck.json`
+（非状态机文件），供 `advance-phase.js` 推进成功时对账补记 `preGateBlocked` 教训。
 
 ## advance-phase.js — 相位跃迁唯一执行者
 

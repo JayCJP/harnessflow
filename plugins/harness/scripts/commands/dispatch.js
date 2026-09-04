@@ -40,6 +40,10 @@
  *        迫使主 Agent 自己去读文件、自己判断——判断权回流即失控。
  *   - 门控预检只是"预读"，真正的裁定权在 advance-phase.js。dispatch.js 的门控结论仅用于
  *     决定"该干活还是该修复"，绝不代替 advance-phase.js 写状态。
+ *   - P2-1（2026-09）: 预检报出 blocker 时会落盘诊断类文件 .dispatch-precheck.json（仅记录
+ *     预检快照，不是状态）。这是对"零写权限"的唯一且有意的例外 —— 状态机文件
+ *     (e2e-state.json / dev-pass.json) 仍然零写；该文件供 advance-phase.js 推进成功时
+ *     对账补记 preGateBlocked 教训，否则「预检越好用，飞轮越饿」(D3)。
  *   - fix_loop 分支会一并给出回退后要 Spawn 的 Phase 2 Agent 与 prompt，否则主 Agent 执行完
  *     --fix-loop 只能自行判断该 Spawn 谁 —— 判断权回流即失控。
  *   - agentPrompt 统一由 services/prompt-builder.js 构造，与 advance-phase.js 共用同一信源。
@@ -70,8 +74,26 @@ const promptBuilder = require('../services/prompt-builder')
 
 const MAX_PHASE = PHASE_SLUGS.length - 1
 
-/** 插件根目录下 advance-phase.js 的调用形式（文档中统一用 ${CLAUDE_PLUGIN_ROOT}） */
-const ADVANCE_CMD = 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/advance-phase.js'
+/**
+ * 插件根目录（P0-3: 运行时由脚本自身位置动态推导，不依赖 ${CLAUDE_PLUGIN_ROOT} 占位符展开，
+ * 主 Agent 在任何 cwd 下拿到的命令都可直接执行，PowerShell 不再需要手工改写绝对路径）
+ */
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..')
+
+/**
+ * 生成插件内命令脚本的绝对调用形式
+ * 动态解析插件根后拼接脚本路径；Windows 路径含空格时由双引号保护；
+ * 用正斜杠形式输出 —— markdown 渲染层会把 `\.` 当转义吃掉导致显示缺分隔符（2026-09 实跑反馈），
+ * 正斜杠在任何渲染层原样保留，且 PowerShell / node 均兼容
+ * @param {string} scriptName - scripts/commands/ 下的脚本文件名
+ * @returns {string} 形如 node "<绝对路径>" 的可执行命令
+ */
+function pluginCmd (scriptName) {
+  return `node "${path.join(PLUGIN_ROOT, 'scripts', 'commands', scriptName).replace(/\\/g, '/')}"`
+}
+
+/** advance-phase.js 的绝对调用形式（动态解析，无未展开占位符） */
+const ADVANCE_CMD = pluginCmd('advance-phase.js')
 
 /**
  * 构造调度结果骨架
@@ -160,7 +182,7 @@ function dispatch (storyId) {
       warnings: [`工作流尚未创建: .codebuddy/plans/${storyId}/e2e-state.json 不存在`],
       recovery: {
         type: 'not_started',
-        command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/harness-workflow.js start ' + storyId + ' "<标题>"',
+        command: pluginCmd('harness-workflow.js') + ' start ' + storyId + ' "<标题>"',
         description: '先创建工作流，再重新执行 dispatch.js'
       }
     }
@@ -198,7 +220,7 @@ function dispatch (storyId) {
     )
     result.recovery = {
       type: 'archived',
-      command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' restore',
+      command: pluginCmd('archive-story.js') + ' ' + storyId + ' restore',
       description: '如需继续该 Story，先执行复档'
     }
     return result
@@ -210,7 +232,7 @@ function dispatch (storyId) {
     result.warnings.push('工作流已完成全部 Phase。')
     result.recovery = {
       type: 'completed',
-      command: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js ' + storyId + ' archive',
+      command: pluginCmd('archive-story.js') + ' ' + storyId + ' archive',
       description: '可执行归档收尾'
     }
     return result
@@ -251,12 +273,15 @@ function dispatch (storyId) {
 
       // 回退后要干活的是 Phase 2 的开发者。此处一并给出 Agent 与 prompt，
       // 否则主 Agent 执行完 --fix-loop 只能自行判断该 Spawn 谁 —— 判断权回流即失控。
+      // P1-2: scope=incremental —— 修复场景用窄上下文（只列 fix-request 等被点名契约，
+      // 跳过 Story 背景资料与 Figma 摘要），避免重读大文件空转（D5）
       const fixAgentInfo = getPhaseAgent(2)
       if (fixAgentInfo) {
         const pb = promptBuilder.buildAgentPrompt({
           storyId,
           targetPhase: 2,
-          summaryPhase: phase
+          summaryPhase: phase,
+          scope: 'incremental'
         })
         result.nextAgent = pb.agent
         result.agentLabel = pb.agentLabel
@@ -285,6 +310,52 @@ function dispatch (storyId) {
         message: errorToString(b)
       }))
       if (pb.fixLoopContext) result.fixLoopContext = pb.fixLoopContext
+
+      // P1-1: Phase 2 且 task-dag 声明了多个 batch 时，逐 batch 输出 spawn 指令 ——
+      // 主 Agent 无需再从整份 Phase 2 prompt 里自行裁剪批次范围、手写 batch prompt（D1）。
+      // 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 白名单」。
+      if (phase === 2) {
+        const { batches } = promptBuilder.readTaskBatches(storyId)
+        if (batches.length > 1) {
+          result.batches = batches.map(b => {
+            const bpb = promptBuilder.buildAgentPrompt({
+              storyId,
+              targetPhase: 2,
+              summaryPhase: phase - 1,
+              batchId: b.batchId
+            })
+            return {
+              batchId: b.batchId,
+              taskIds: b.taskIds,
+              agent: bpb.agent,
+              agentLabel: bpb.agentLabel,
+              agentPrompt: bpb.agentPrompt,
+              expectedOutputs: bpb.expectedOutputs
+            }
+          })
+          result.instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${result.nextAgent} 并注入该 batch 的 agentPrompt（files 白名单已注入各 batch prompt），全部 batch 完成后再执行 advanceCommand`
+        }
+      }
+
+      // P2-1: 预检失败留痕 —— dispatch 预检报出的 blocker 修复后直接 advance 成功，
+      // 失败从未进入经验库（预检越好用，飞轮越饿，D3）。此处落盘诊断类文件
+      // （非状态机文件），供 advance-phase.js 推进成功时对账补记 preGateBlocked
+      if (result.pendingBlockers.length > 0) {
+        try {
+          fs.writeFileSync(
+            path.join(PLANS_DIR, storyId, '.dispatch-precheck.json'),
+            JSON.stringify({
+              storyId,
+              phase,
+              blockers: result.pendingBlockers,
+              recordedAt: new Date().toISOString()
+            }, null, 2),
+            'utf-8'
+          )
+        } catch (e) {
+          // 落盘失败不影响调度（对账退化为无记录，不补记教训）
+        }
+      }
       return result
     }
 

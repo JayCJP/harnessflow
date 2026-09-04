@@ -1093,6 +1093,19 @@ function checkTaskDagJson (storyId) {
         result.errors.push(`${prefix}: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）`)
       }
     }
+
+    // P2-3（2026-09）: 跨项目 task 强制检索证据 —— evidence.source 必须含 graphify。
+    // 门控「查产出物、不查过程」：只有真实在目标仓执行过 graphify 检索才拿得到 evidence，
+    // 对标行号引用门控；kb/grep 单独不满足（v3 裁定：只用 graphify 倒逼真执行）
+    if (task.project && task.project !== repos.primary) {
+      const ev = task.evidence
+      const sourceOk = ev && typeof ev.source === 'string' && ev.source.includes('graphify')
+      if (!sourceOk) {
+        result.errors.push(`${prefix}: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索`)
+      } else if (!ev.ref || typeof ev.ref !== 'string') {
+        result.errors.push(`${prefix}: 跨项目 task 的 evidence.ref 不能为空（填实际执行的 graphify query 或命中的文档路径）`)
+      }
+    }
   }
 
   // 检查 ID 唯一性

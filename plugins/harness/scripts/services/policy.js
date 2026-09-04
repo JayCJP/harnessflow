@@ -59,6 +59,13 @@ const {
 
 const schemaValidator = require('./schema-validator')
 
+/**
+ * advance-phase.js 的绝对调用形式（P0-3: 运行时由脚本位置动态推导，
+ * resolution / fixLoopHint 中的命令主 Agent 可直接执行，无需手工改绝对路径）。
+ * 正斜杠形式：规避 markdown 渲染层吃 `\.` 造成显示缺分隔符（2026-09 实跑反馈）
+ */
+const ADVANCE_CMD = `node "${path.resolve(__dirname, '..', 'commands', 'advance-phase.js').replace(/\\/g, '/')}"`
+
 // ─── 错误恢复建议表 ─────────────────────────────────────────────
 
 /**
@@ -165,6 +172,24 @@ const RECOVERY_SUGGESTIONS = {
   task_missing_line_ref: {
     level: 2,
     action: '跨项目 task（有 project 字段）的 description 必须包含行号引用（如 L123 或 line 45），便于定位代码改动点。请检查 task-dag.json 中跨项目 task 的 description 并补充行号。',
+    autoFixable: false
+  },
+  // Phase 1→2: 跨项目 task 缺少 repoPath（P2-2: 补齐 checkTaskDagJson 错误的结构化映射，杜绝 unknown）
+  task_missing_repo_path: {
+    level: 2,
+    action: '跨项目 task（project ≠ 主仓）必须指定 repoPath，否则 dev-pass 无法把改动定位到正确仓库',
+    autoFixable: false
+  },
+  // Phase 1→2: 跨项目 task 缺少 description 字段（P2-2）
+  task_missing_description: {
+    level: 2,
+    action: '跨项目 task 必须有 description 字段（含行号引用），便于开发 Agent 定位改动点',
+    autoFixable: false
+  },
+  // Phase 1→2: 跨项目 task 缺少 graphify 检索证据（P2-3: evidence 门控，只认含 graphify 的来源）
+  task_missing_evidence: {
+    level: 2,
+    action: '跨项目 task 必须提供 evidence 字段（{ source, ref }），且 source 必须含 graphify（graphify 或 both；kb/grep 单独不满足）——证明已在目标仓真实执行过 graphify 检索。ref 填实际执行的 query 或命中的文档路径',
     autoFixable: false
   },
   // Phase 1→2: acceptanceCriteria 空数组
@@ -301,14 +326,14 @@ const RECOVERY_SUGGESTIONS = {
     level: 2,
     action: '代码审查发现 BLOCKER，执行修复回路回退到 Phase 2 由前端开发工程师修复',
     autoFixable: false,
-    resolution: 'node advance-phase.js <storyId> 2 --fix-loop'
+    resolution: `${ADVANCE_CMD} <storyId> 2 --fix-loop`
   },
   // Phase 3/4 修复回路：功能测试失败 → 回退 Phase 2
   fix_loop_test_failed: {
     level: 2,
     action: '功能测试未通过，执行修复回路回退到 Phase 2 由前端开发工程师修复',
     autoFixable: false,
-    resolution: 'node advance-phase.js <storyId> 2 --fix-loop'
+    resolution: `${ADVANCE_CMD} <storyId> 2 --fix-loop`
   },
   // 修复回路耗尽：已达最大轮次（按失败源独立预算：code-review 与 test 各 2 次）
   fix_loop_exhausted: {
@@ -652,7 +677,22 @@ function checkPhase1Gate (storyId, state, result) {
       let level = 2
       let resolution = '需人工分析此错误模式'
 
-      if (lower.includes('缺少 id') && lower.includes('task')) {
+      // P2-2（2026-09）: 补齐跨项目 task 校验的结构化映射 —— 实跑中「跨项目 task
+      // 必须指定 repoPath / 必须有 description / 行号引用」等 dispatch 预检 blocker
+      // 的 failureType 全是 unknown（D4），经验库只能进「待人工补录」
+      if (lower.includes('repopath')) {
+        type = 'task_missing_repo_path'
+        resolution = '跨项目 task（project ≠ 主仓）必须指定 repoPath'
+      } else if (lower.includes('evidence')) {
+        type = 'task_missing_evidence'
+        resolution = '跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索'
+      } else if (lower.includes('description')) {
+        type = 'task_missing_description'
+        resolution = '跨项目 task 必须有 description 字段（含行号引用）'
+      } else if (lower.includes('行号引用')) {
+        type = 'task_missing_line_ref'
+        resolution = '跨项目 task 的 description 必须包含行号引用（如 L123 或 line 45）'
+      } else if (lower.includes('缺少 id') && lower.includes('task')) {
         type = 'task_missing_id'
         resolution = '为每个 task 添加唯一 id 字段'
       } else if (lower.includes('缺少 title') || lower.includes('"name"')) {
@@ -796,7 +836,7 @@ function checkPhase2Gate (storyId, state, result) {
           'lint_error',
           `${label}本次变更文件存在 lint error:\n${lint.details}`,
           2,
-          `在 ${repoRoot} 修复上述 lint error 后重新执行 advance-phase.js ${storyId} 3`
+          `在 ${repoRoot} 修复上述 lint error 后重新执行 ${ADVANCE_CMD} ${storyId} 3`
         ))
         result.passed = false
       }
@@ -812,7 +852,7 @@ function checkPhase2Gate (storyId, state, result) {
           'build_failed',
           `${label}本地编译失败（${build.command}）:\n${build.details}`,
           2,
-          `在 ${repoRoot} 执行 ${build.command} 复现并修复编译错误后重新执行 advance-phase.js ${storyId} 3`
+          `在 ${repoRoot} 执行 ${build.command} 复现并修复编译错误后重新执行 ${ADVANCE_CMD} ${storyId} 3`
         ))
         result.passed = false
       }
@@ -853,7 +893,7 @@ function checkPhase3Gate (storyId, result) {
           'code_review_blocker',
           `BLOCKER ${b.id}: ${b.title} (${b.file}${b.line ? ':' + b.line : ''})`,
           2,
-          `执行修复回路: advance-phase.js ${storyId} 2 --fix-loop`
+          `执行修复回路: ${ADVANCE_CMD} ${storyId} 2 --fix-loop`
         ))
       }
       result.passed = false
@@ -885,7 +925,7 @@ function checkPhase3Gate (storyId, result) {
       result._meta = result._meta || {}
       result._meta.fixLoopAvailable = true
       result._meta.fixLoopSource = 'phase3'
-      result._meta.fixLoopHint = `advance-phase.js ${storyId} 2 --fix-loop`
+      result._meta.fixLoopHint = `${ADVANCE_CMD} ${storyId} 2 --fix-loop`
     }
   } catch (e) {
     result.blockers.push(structuredError(
@@ -917,7 +957,7 @@ function checkPhase4Gate (storyId, result) {
       'ac_verification_failed',
       `AC ${f.id}: ${f.status}`,
       2,
-      `验收标准 ${f.id} 未通过，执行修复回路: advance-phase.js ${storyId} 2 --fix-loop`
+      `验收标准 ${f.id} 未通过，执行修复回路: ${ADVANCE_CMD} ${storyId} 2 --fix-loop`
     ))
     result.passed = false
     hasFailure = true
@@ -926,6 +966,19 @@ function checkPhase4Gate (storyId, result) {
   // unverifiable 状态 → WARNING（不阻塞，降级通过）
   for (const u of avCheck.unverifiable) {
     result.warnings.push(`AC ${u.id}: unverifiable（跨项目或环境限制，代码逻辑已验证）`)
+  }
+
+  // P2-4（2026-09）: unverifiable 占比 ≥50% → 强告警并写入推进结果 warnings。
+  // 实跑出现过 1 passed / 0 failed / 14 unverifiable 仍静默放行到部署（D12）——
+  // 环境限制（拿不到登录态）是真实的，但必须让主 Agent 与用户在 Phase 5 发布前知悉。
+  // 该 warning 会随 advance-phase.js 写入 state.gateChecks 与推进输出
+  const totalCount = Array.isArray(avCheck.results) ? avCheck.results.length : 0
+  if (totalCount > 0 && avCheck.unverifiable.length / totalCount >= 0.5) {
+    const pct = Math.round((avCheck.unverifiable.length / totalCount) * 100)
+    result.warnings.push(
+      `⚠️ [强告警] unverifiable AC 占比 ${avCheck.unverifiable.length}/${totalCount} (${pct}%) ≥ 50%: 仅 ${totalCount - avCheck.unverifiable.length} 条 AC 被实际验证。` +
+      '发布前请确认环境限制已知悉（无法登录的第三方系统等），Phase 5 发布时应向用户明示本 Story 的实际验证覆盖面'
+    )
   }
 
   // 交叉对账: code-review 里仍 open 的问题，若自称影响某条 AC，而该 AC 已判 passed → 矛盾
@@ -974,7 +1027,7 @@ function checkPhase4Gate (storyId, result) {
     result._meta = result._meta || {}
     result._meta.fixLoopAvailable = true
     result._meta.fixLoopSource = 'phase4'
-    result._meta.fixLoopHint = `advance-phase.js ${storyId} 2 --fix-loop`
+    result._meta.fixLoopHint = `${ADVANCE_CMD} ${storyId} 2 --fix-loop`
   }
 
   // open-questions 检查: Phase 4→5 提交前提醒未 resolve 的问题

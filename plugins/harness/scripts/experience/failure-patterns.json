@@ -50,9 +50,9 @@
       "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 160,
+      "occurrences": 183,
       "firstSeen": "2026-08-13T02:02:23.008Z",
-      "lastSeen": "2026-09-03T09:36:11.800Z",
+      "lastSeen": "2026-09-04T07:17:47.652Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -63,9 +63,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 1926,
+      "occurrences": 2202,
       "firstSeen": "2026-08-05T02:36:44.009Z",
-      "lastSeen": "2026-09-03T09:36:11.796Z",
+      "lastSeen": "2026-09-04T07:17:47.647Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -76,9 +76,9 @@
       "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
       "storyId": "ai-assistant-extract",
       "blockers": [],
-      "occurrences": 90,
+      "occurrences": 136,
       "firstSeen": "2026-08-24T08:15:39.905Z",
-      "lastSeen": "2026-09-03T09:36:11.764Z",
+      "lastSeen": "2026-09-04T07:17:47.606Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -109,8 +109,40 @@
       "lastSeen": "2026-09-03T09:15:51.795Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: blocking_unresolved，示例: 2 项阻塞级待确认问题未解决 (open-questions: 2)），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "bug-1138260062001211901",
+      "blockers": [
+        "2 项阻塞级待确认问题未解决 (open-questions: 2)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-04T09:50:27.107Z",
+      "lastSeen": "2026-09-04T09:50:27.107Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 4,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 3 个 blocker（类型: schema_validation_failed，示例: Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "bug-1138260062001211901",
+      "blockers": [
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-04T12:14:31.995Z",
+      "lastSeen": "2026-09-04T12:14:31.995Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.1",
-  "lastUpdated": "2026-09-03T09:36:11.800Z"
+  "lastUpdated": "2026-09-04T12:14:31.995Z"
 }

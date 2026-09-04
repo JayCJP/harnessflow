@@ -146,7 +146,8 @@ section('3. fixbugs prompt 注入')
 
 const p0 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 0 })
 ok('storyMode = fixbugs', p0.storyMode === 'fixbugs')
-ok('P0 给出 story-input.json 路径（不内联原文，优化上下文）', /story-input\.json/.test(p0.agentPrompt) && /读取 .codebuddy\/plans\/.*\/story-input\.json/.test(p0.agentPrompt))
+// P0-2: story-input.json 路径为动态解析的绝对路径（PLANS_DIR 推导），不再给相对路径
+ok('P0 给出 story-input.json 路径（不内联原文，优化上下文）', /story-input\.json/.test(p0.agentPrompt) && /读取 [A-Za-z]:[\\/].*story-input\.json/.test(p0.agentPrompt) && !/读取 \.codebuddy\/plans\//.test(p0.agentPrompt))
 ok('P0 含自行调 skill 指引', p0.agentPrompt.includes('tapd-bug-analyzer'))
 ok('P0 含「不写修复方案」', /不要写修复方案|不写修复方案|只记录事实|只记事实/.test(p0.agentPrompt))
 // expectedOutputs 是主 Agent 校验子 Agent 产出物汇报的依据，
@@ -172,8 +173,9 @@ ok('P2 含「Bug 修复说明」', p2.agentPrompt.includes('Bug 修复说明'))
 ok('P2 含 kb-query ∥ graphify 双源', /kb-query[\s\S]{0,80}graphify|graphify[\s\S]{0,80}kb-query/.test(p2.agentPrompt))
 ok('P2 修复说明指向契约文件而非原始报告', /task-dag\.json/.test(p2.agentPrompt))
 
-// v3：约束段只留 agent .md 未覆盖的 2 条，删掉的 3 条不应再出现
-ok('约束段已精简为 2 条', p2.agentConstraints.length === 2, JSON.stringify(p2.agentConstraints))
+// v3 精简为 2 条 + P3-2（2026-09）新增「检索失败必须上报」共 3 条，删掉的 3 条旧约束不应再出现
+ok('约束段为 3 条（v3 精简 2 条 + P3-2 检索失败上报）', p2.agentConstraints.length === 3, JSON.stringify(p2.agentConstraints))
+ok('P3-2 检索失败上报约束已注入', p2.agentConstraints.some(c => /检索失败必须停下上报/.test(c)))
 ok('不再重复 agent .md 已有的 advance-phase 约束', !/- 🚫 由主 Agent 调用 advance-phase/.test(p2.agentPrompt))
 
 // ════════════════════════════════════════════════════════════

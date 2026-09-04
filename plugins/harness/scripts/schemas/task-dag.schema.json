@@ -56,7 +56,25 @@
           "complexity": { "type": "string", "enum": ["low", "medium", "high"] },
           "estimate": { "type": "integer", "minimum": 1 },
           "project": { "type": ["string", "null"] },
-          "repoPath": { "type": ["string", "null"] }
+          "repoPath": { "type": ["string", "null"] },
+          "evidence": {
+            "type": "object",
+            "required": ["source", "ref"],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": ["graphify", "kb", "both", "grep"],
+                "description": "检索证据来源。枚举保留 4 值用于记录真实检索途径；跨仓 task 的门控要求 source 必须含 graphify（graphify/both 通过，kb/grep 单独不满足，v3 裁定）"
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "description": "实际执行的检索 query 或命中的文档路径"
+              }
+            },
+            "additionalProperties": false,
+            "description": "检索证据（跨仓 task 门控必填）——对标行号引用门控：查产出物、不查过程，倒逼在目标仓真实执行过 graphify 检索"
+          }
         },
         "additionalProperties": false
       }

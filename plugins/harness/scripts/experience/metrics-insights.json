@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "totalProjects": 1,
-  "totalStories": 2,
+  "totalStories": 3,
   "insights": [
     {
       "id": "INSIGHT-001",
@@ -24,16 +24,16 @@
       "targetPhase": 3,
       "type": "fix_loop_success",
       "severity": "warning",
-      "title": "Fix-loop 第 1 轮成功率 50%",
+      "title": "Fix-loop 第 1 轮成功率 67%",
       "description": "BLOCKER 修复建议的可操作性不足，导致需要多轮修复",
       "recommendation": "代码审查师在 FIX_DATA 块中给出代码级建议（含具体行号和替换方案），而非泛泛描述问题",
-      "evidence": "成功率 50%",
+      "evidence": "成功率 67%",
       "sourceProjects": [
         "userlive"
       ],
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-08-13T15:15:07.909Z",
-      "lastSeen": "2026-09-01T06:36:40.882Z"
+      "lastSeen": "2026-09-03T15:58:12.898Z"
     },
     {
       "id": "INSIGHT-003",
@@ -47,9 +47,9 @@
       "sourceProjects": [
         "userlive"
       ],
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-08-13T15:15:07.909Z",
-      "lastSeen": "2026-09-01T06:36:40.882Z"
+      "lastSeen": "2026-09-03T15:58:12.898Z"
     },
     {
       "id": "INSIGHT-001",
@@ -72,19 +72,51 @@
       "targetPhase": 0,
       "type": "gate_quality",
       "severity": "warning",
-      "title": "门控一次通过率 63%",
-      "description": "38% 的 Phase 推进需要多次门控尝试",
+      "title": "门控一次通过率 61%",
+      "description": "39% 的 Phase 推进需要多次门控尝试",
       "recommendation": "需求分析阶段确保 AC 格式正确（id/description/criteria 非空）、open-questions 全部 resolved、task-dag 使用 title 而非 name",
-      "evidence": "通过率 63% (基于 4 个 Story)",
+      "evidence": "通过率 61% (基于 4 个 Story)",
+      "sourceProjects": [
+        "userlive"
+      ],
+      "occurrences": 2,
+      "firstSeen": "2026-09-01T06:36:40.882Z",
+      "lastSeen": "2026-09-03T15:58:12.898Z"
+    },
+    {
+      "id": "INSIGHT-001",
+      "targetPhase": 3,
+      "type": "bottleneck",
+      "severity": "warning",
+      "title": "Phase 4(功能测试)平均耗时 32min，最长 106min",
+      "description": "功能测试阶段耗时偏长，可能影响整体交付效率",
+      "recommendation": "测试工程师确保 AC 100% 覆盖，evidence 数组至少 1 条",
+      "evidence": "4 个 Story 统计: avg=32min, median=11min, max=106min",
       "sourceProjects": [
         "userlive"
       ],
       "occurrences": 1,
-      "firstSeen": "2026-09-01T06:36:40.882Z",
-      "lastSeen": "2026-09-01T06:36:40.882Z"
+      "firstSeen": "2026-09-03T15:58:12.898Z",
+      "lastSeen": "2026-09-03T15:58:12.898Z"
+    },
+    {
+      "id": "INSIGHT-002",
+      "targetPhase": 5,
+      "type": "bottleneck",
+      "severity": "warning",
+      "title": "Phase 6(知识库更新)平均耗时 49min，最长 145min",
+      "description": "知识库更新阶段耗时偏长，可能影响整体交付效率",
+      "recommendation": "知识库更新时保留手工批注",
+      "evidence": "3 个 Story 统计: avg=49min, median=1min, max=145min",
+      "sourceProjects": [
+        "userlive"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-03T15:58:12.898Z",
+      "lastSeen": "2026-09-03T15:58:12.898Z"
     }
   ],
-  "lastUpdated": "2026-09-01T06:36:40.882Z",
+  "lastUpdated": "2026-09-03T15:58:12.898Z",
   "_knownProjects": [
     "userlive"
   ]
