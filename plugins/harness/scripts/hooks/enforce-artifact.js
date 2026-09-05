@@ -44,6 +44,7 @@ const {
 } = require('../lib/state')
 
 const trace = require('../lib/trace')
+const debugLog = require('../lib/debug-log')
 
 // ─── Hook 主逻辑 ─────────────────────────────────────────────────
 
@@ -171,6 +172,15 @@ if (blockers.length > 0) {
       rootCause: `Agent 试图跳 Phase 将状态推进到 Phase ${targetPhase}，但前置产出物缺失: ${blockers.join('; ')}`,
       resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.js ${storyId} ${targetPhase} 统一推进`
     }
+  })
+
+  // debug 载荷层：拒绝详情留痕（含完整缺失清单）
+  debugLog.record(storyId, 'hook_decision', {
+    hook: 'enforce-artifact.js',
+    decision: 'deny',
+    reason: 'phase_skip_attempt',
+    targetPhase,
+    blockers
   })
 
   const output = {

@@ -17,7 +17,6 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { execFileSync } = require('child_process')
 
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
@@ -32,6 +31,7 @@ fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const { buildAgentPrompt } = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 const { createWorkflow } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
+const { runGateCheck } = require(path.join(SCRIPTS_DIR, 'services/policy'))
 
 let pass = 0
 const failures = []
@@ -65,14 +65,14 @@ function readReport (id) {
   return fs.readFileSync(path.join(storyDir(id), '测试需求_bug分析报告.md'), 'utf-8')
 }
 
-/** 跑门控脚本，退出码非 0 也要拿到输出（阻断时会 exit 1） */
+/**
+ * 跑生效门控（policy.js runGateCheck，与 advance-phase.js 调用同一入口）
+ * @param {string} id - Story ID
+ * @param {number} phase - 来源 Phase（检查 phase → phase+1 的推进）
+ * @returns {Object} { passed, blockers, warnings, recoveries, _meta }
+ */
 function gate (id, phase) {
-  try {
-    return execFileSync('node', [path.join(SCRIPTS_DIR, 'services/validate-phase-gate.js'), id, String(phase)],
-      { encoding: 'utf-8', env: process.env })
-  } catch (e) {
-    return (e.stdout || '') + (e.stderr || '')
-  }
+  return runGateCheck(id, phase, state.readStateFile(id))
 }
 
 const COMPLIANT_REPORT = `# 测试需求 Bug 分析报告
@@ -123,23 +123,29 @@ ok('无 prototype-analysis.md 存根', !files1.some(f => f.includes('prototype-a
 ok('getStoryMode = fixbugs', state.getStoryMode('FIX-1') === 'fixbugs')
 
 // ════════════════════════════════════════════════════════════
-section('2. fixbugs Phase 0->1 门控')
+section('2. fixbugs Phase 0->1 门控（policy.js 生效路径）')
 
-const g1 = gate('FIX-1', 1)
-ok('缺 Bug 报告 -> 阻断', /bug分析报告/i.test(g1) && /阻断|BLOCK|❌/.test(g1))
-ok('不再检查原型文档', !/prototype-analysis/.test(g1))
+// 文档化行为（references/phases/phase-0.md）：Bug 报告存在性不设门控，
+// 缺报告的后果是后续 Phase 拿不到事实（由 expectedOutputs 要求产出），而非被阻断
+const g1 = gate('FIX-1', 0)
+ok('缺 Bug 报告 -> 不阻断（无 bug 报告相关 blocker）',
+  !g1.blockers.some(b => /bug分析报告/i.test(typeof b === 'string' ? b : (b.message || ''))))
+ok('门控不检查原型文档',
+  !g1.blockers.some(b => /prototype-analysis/i.test(typeof b === 'string' ? b : (b.message || ''))))
 
 writeReport('FIX-1', COMPLIANT_REPORT)
-const g2 = gate('FIX-1', 1)
-ok('合规报告 -> 无 Bug 阻断', !/未在 Story 目录找到/.test(g2))
-ok('合规报告 -> 无越界警告', !/修复建议|解决方案|测试验证/.test(g2))
+const g2 = gate('FIX-1', 0)
+ok('合规报告 -> 无越界警告',
+  !g2.warnings.some(w => /修复建议|解决方案|测试验证/.test(w)))
 
 // 越界内容必须写成标题行 —— 门控只扫标题，避免正文里的根因描述误报
 writeReport('FIX-1', readReport('FIX-1') +
   '\n#### 修复建议\n把初始化移到 created。\n\n#### 测试验证\n回归首页。\n')
-const g3 = gate('FIX-1', 1)
-ok('越界标题 -> 出警告', /修复建议/.test(g3) && /警告|WARN|⚠/.test(g3))
-ok('越界仅警告，不阻断', !/未在 Story 目录找到/.test(g3))
+const g3 = gate('FIX-1', 0)
+ok('越界标题 -> 出警告（warning 级）',
+  g3.warnings.some(w => /修复建议/.test(w) && /只记录事实|修复设计属于/.test(w)))
+ok('越界仅警告，不阻断',
+  !g3.blockers.some(b => /bug分析报告|修复建议/i.test(typeof b === 'string' ? b : (b.message || ''))))
 
 // ════════════════════════════════════════════════════════════
 section('3. fixbugs prompt 注入')
@@ -192,7 +198,7 @@ const rp0 = buildAgentPrompt({ storyId: 'RUN-1', targetPhase: 0 })
 ok('run P0 不含 tapd-bug-analyzer', !rp0.agentPrompt.includes('tapd-bug-analyzer'))
 const rp2 = buildAgentPrompt({ storyId: 'RUN-1', targetPhase: 2 })
 ok('run P2 不含 Bug 修复说明', !rp2.agentPrompt.includes('Bug 修复说明'))
-ok('run 门控无 Bug 报告检查', !/bug分析报告/i.test(gate('RUN-1', 1)))
+ok('run 门控无 Bug 报告检查', !/bug分析报告/i.test(JSON.stringify(gate('RUN-1', 0))))
 
 // ════════════════════════════════════════════════════════════
 section('5. 原型按需判定')

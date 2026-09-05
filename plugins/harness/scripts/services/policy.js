@@ -54,10 +54,13 @@ const {
   getRepoRoot,
   structuredError,
   errorToString,
-  errorToType
+  errorToType,
+  getStoryMode,
+  findBugAnalysisReports
 } = require('../lib/state')
 
 const schemaValidator = require('./schema-validator')
+const debugLog = require('../lib/debug-log')
 
 /**
  * advance-phase.js 的绝对调用形式（P0-3: 运行时由脚本位置动态推导，
@@ -591,6 +594,9 @@ function checkPhase0Gate (storyId, state, result) {
 
   // PRD 功能点 → AC 覆盖率校验（run 模式）
   checkPrdCoverage(storyId, result)
+
+  // Bug 分析报告越界章节扫描（fixbugs 模式，warning 级；存在性不设门控）
+  checkBugReportScope(storyId, result)
 }
 
 /**
@@ -662,6 +668,56 @@ function checkPrdCoverage (storyId, result) {
       ))
       result.passed = false
     }
+  }
+}
+
+/**
+ * Phase 0→1（fixbugs 模式）: Bug 分析报告越界章节扫描（warning 级）
+ *
+ * 设计边界（见 references/phases/phase-0.md「Bug 分析报告没有门控」）:
+ *   - 报告**存在性不设门控** —— 缺报告的后果是后续 Phase 拿不到 Bug 事实，
+ *     由 prompt-builder 的 expectedOutputs 要求 Agent 产出，而非程序阻断。
+ *   - 仅当报告存在时，扫描**标题行**是否含修复方案类章节 —— 修复设计属于
+ *     Phase 2 开发工程师，报告只记录事实。
+ *   - 关键词匹配是启发式的（根因段落出现"建议"类措辞会误报），只警告不阻断；
+ *     正文不扫描，"该 Bug 在 xx 版本已修复"这类正常表述不会命中。
+ *
+ * 2026-09 自已删除的废弃脚本 validate-phase-gate.js 迁入（该脚本曾对报告
+ * 存在性设 blocker，与文档化行为矛盾，清理时一并纠正）。
+ *
+ * @param {string} storyId - Story ID
+ * @param {Object} result - runGateCheck 的累积结果，warning 写入 result.warnings
+ * @returns {void}
+ */
+function checkBugReportScope (storyId, result) {
+  if (getStoryMode(storyId) !== 'fixbugs') return
+
+  const found = findBugAnalysisReports(storyId)
+  if (!found.exists) return
+
+  // 只扫标题行 —— 独立的「修复建议 / 解决方案」章节才是越界信号
+  const SOLUTION_HEADINGS = /^#{1,6}\s*.*(修复建议|修复方案|解决方案|改造建议|优化建议|测试验证)/
+  const hints = []
+  for (const p of found.paths) {
+    let raw
+    try {
+      raw = fs.readFileSync(p, 'utf-8')
+    } catch (e) {
+      continue
+    }
+    const name = path.basename(p)
+    for (const line of raw.split(/\r?\n/)) {
+      if (SOLUTION_HEADINGS.test(line.trim())) {
+        hints.push(`${name}: ${line.trim()}`)
+      }
+    }
+  }
+
+  if (hints.length > 0) {
+    result.warnings.push(
+      `Bug 分析报告疑似包含修复方案章节（应只记录事实，修复设计属于开发工程师）:\n` +
+      hints.map(h => `  - ${h}`).join('\n')
+    )
   }
 }
 
@@ -829,6 +885,14 @@ function checkPhase2Gate (storyId, state, result) {
     const lintTargets = changed.filter(f => /\.(js|jsx|ts|tsx|vue)$/i.test(f))
     if (lintTargets.length > 0) {
       const lint = runIncrementalLint(repoRoot, lintTargets)
+      // debug 载荷层：lint 原始结果留痕（命令输出只携带前 10 行 error，此处保留全量细节）
+      debugLog.record(storyId, 'method_output', {
+        method: 'runIncrementalLint',
+        repo: name || 'primary',
+        repoRoot,
+        files: lintTargets,
+        result: lint
+      }, { source: 'policy.js', phase: 2 })
       if (lint.skipped) {
         result.warnings.push(`${label}未找到可用的 lint 工具，已跳过增量 lint 校验`)
       } else if (lint.hasErrors) {
@@ -845,6 +909,13 @@ function checkPhase2Gate (storyId, state, result) {
     // 2. 编译校验: 默认关闭，仅当显式设 HARNESS_RUN_BUILD=1 时执行
     if (process.env.HARNESS_RUN_BUILD === '1') {
       const build = runBuildCheck(repoRoot)
+      // debug 载荷层：编译结果留痕（含 command 与末尾错误细节）
+      debugLog.record(storyId, 'method_output', {
+        method: 'runBuildCheck',
+        repo: name || 'primary',
+        repoRoot,
+        result: build
+      }, { source: 'policy.js', phase: 2 })
       if (build.skipped) {
         result.warnings.push(`${label}package.json 未找到可用的 build script，已跳过编译校验`)
       } else if (!build.ok) {
@@ -1335,6 +1406,12 @@ function attemptAutoRecovery (storyId, recoveries) {
       details.push(`❌ 自动修复失败: ${r.suggestion.action} - ${e.message}`)
     }
   }
+
+  // debug 载荷层：自动恢复过程留痕（每项尝试的成功/失败明细）
+  debugLog.record(storyId, 'method_output', {
+    method: 'attemptAutoRecovery',
+    result: { fixed: fixedCount > 0, fixedCount, details }
+  }, { source: 'policy.js' })
 
   return { fixed: fixedCount > 0, fixedCount, details }
 }

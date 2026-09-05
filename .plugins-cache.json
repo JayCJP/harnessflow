@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1788427352036,
+  "createdAt": 1788514871386,
   "plugins": [
     {
       "name": "harness",
@@ -33,27 +33,27 @@
       "agents": [
         {
           "name": "code-reviewer",
-          "description": "Frontend code quality reviewer covering Vue/React/MiniProgram. Combines project coding standards, ESLint rules, and knowledge base best practices for static incremental code review. Outputs graded issue list (BLOCKER/WARNING/SUGGESTION). Review only, no code changes.",
+          "description": "Phase 3 代码审查。对本 Story 的增量代码变更（git diff）做静态审查，产出分级问题清单 code-review.json；存在 fix-request.json 时做修复回路增量复查。只审查，不改代码。",
           "path": "agents\\代码审查师.md"
         },
         {
           "name": "task-planner",
-          "description": "Decompose technical plans into parallelizable task DAGs. Orchestrate execution order, identify file dependencies and conflict risks. Support Fork-Join parallel mode, dispatch independent tasks to multiple frontend developers.",
+          "description": "Phase 1 任务规划。读取 Phase 0 产出物，拆解为可并行的任务 DAG，列全待修改文件，产出 task-dag.md / task-dag.json（有设计稿时另产 figma-frame-inventory.json）。",
           "path": "agents\\任务规划师.md"
         },
         {
           "name": "frontend-developer",
-          "description": "Senior frontend engineer skilled in Web/H5/MiniProgram multi-platform development across Vue/React/MiniProgram frameworks. Receives dev tasks from task planner, writes code following project standards, collaborates with test engineer for verification.",
+          "description": "Phase 2 代码开发。按 task-dag.json 的批次实现分配到的单个任务（含 Bug 修复与审查/测试回退的修复任务），产出代码变更并交接测试工程师。",
           "path": "agents\\前端开发工程师.md"
         },
         {
           "name": "release-assistant",
-          "description": "Handles Git commits, knowledge base updates, and cloud deployment. After receiving test engineer approval, commits code, updates knowledge base, triggers cloud build and release via devops MCP, creates Merge Requests. No local npm build.",
+          "description": "Phase 5/6/7 发布。提交开发分支并创建 MR（Phase 5）、调 kb-update 增量更新知识库（Phase 6）、通过 devops MCP 触发云端构建部署并回报构建号（Phase 7）。不做本地 npm build。",
           "path": "agents\\发布助手.md"
         },
         {
           "name": "test-engineer",
-          "description": "Senior frontend QA architect. Designs test cases, validates APIs, reviews code, and verifies fixes in Agent Team. Ensures new features and fixes work correctly without regressions. Supports Playwright MCP automated verification.",
+          "description": "Phase 4 功能测试。逐条验证 acceptance-criteria.json 中的每条 AC 是否通过（支持 Playwright MCP 实跑），产出 test-report.md 与 acceptance-verification.json。只验证，不改代码。",
           "path": "agents\\测试工程师.md"
         },
         {

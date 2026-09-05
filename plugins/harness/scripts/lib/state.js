@@ -15,7 +15,7 @@
  * 使用场景:
  *   - 被 hooks/ 复用（enforce-dev-pass / enforce-artifact / session-start / session-stop）:
  *     读 dev-pass 判断 src/ 编辑是否放行、读 e2e-state 判断是否跳 Phase
- *   - 被 services/ 复用（validate-phase-gate / validate-contracts / policy / schema-validator /
+ *   - 被 services/ 复用（validate-contracts / policy / schema-validator /
  *     prompt-builder / context-refresh / experience）: 做门控校验、契约校验、产出物清单与 prompt 组装
  *   - 被 commands/ 复用（create-workflow / advance-phase / dispatch / archive-story / harness-workflow）:
  *     做状态流转、dev-pass 生命周期管理、Story 目录创建与清理
@@ -35,6 +35,9 @@
 
 const fs = require('fs')
 const path = require('path')
+// debug-log 对本模块为惰性 require（见 lib/debug-log.js 头注释），
+// 此处顶层 require 不会形成加载期循环依赖
+const debugLog = require('./debug-log')
 
 // ─── 路径常量 ──────────────────────────────────────────────────
 
@@ -476,6 +479,26 @@ function readStateFile (storyId) {
 function writeStateFile (storyId, state) {
   ensureStoryDir(storyId)
   const filePath = path.join(getStoryDir(storyId), 'e2e-state.json')
+
+  // debug 载荷层：记录变更前后 diff + 变更后全量快照（供 debug-replay 重建任意时刻状态）。
+  // updatedAt 每次写入必变、无信息量，不进 diff。record 静默失败不影响状态写入。
+  let before = null
+  try {
+    if (fs.existsSync(filePath)) before = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch (e) { before = null }
+  const diff = {}
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(state || {})])
+  for (const k of keys) {
+    if (k === 'updatedAt') continue
+    if (JSON.stringify(before ? before[k] : undefined) !== JSON.stringify(state ? state[k] : undefined)) {
+      diff[k] = { from: before ? before[k] : undefined, to: state ? state[k] : undefined }
+    }
+  }
+  debugLog.record(storyId, 'state_change', { diff, after: state }, {
+    source: 'state.js',
+    phase: state && typeof state.phase === 'number' ? state.phase : null
+  })
+
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8')
 }
 
@@ -623,8 +646,8 @@ function getStoryMode (storyId) {
  *
  * 历史问题: `hasFigmaDesign` 只来自 `--figma` CLI flag，而唯一入口
  * `harness-workflow.js` 调 createWorkflow 时该参数硬编码 false，导致三道
- * Figma 门控（validate-phase-gate.js 的 hasFigmaFrameInventoryIfDesign /
- * hasFigmaMapIfDesign / task figmaNodeId 校验）在正常流程下永远不触发。
+ * Figma 门控（frame 清单完整性 / figma 映射 / task figmaNodeId 校验 ——
+ * 时在 validate-phase-gate.js，现由 policy.js 承担）在正常流程下永远不触发。
  *
  * 现以 story-input.json 的 `sources.figmaUrls` 为信源自动推导，`--figma`
  * 降级为手工覆盖开关（无 story-input.json 时仍可强制开启）。

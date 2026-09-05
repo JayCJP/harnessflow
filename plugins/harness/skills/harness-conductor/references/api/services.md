@@ -1,4 +1,4 @@
-# services/ — 服务层 7 个脚本（AI 不直接调用）
+# services/ — 服务层 6 个脚本（AI 不直接调用）
 
 > 根路径：`${CLAUDE_PLUGIN_ROOT}/scripts/services/`
 > 这些脚本被 `commands/` 内部 require。**读本文件的场景是「要改行为，得知道改哪个文件」**，
@@ -97,9 +97,7 @@ Ajv 来自 `vendor/ajv.bundle.js`（6 系，错误位置字段是 `dataPath`）�
 `node validate-contracts.js <storyId>` 人工诊断用，检查 AC / task-dag / verification 等
 契约文件的完整性。
 
-## validate-phase-gate.js — ⚠️ 已废弃
-
-**不在生效路径上**，仅作人工诊断保留。生效门控是 `policy.js`。
-历史遗留：曾有过「两套门控」，真正被 `advance-phase.js` 调用的一直是 `policy.js`；
-读到旧文档说「`validate-phase-gate.js` 在 fixbugs 模式下额外检查 X」时，
-去 `policy.js` 确认 X 是否真的还在生效。
+> 历史遗留说明：曾存在第二套门控脚本 `validate-phase-gate.js`（已删除，2026-09）。
+> 它从未被 `advance-phase.js` 调用（生效门控一直是 `policy.js`），却被 session-start
+> 与旧测试误用作预言机，且持有与文档化行为矛盾的报告存在性 blocker。
+> 其中有价值的「Bug 报告越界章节扫描」已迁入 `policy.js:checkBugReportScope`（warning 级）。

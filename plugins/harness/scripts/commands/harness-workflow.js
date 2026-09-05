@@ -53,6 +53,7 @@ const fs = require('fs')
 const path = require('path')
 const { ensureReposJson, readStateFile, loadRepos, PROJECT_ROOT, PLANS_DIR } = require('../lib/state')
 const { createWorkflow, precheckStoryInput, takeFlagValue } = require('./create-workflow')
+const debugLog = require('../lib/debug-log')
 
 // ─── 路径常量 ──────────────────────────────────────────────────
 // PROJECT_ROOT / PLANS_DIR 单一信源: lib/state.js（含 CLAUDE_PROJECT_DIR 跨宿主回退）
@@ -152,6 +153,9 @@ function cmdStart(storyId, title, mode, opts = {}) {
   // 检查是否已有激活的 harness
   const existing = readFlag()
   if (existing && existing.active) {
+    debugLog.record(existing.storyId, 'script_output', {
+      ok: false, rejected: 'already_active', current: existing
+    }, { source: 'harness-workflow.js start' })
     console.log(JSON.stringify({
       ok: false,
       message: `⚠️ Harness 模式已激活 (storyId: ${existing.storyId} "${existing.title}")，请先执行 /harness end 结束当前工作流`,
@@ -198,6 +202,15 @@ function cmdStart(storyId, title, mode, opts = {}) {
     data.e2eStateError = e.message
   }
 
+  debugLog.record(id, 'script_output', {
+    ok: true,
+    command: 'start',
+    mode: workflowMode,
+    title: name,
+    e2eStateCreated: data.e2eStateCreated !== false,
+    workflowResult
+  }, { source: 'harness-workflow.js start', phase: data.phase != null ? data.phase : 0 })
+
   console.log(JSON.stringify({
     ok: true,
     message: `✅ Harness 模式已激活\n   Story: ${id} "${name}"\n   模式: ${workflowMode}${workflowMode === 'fixbugs' ? ' (Bug 修复，免原型文档)' : ''}\n   Phase: 0 (需求分析)\n   标记文件: .codebuddy/plans/.harness-active` +
@@ -230,6 +243,10 @@ function cmdEnd() {
 
   deleteFlag()
 
+  debugLog.record(existing.storyId, 'script_output', {
+    ok: true, command: 'end', summary
+  }, { source: 'harness-workflow.js end' })
+
   console.log(JSON.stringify({
     ok: true,
     message: `✅ Harness 模式已关闭\n   Story: ${existing.storyId} "${existing.title}"\n   标记文件已删除，src/ 编辑恢复正常`,
@@ -254,6 +271,9 @@ function cmdStatus() {
     const phase = (state && typeof state.phase === 'number') ? state.phase : 0
     // repos 从 story 级 repos.json 读取
     const repos = loadRepos(existing.storyId)
+    debugLog.record(existing.storyId, 'script_output', {
+      ok: true, command: 'status', active: true, phase, storyId: existing.storyId
+    }, { source: 'harness-workflow.js status', phase })
     console.log(JSON.stringify({
       active: true,
       message: `🔴 Harness 模式已激活\n   Story: ${existing.storyId} "${existing.title}"\n   激活时间: ${existing.activatedAt}\n   Phase: ${phase}\n   主仓库: ${repos.primary}\n   涉及仓库: ${Object.keys(repos.repos).join(', ')}\n   src/ 编辑需要 dev-pass`,

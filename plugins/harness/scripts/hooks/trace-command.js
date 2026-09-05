@@ -35,6 +35,7 @@
  */
 const fs = require('fs')
 const path = require('path')
+const debugLog = require('../lib/debug-log')
 
 // 读取 stdin 数据
 const chunks = []
@@ -60,8 +61,10 @@ process.stdin.on('end', () => {
   const toolName = event.tool_name || ''
   const cmd = event.tool_input?.command || ''
 
-  // 1. harness 命令（advance-phase / harness-workflow / archive-story）
-  const isHarnessCmd = cmd.includes('advance-phase') || cmd.includes('harness-workflow') || cmd.includes('archive-story')
+  // 1. harness 命令（dispatch / advance-phase / create-workflow / harness-workflow / archive-story）
+  //    2026-09 修复：此前漏了 dispatch 与 create-workflow——三步循环的 Step 1 与建流入口反而不被记录
+  const isHarnessCmd = cmd.includes('dispatch') || cmd.includes('advance-phase') ||
+    cmd.includes('create-workflow') || cmd.includes('harness-workflow') || cmd.includes('archive-story')
   // 2. Skill 调用（CodeBuddy 中 tool_name 为 Skill，input 里带 skill 名）
   const isSkill = toolName === 'Skill' || toolName === 'use_skill'
   // 3. MCP 调用（tool_name 形如 mcp__<server>__<tool>）
@@ -127,6 +130,26 @@ process.stdin.on('end', () => {
           })
         }
         fs.appendFileSync(tracePath, entry + '\n')
+
+        // debug 载荷层：Skill / MCP 调用的输入与返回（宿主 PostToolUse 提供 tool_response
+        // 时全量留痕，缺失时标注 responseAvailable=false）。
+        // harness 命令不在此记录 script_output —— 命令脚本自身的输出口已全量留痕，
+        // 此处再记即重复计费。
+        if (isSkill || isMcp) {
+          const resp = event.tool_response != null ? event.tool_response
+            : (event.tool_result != null ? event.tool_result
+              : (event.response != null ? event.response : null))
+          debugLog.record(storyId, 'agent_report', {
+            tool: toolName,
+            toolClass: isSkill ? 'skill' : 'mcp',
+            input: event.tool_input || {},
+            response: resp,
+            responseAvailable: resp != null
+          }, {
+            phase: state.phase != null ? state.phase : null,
+            source: 'trace-command.js'
+          })
+        }
         break
       }
     }

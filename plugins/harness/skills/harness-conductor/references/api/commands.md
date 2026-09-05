@@ -123,8 +123,12 @@ node $HARNESS/archive-story.js <storyId> status
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/harness-audit.js        # 工作流健康审计
 node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/metrics-aggregator.js   # 指标聚合
+node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/debug-replay.js <storyId> [--phase N] [--kind X] [--round N] [--verbose] [--card [seq]]
+                                                                  # 全流程调试日志回放（debug.jsonl 载荷层）
 ```
 
 `harness-audit.js` 检查 `settings.json` / `e2e-state` / 产出物完整性 —— 排查「流程行为不符预期」
 时先跑它。`metrics-aggregator.js` 在 Phase 7 完成时由 `advance-phase.js` 自动触发一次，
-也可手动执行做跨 Story 统计。
+也可手动执行做跨 Story 统计。`debug-replay.js` 回放一次 Story 运行的全量输出
+（每步 dispatch/advance 输出、门控 blockers 原文、hook 拒绝详情、agentPrompt 全文），
+按 state_change 自动分段；`--card` 重建任意历史时刻的状态摘要。

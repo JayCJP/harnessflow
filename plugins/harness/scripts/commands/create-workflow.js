@@ -73,6 +73,7 @@ const {
   DEFAULT_MAX_TEST_FIX_ROUNDS
 } = require('../lib/state')
 const { validateFile } = require('../services/schema-validator')
+const debugLog = require('../lib/debug-log')
 
 /**
  * 摘取 `--flag=<value>` / `--flag <value>` 两种形式的 flag 值
@@ -448,6 +449,7 @@ if (require.main === module) {
       process.exit(1)
     }
     const refreshResult = refreshStoryInput(cliStoryId, cliHasFigma)
+    debugLog.record(cliStoryId, 'script_output', refreshResult, { source: 'create-workflow.js --refresh-input' })
     console.log(JSON.stringify(refreshResult, null, 2))
     process.exit(refreshResult.success ? 0 : 1)
   }
@@ -472,6 +474,11 @@ if (require.main === module) {
   const result = createWorkflow(cliStoryId, cliTitle, cliBypass, cliHasFigma, cliMode, {
     inputFile: cliInput,
     modeExplicit: Boolean(modeArg)
+  })
+  // debug 载荷层：成功与失败路径都留痕（失败建流同样是回顾分析的关键素材）
+  debugLog.record(cliStoryId, 'script_output', result, {
+    source: 'create-workflow.js',
+    phase: result.phase != null ? result.phase : null
   })
   if (result.success) {
     console.log(JSON.stringify(result, null, 2))

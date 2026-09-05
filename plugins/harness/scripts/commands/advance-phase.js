@@ -85,9 +85,30 @@ const {
 
 const policy = require('../services/policy')
 const trace = require('../lib/trace')
+const debugLog = require('../lib/debug-log')
 const experience = require('../services/experience')
 const contextRefresh = require('../services/context-refresh')
 const promptBuilder = require('../services/prompt-builder')
+
+/** 脚本启动时刻（emit 计算 command 总耗时用） */
+const T0 = Date.now()
+
+/**
+ * 统一输出口：console.log JSON + debug 载荷层全量留痕（供流程回顾分析）。
+ * debug 记录失败静默吞掉，绝不影响命令输出与退出码。
+ * @param {Object} o - 输出对象（phase 取 o.toPhase ?? o.phase）
+ */
+function emit (o) {
+  try {
+    const p = o && o.toPhase != null ? o.toPhase : (o && o.phase != null ? o.phase : null)
+    debugLog.record(storyId, 'script_output', o, {
+      source: 'advance-phase.js',
+      phase: p,
+      durationMs: Date.now() - T0
+    })
+  } catch (e) { /* debug 记录失败不影响输出 */ }
+  console.log(JSON.stringify(o, null, 2))
+}
 
 /**
  * advance-phase.js 自身的绝对调用形式（P0-3: 运行时由脚本位置动态推导，
@@ -141,10 +162,10 @@ if (numericArgs.length > 0) {
 }
 
 if (!storyId || targetPhase === null) {
-  console.log(JSON.stringify({
+  emit({
     error: '用法: node advance-phase.js <storyId> <phase> [--renew-pass] [--lint-fix] [--auto-fix] [--rollback] [--fix-loop]',
     example: '  node advance-phase.js STORY-002 2\n  node advance-phase.js STORY-002 1 --rollback\n  node advance-phase.js STORY-002 2 --fix-loop'
-  }, null, 2))
+  })
   process.exit(1)
 }
 
@@ -154,7 +175,7 @@ if (!storyId || targetPhase === null) {
 
 const state = readStateFile(storyId)
 if (!state || state._parseError) {
-  console.log(JSON.stringify({ error: state?._parseError || 'e2e-state.json 不存在', storyId }, null, 2))
+  emit({ error: state?._parseError || 'e2e-state.json 不存在', storyId })
   process.exit(1)
 }
 
@@ -165,14 +186,14 @@ if (!state || state._parseError) {
 if (renewFlag && targetPhase === 2) {
   const pass = issueDevPass(storyId, DEV_PASS_TTL)
   if (!pass) {
-    console.log(JSON.stringify({ error: '签发 dev-pass 失败' }, null, 2))
+    emit({ error: '签发 dev-pass 失败' })
     process.exit(1)
   }
   trace.tracePhaseTransition(storyId, 2, 2)
-  console.log(JSON.stringify({
+  emit({
     success: true, storyId, phase: 2,
     pass: { expiresAt: pass.expiresAt, allowedPaths: pass.allowedPaths.length + ' files', source: pass.pathSource }
-  }, null, 2))
+  })
   process.exit(0)
 }
 
@@ -194,12 +215,12 @@ const currentPhaseName = getPhaseName(currentPhase)
 const MAX_PHASE = PHASE_SLUGS.length - 1
 
 if (targetPhase < 0 || targetPhase > MAX_PHASE) {
-  console.log(JSON.stringify({
+  emit({
     error: `targetPhase 越界: ${targetPhase}，合法范围 0~${MAX_PHASE}`,
     storyId,
     currentPhase,
     hint: `Phase 定义: ${PHASE_SLUGS.map((s, i) => `${i}=${getPhaseName(i)}`).join(', ')}`
-  }, null, 2))
+  })
   process.exit(1)
 }
 
@@ -319,7 +340,7 @@ if (!integrityCheck.valid) {
     reason: 'agent_direct_state_mutation_detected'
   })
 
-  console.log(JSON.stringify(errorOutput, null, 2))
+  emit(errorOutput)
   process.exit(1)
 }
 
@@ -330,18 +351,18 @@ if (!integrityCheck.valid) {
 if (rollbackFlag) {
   // 🛡️ 归档状态守卫：归档后禁止 --rollback（归档后产出物已移走，回退无意义）
   if (state.status === 'archived') {
-    console.log(JSON.stringify({
+    emit({
       error: `Story 已归档 (round ${state.archiveRound || '?'})，禁止 --rollback`,
       hint: '归档后的 Story 不支持回退操作。如需恢复，请先执行: ' + ARCHIVE_CMD + ' ' + storyId + ' restore'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
   if (targetPhase >= currentPhase) {
-    console.log(JSON.stringify({
+    emit({
       error: `--rollback 必须回退到更早的 Phase: 当前 ${currentPhase}(${currentPhaseName}) → 目标 ${targetPhase}(${getPhaseName(targetPhase)})`,
       hint: '回退时 targetPhase 必须 < currentPhase'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -429,7 +450,7 @@ if (rollbackFlag) {
   // 持久化
   writeStateFile(storyId, state)
 
-  console.log(JSON.stringify({
+  emit({
     success: true,
     storyId,
     fromPhase: currentPhase,
@@ -439,7 +460,7 @@ if (rollbackFlag) {
     archiveDir: path.relative(PROJECT_ROOT, archiveDir),
     fixBudgetReset,
     note: '已归档产出物到 archive/ 目录，dev-pass 已处理'
-  }, null, 2))
+  })
   process.exit(0)
 }
 
@@ -501,10 +522,10 @@ function extractFixIssuesFromVerification(verification) {
 if (fixLoopFlag) {
   // 🛡️ 归档状态守卫：归档后禁止 --fix-loop（归档后产出物已移走，无法提取修复问题）
   if (state.status === 'archived') {
-    console.log(JSON.stringify({
+    emit({
       error: `Story 已归档 (round ${state.archiveRound || '?'})，禁止 --fix-loop`,
       hint: '归档后的 Story 不支持修复回路。如需恢复，请先执行: ' + ARCHIVE_CMD + ' ' + storyId + ' restore'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -560,11 +581,11 @@ if (fixLoopFlag) {
   }
 
   if (issues.length === 0) {
-    console.log(JSON.stringify({
+    emit({
       status: 'no_issues_found',
       message: '未在 code-review.json / acceptance-verification.json / test-report.md 中找到可修复问题',
       hint: '如果确实需要修复，请手动创建 fix-request.json'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -584,7 +605,7 @@ if (fixLoopFlag) {
 
   if (currentRound >= MAX_FIX_ROUNDS) {
     const sourceLabel = sourcePhase === 3 ? '代码审查 (Phase 3)' : '功能测试 (Phase 4)'
-    console.log(JSON.stringify({
+    emit({
       action: 'human_intervention_required',
       status: 'fix_loop_exhausted',
       message: `已达 ${sourceLabel} 的最大修复轮次 (${MAX_FIX_ROUNDS})，需人工介入决策`,
@@ -595,7 +616,7 @@ if (fixLoopFlag) {
         '3. 或联系任务规划师重新拆解任务'
       ],
       blockerCount: issues.length
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -779,7 +800,7 @@ if (fixLoopFlag) {
   })
 
   // 11. 输出结构化结果
-  console.log(JSON.stringify({
+  emit({
     status: 'fix_loop_prepared',
     action: 'spawn_frontend_developer',
     storyId,
@@ -798,7 +819,7 @@ if (fixLoopFlag) {
       `3. 如果 Phase 3/4 仍失败 → 再次执行: ${ADVANCE_CMD} ${storyId} 2 --fix-loop`,
       `4. 达到 ${MAX_FIX_ROUNDS} 轮上限 → 人工介入处理`
     ]
-  }, null, 2))
+  })
   process.exit(0)
 }
 
@@ -810,18 +831,18 @@ if (targetPhase === currentPhase) {
     const acPath = path.join(storyDir, 'acceptance-criteria.json')
     const hasPhase0Artifacts = fs.existsSync(raPath) && fs.existsSync(acPath)
     if (hasPhase0Artifacts) {
-      console.log(JSON.stringify({
+      emit({
         success: true, storyId, phase: currentPhase, name: currentPhaseName,
         note: '已在目标 Phase，无需推进',
         phase0Reuse: {
           detected: true,
           message: 'Phase 0 产出物已存在，可直接复用。如 bug 分析报告有更新但 AC 未反映，请手动更新 acceptance-criteria.json 后推进到 Phase 1'
         }
-      }, null, 2))
+      })
       process.exit(0)
     }
   }
-  console.log(JSON.stringify({ success: true, storyId, phase: currentPhase, name: currentPhaseName, note: '已在目标 Phase，无需推进' }, null, 2))
+  emit({ success: true, storyId, phase: currentPhase, name: currentPhaseName, note: '已在目标 Phase，无需推进' })
   process.exit(0)
 }
 
@@ -834,7 +855,7 @@ if (targetPhase === currentPhase) {
 
 if (targetPhase !== currentPhase + 1) {
   const isBackward = targetPhase < currentPhase
-  console.log(JSON.stringify({
+  emit({
     error: isBackward
       ? `禁止倒退推进: 当前 Phase ${currentPhase}(${currentPhaseName}) → 目标 Phase ${targetPhase}(${getPhaseName(targetPhase)})`
       : `禁止跨 Phase 推进: 当前 Phase ${currentPhase}(${currentPhaseName}) → 目标 Phase ${targetPhase}(${getPhaseName(targetPhase)})，一次只能推进一个 Phase`,
@@ -854,7 +875,7 @@ if (targetPhase !== currentPhase + 1) {
     hint: isBackward
       ? '如需回退，请加 --rollback'
       : `请逐 Phase 推进：先执行到 Phase ${currentPhase + 1}，完成产出物后再推进下一个`
-  }, null, 2))
+  })
 
   trace.appendTrace(storyId, {
     type: 'phase_transition',
@@ -1012,7 +1033,7 @@ if (!combinedResult.passed) {
         ? { action: 'manual_fix', command: null, description: '自动修复未能解决所有 blockers，需人工分析处理' }
         : { action: 'retry_with_auto_fix', command: `${ADVANCE_CMD} ${storyId} ${targetPhase} --auto-fix`, description: '可尝试 --auto-fix 自动修复格式类问题' })
 
-    console.log(JSON.stringify({
+    emit({
       success: false,
       storyId,
       targetPhase,
@@ -1028,7 +1049,7 @@ if (!combinedResult.passed) {
       hint: combinedResult._meta?.fixLoopAvailable
         ? `发现可修复问题，建议执行: ${combinedResult._meta.fixLoopHint}`
         : (autoFixFlag ? '自动修复未能解决所有问题，请手动处理' : '可添加 --auto-fix 尝试自动修复')
-    }, null, 2))
+    })
     process.exit(1)
   }
 }
@@ -1314,5 +1335,5 @@ if (currentPhase === 7 && targetPhase > 7) {
   console.log('  ✓ 工作流已标记为 completed')
 }
 
-console.log(JSON.stringify(result, null, 2))
+emit(result)
 process.exit(0)

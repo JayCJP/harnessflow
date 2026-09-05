@@ -37,6 +37,17 @@
  */
 const fs = require('fs')
 const path = require('path')
+const debugLog = require('../lib/debug-log')
+
+/**
+ * 从路径或命令中提取 storyId（.codebuddy/plans/<storyId>/ 模式）
+ * @param {string} s - 文件路径或 shell 命令
+ * @returns {string|null} 提取不到时返回 null（debug 记录将静默跳过）
+ */
+function extractStoryId (s) {
+  const m = /\.codebuddy[\/\\]plans[\/\\]([^\/\\]+)/.exec(String(s || ''))
+  return m ? m[1] : null
+}
 
 // 读取 stdin 获取 hook 输入
 let stdinData = ''
@@ -142,6 +153,17 @@ if (bashTools.includes(toolName)) {
     process.exit(0)
   }
 
+  // debug 载荷层：拒绝详情留痕（放行是常态不记录，拒绝才是回顾分析的关键事件）
+  debugLog.record(extractStoryId(command), 'hook_decision', {
+    hook: 'enforce-state-file.js',
+    channel: 'shell',
+    decision: 'deny',
+    tool: toolName,
+    command,
+    targetFile: mentioned,
+    hitPattern: String(hitPattern)
+  })
+
   console.log(JSON.stringify({
     continue: false,
     stopReason: `BLOCKED: 禁止通过 shell 命令写入 ${mentioned}。状态文件的相位跃迁只能通过 advance-phase.js 完成。`,
@@ -197,6 +219,16 @@ function isProtectedStateFile(filePath) {
 const check = isProtectedStateFile(normalizedPath)
 
 if (check.protected) {
+  // debug 载荷层：拒绝详情留痕
+  debugLog.record(extractStoryId(filePath), 'hook_decision', {
+    hook: 'enforce-state-file.js',
+    channel: 'file-tool',
+    decision: 'deny',
+    tool: toolName,
+    filePath,
+    targetFile: check.fileName
+  })
+
   console.log(JSON.stringify({
     continue: false,
     stopReason: `BLOCKED: 禁止直接写入 ${check.fileName}。状态文件只能通过 advance-phase.js 脚本更新，Agent 无权操作。`,

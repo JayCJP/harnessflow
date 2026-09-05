@@ -30,9 +30,13 @@ description: Harness 自进化分析 — 体检(audit) → 度量(metrics) → �
    **Step 1: 度量** — 运行 metrics-aggregator.js --json
    - 获取 Phase耗时/门控通过率/fix-loop触发率等趋势数据
 
-   **Step 2: 诊断** — 结合体检+度量+ trace.jsonl + fix-request.json
+   **Step 2: 诊断** — 结合体检+度量+ trace.jsonl + debug.jsonl + fix-request.json
    - 区分新问题 vs 持续问题
    - BLOCKER根因归类 + 流程瓶颈定位
+   - 事件级线索查 trace.jsonl（索引层）；需要完整现场（门控 blockers 原文 / agentPrompt /
+     hook 拒绝详情 / lint 输出）时用 `node scripts/audit/debug-replay.js <storyId>
+     [--kind X] [--phase N] [--verbose]`（载荷层，2026-09 起）——根因分析从
+     「事件+计数」升级为「完整输出对照」
 
    **Step 3: 治疗** — 生成 Harness 修改提案
    - 目标文件: agents/*.md / policy.js / advance-phase.js / schemas/

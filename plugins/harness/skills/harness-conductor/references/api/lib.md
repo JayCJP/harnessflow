@@ -1,4 +1,4 @@
-# lib/ — 基础库 2 个脚本（AI 不直接调用）
+# lib/ — 基础库 3 个脚本（AI 不直接调用）
 
 > 根路径：`${CLAUDE_PLUGIN_ROOT}/scripts/lib/`
 > 被 `commands/` `services/` `hooks/` 全线 require。改这里影响面最大。
@@ -90,3 +90,22 @@ trace 写入失败不阻塞任何流程。
 
 `checkResourceIntegrity`（policy.js）就是读 trace 判断开发阶段是否调用过 kb-query / graphify。
 注意子 Agent 的 tool_call 不会写进主流程的 trace.jsonl —— 这是 Figma MCP 消费检查被移除的原因。
+
+## debug-log.js — 调试日志载荷层（debug.jsonl）
+
+trace.jsonl 是**索引层**（紧凑事件），debug-log 是**载荷层**（全量输出），供流程回顾分析：
+
+```js
+{ record, read, isEnabled, rebuildStateAt }
+```
+
+- `record(storyId, kind, data, { source, phase, durationMs, round })` — 静默追加，
+  kind: `script_output`（命令输出）/ `method_output`（lint/编译/自动恢复等方法细节）/
+  `hook_decision`（enforce-* 拒绝详情）/ `state_change`（writeStateFile 前后 diff + 快照）/
+  `agent_report`（Skill/MCP 调用与返回）
+- 单条 payload 超 64KB 截断并记 sha1 指纹；`HARNESS_DEBUG=0` 关闭
+- 回放入口：`node scripts/audit/debug-replay.js <storyId> [--phase N] [--kind X] [--verbose]`
+- 对本模块为惰性 require（writeStateFile 记录 state_change 时防加载期循环依赖）
+
+**改哪里影响什么**：想调整"哪些输出留痕"，改各命令的 emit() 调用与 hooks 的
+debugLog.record 调用，不改本模块——它是单一信源。

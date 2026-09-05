@@ -71,6 +71,7 @@ const {
 
 const policy = require('../services/policy')
 const promptBuilder = require('../services/prompt-builder')
+const debugLog = require('../lib/debug-log')
 
 const MAX_PHASE = PHASE_SLUGS.length - 1
 
@@ -413,7 +414,14 @@ if (require.main === module) {
   }
 
   try {
+    const t0 = Date.now()
     const out = dispatch(storyId)
+    // debug 载荷层：全量记录调度输出（含 agentPrompt / pendingBlockers / batches），供流程回顾
+    debugLog.record(storyId, 'script_output', out, {
+      source: 'dispatch.js',
+      phase: out.phase,
+      durationMs: Date.now() - t0
+    })
     console.log(JSON.stringify(out, null, 2))
     process.exit(0)
   } catch (e) {

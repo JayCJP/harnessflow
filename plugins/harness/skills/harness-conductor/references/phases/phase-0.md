@@ -1,6 +1,6 @@
 # Phase 0 — 需求分析
 
-> 门控实现：`services/policy.js` → `checkPhase0Gate()` / `checkPrdCoverage()`
+> 门控实现：`services/policy.js` → `checkPhase0Gate()` / `checkPrdCoverage()` / `checkBugReportScope()`
 > 通用三道检查见 [README.md](./README.md)
 
 ## 职责
@@ -25,12 +25,12 @@ Agent 内部需调用 `use_skill("kb-query")` 检索项目知识库。
 `prototypeRequired` 由 `state.js:isPrototypeRequired()` 判定：fixbugs 恒 false；
 run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
 
-⚠️ **Bug 分析报告没有门控**。文件名含动态标题，进不了 `PHASE_ARTIFACTS` 固定文件名表；
-`state.js:findBugAnalysisReports()` 虽然存在，但 `policy.js` **从不调用它**。
-它只出现在两处：`prompt-builder.js` 的 `expectedOutputs`（要求 Agent 产出）和
-`readStoryContext()`（Phase 1~8 自动注入报告全文）。
-旧文档曾声称「缺报告则 Phase 0→1 被拦截」，那是已废弃的 `validate-phase-gate.js` 里的逻辑 ——
-**不在生效路径上**。缺报告的实际后果是后续 Phase 拿不到 Bug 事实，而不是被门控挡住。
+⚠️ **Bug 分析报告的存在性没有门控**。文件名含动态标题，进不了 `PHASE_ARTIFACTS` 固定文件名表。
+报告相关机制共三处，全部不阻断推进：`prompt-builder.js` 的 `expectedOutputs`（要求 Agent 产出）、
+`readStoryContext()`（Phase 1~8 自动注入报告全文）、`policy.js:checkBugReportScope`
+（仅当报告存在时扫描标题行是否含修复方案类章节 → warning，见下表）。
+缺报告的实际后果是后续 Phase 拿不到 Bug 事实，而不是被门控挡住。
+（历史上的废弃脚本 validate-phase-gate.js 曾对存在性设 blocker，与该取舍矛盾，2026-09 随脚本删除一并纠正。）
 
 ## 出门门控（Phase 0→1）
 
@@ -43,6 +43,7 @@ run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
 | **run 模式** `acceptance-criteria.json` 缺 `featurePoints` | BLOCKER (2) | `prd_coverage_missing` |
 | **run 模式** 功能点 `coverage:"deferred"` 却没写 `deferredReason` | BLOCKER (2) | `prd_coverage_missing` |
 | **run 模式** 功能点 `covered` 却 `acIds` 为空，或引用了不存在的 AC | BLOCKER (2) | `prd_coverage_missing` |
+| **fixbugs 模式** Bug 分析报告含修复方案类章节（修复建议/解决方案/测试验证等标题行） | WARNING | — |
 
 ⚠️ `featurePoints` 是 run 模式的硬要求，`fixbugs` 不要求（Bug 修复没有 PRD 功能点可枚举）。
 它的存在理由：门控原先只能校验「已写下的 AC 是否格式合规」，发现不了「整条功能压根没进 AC」。

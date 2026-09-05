@@ -279,7 +279,7 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 ```
 
 > 🚫 报告中不得出现 `#### 修复建议`、`#### 解决方案`、`#### 测试验证` 等章节。
-> `validate-phase-gate.js` 会扫描标题行，命中时输出警告。
+> Phase 0→1 门控（`policy.js`）会扫描标题行，命中时输出 warning。
 
 ---
 

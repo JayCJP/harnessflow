@@ -48,6 +48,7 @@ const path = require('path')
 const hookUtils = require('../lib/state')
 const { readStdin, isSrcFile, checkDevPass, PLANS_DIR, PROJECT_ROOT } = hookUtils
 const trace = require('../lib/trace')
+const debugLog = require('../lib/debug-log')
 
 const stdinData = readStdin()
 if (!stdinData.trim()) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
@@ -72,8 +73,10 @@ if (srcFilePaths.length === 0) { console.log(JSON.stringify({ continue: true }))
 
 const harnessFlag = path.join(PLANS_DIR, '.harness-active')
 let harnessActive = false
+/** 激活标记里的 storyId（dev-pass 缺失时用它给 debug 拒绝记录归属 story） */
+let flagStoryId = null
 if (fs.existsSync(harnessFlag)) {
-  try { const flag = JSON.parse(fs.readFileSync(harnessFlag, 'utf-8')); harnessActive = flag.active === true } catch {}
+  try { const flag = JSON.parse(fs.readFileSync(harnessFlag, 'utf-8')); harnessActive = flag.active === true; flagStoryId = flag.storyId || null } catch {}
 }
 
 if (!harnessActive) {
@@ -95,6 +98,15 @@ if (!devPass.valid) {
       rootCause: 'Agent 试图在无 dev-pass 时编辑 src/ 文件: ' + filePath,
       resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）'
     }
+  })
+
+  // debug 载荷层：拒绝详情留痕（storyId 取激活标记，无 dev-pass 可读）
+  debugLog.record(flagStoryId, 'hook_decision', {
+    hook: 'enforce-dev-pass.js',
+    decision: 'deny',
+    reason: 'dev_pass_missing',
+    tool: toolName,
+    filePath
   })
 
   console.log(JSON.stringify({
@@ -140,6 +152,16 @@ if (currentPhase > 2) {
       rootCause: `Agent 在 Phase ${currentPhase} 试图编辑 src/，dev-pass 仅在 Phase 2 有效`,
       resolution: 'dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2'
     }
+  })
+
+  // debug 载荷层：拒绝详情留痕
+  debugLog.record(devPass.storyId || flagStoryId, 'hook_decision', {
+    hook: 'enforce-dev-pass.js',
+    decision: 'deny',
+    reason: 'dev_pass_expired',
+    tool: toolName,
+    filePath,
+    currentPhase
   })
 
   console.log(JSON.stringify({
@@ -254,6 +276,17 @@ if (passFile && Array.isArray(passFile.allowedPaths) && passFile.allowedPaths.le
         rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + deniedFile,
         resolution: '只允许编辑 task-dag.json 中声明的文件，请检查 files 列表'
       }
+    })
+
+    // debug 载荷层：拒绝详情留痕（含允许清单，供回顾对比）
+    debugLog.record(devPass.storyId || flagStoryId, 'hook_decision', {
+      hook: 'enforce-dev-pass.js',
+      decision: 'deny',
+      reason: 'dev_pass_scope_violation',
+      tool: toolName,
+      deniedFile,
+      allowedPaths: passFile.allowedPaths,
+      pathSource: passFile.pathSource
     })
 
     console.log(JSON.stringify({

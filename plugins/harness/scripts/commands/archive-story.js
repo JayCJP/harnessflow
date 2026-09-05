@@ -54,6 +54,21 @@ const {
   writeStateFile
 } = require('../lib/state')
 const trace = require('../lib/trace')
+const debugLog = require('../lib/debug-log')
+
+/**
+ * 统一输出口：console.log JSON + debug 载荷层留痕（归档/复档结果供流程回顾）。
+ * debug 记录失败静默吞掉，不影响命令输出与退出码。
+ * @param {string} sid - Story ID（各 cmd 函数参数或 CLI 层变量）
+ * @param {Object} o - 输出对象
+ * @param {Object} [recordOpts] - 透传 debugLog.record 的附加项（如 round: 归档动作写入轮次目录）
+ */
+function emit (sid, o, recordOpts) {
+  try {
+    debugLog.record(sid, 'script_output', o, Object.assign({ source: 'archive-story.js' }, recordOpts))
+  } catch (e) { /* debug 记录失败不影响输出 */ }
+  console.log(JSON.stringify(o, null, 2))
+}
 
 // ─── 常量 ──────────────────────────────────────────────────────
 
@@ -176,11 +191,11 @@ function cmdArchive(storyId, opts) {
   // 1. 读取当前状态（归档前必须）
   const state = readStateFile(storyId)
   if (!state || state._parseError) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: 'e2e-state.json 不存在或解析失败',
       storyId,
       detail: state ? state._parseError : null
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -192,19 +207,19 @@ function cmdArchive(storyId, opts) {
   const hasArchiveDir = rootFiles.some(e => e.name === ARCHIVE_DIR)
   const actualFiles = rootFiles.filter(e => e.name !== ARCHIVE_DIR || !hasArchiveDir)
   if (actualFiles.length === 0) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: 'Story 已归档（root 目录无文件），禁止重复归档',
       hint: '如需重新归档，请先执行 restore 复档'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
   // 3. 终态检查（phase < 8 需 --force）
   if (state.phase < 8 && !opts.force) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: `Story 未达终态 (当前 Phase ${state.phase})，建议达到 Phase 8 后再归档`,
       hint: '如需强制归档，添加 --force'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -216,7 +231,7 @@ function cmdArchive(storyId, opts) {
 
   // 5. dry-run 预览
   if (opts.dryRun) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       mode: 'dry-run',
       storyId,
       round,
@@ -227,7 +242,7 @@ function cmdArchive(storyId, opts) {
       summary: {
         totalFiles: toArchive.length
       }
-    }, null, 2))
+    })
     process.exit(0)
   }
 
@@ -287,7 +302,7 @@ function cmdArchive(storyId, opts) {
     }
   }
 
-  console.log(JSON.stringify({
+  emit(storyId, {
     success: true,
     action: 'archive',
     storyId,
@@ -299,7 +314,7 @@ function cmdArchive(storyId, opts) {
     archivedFiles: movedCount,
     deletedFiles,
     hint: 'root 目录已清空，所有文件（含 e2e-state.json / trace.jsonl / repos.json）均归档到 archive/round-' + round + '/'
-  }, null, 2))
+  }, { round })
 }
 
 // ─── 命令: restore ────────────────────────────────────────────
@@ -319,20 +334,20 @@ function cmdRestore(storyId, opts) {
   if (!round) {
     round = detectLatestRound(archiveDir)
     if (!round) {
-      console.log(JSON.stringify({
+      emit(storyId, {
         error: '无可用归档，请先执行 archive 归档',
         storyId
-      }, null, 2))
+      })
       process.exit(1)
     }
   }
 
   const roundDir = path.join(archiveDir, `round-${round}`)
   if (!fs.existsSync(roundDir)) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: `归档目录不存在: archive/round-${round}/`,
       hint: '请检查归档轮次是否正确，或用 list 命令查看可用归档'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -340,10 +355,10 @@ function cmdRestore(storyId, opts) {
   const archiveFiles = scanAllFiles(roundDir, [])
 
   if (archiveFiles.length === 0) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: `归档目录为空: archive/round-${round}/`,
       storyId
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -356,11 +371,11 @@ function cmdRestore(storyId, opts) {
     }
   }
   if (conflicts.length > 0) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: `根目录存在 ${conflicts.length} 个同名文件，复档将覆盖`,
       conflicts,
       hint: '添加 --force 覆盖，或先手动处理冲突文件'
-    }, null, 2))
+    })
     process.exit(1)
   }
 
@@ -421,7 +436,7 @@ function cmdRestore(storyId, opts) {
     })
   }
 
-  console.log(JSON.stringify({
+  emit(storyId, {
     success: true,
     action: 'restore',
     storyId,
@@ -433,7 +448,7 @@ function cmdRestore(storyId, opts) {
     hint: opts.keepArchive
       ? '归档副本已保留，可再次 restore'
       : '归档目录已清理，root 目录已完全复原'
-  }, null, 2))
+  })
 }
 
 // ─── 命令: list ───────────────────────────────────────────────
@@ -446,11 +461,11 @@ function cmdList(storyId) {
   const storyDir = getStoryDir(storyId)
   const archiveDir = path.join(storyDir, ARCHIVE_DIR)
   if (!fs.existsSync(archiveDir)) {
-    console.log(JSON.stringify({
+    emit(storyId, {
       storyId,
       archives: [],
       message: '无归档目录'
-    }, null, 2))
+    })
     return
   }
 
@@ -514,12 +529,12 @@ function cmdList(storyId) {
     rootHasFiles = rootEntries.some(e => e.isFile())
   } catch {}
 
-  console.log(JSON.stringify({
+  emit(storyId, {
     storyId,
     archived: !rootHasFiles,
     totalArchives: rounds.length,
     archives: rounds
-  }, null, 2))
+  })
 }
 
 // ─── 命令: status ─────────────────────────────────────────────
@@ -570,7 +585,7 @@ function cmdStatus(storyId) {
     }
   }
 
-  console.log(JSON.stringify({
+  emit(storyId, {
     storyId,
     title: state ? state.title : null,
     phase: state ? state.phase : null,
@@ -585,7 +600,7 @@ function cmdStatus(storyId) {
     hint: archived
       ? '已归档（root 目录无文件）。执行 restore 复档可恢复操作能力'
       : '未归档。执行 archive 可归档全部文件'
-  }, null, 2))
+  })
 }
 
 // ─── CLI 入口 ─────────────────────────────────────────────────
@@ -632,7 +647,7 @@ const roundIdx = flags.indexOf('--round')
 if (roundIdx !== -1 && flags[roundIdx + 1]) {
   opts.round = parseInt(flags[roundIdx + 1], 10)
   if (isNaN(opts.round) || opts.round < 1) {
-    console.log(JSON.stringify({ error: '--round 必须为正整数' }, null, 2))
+    emit(storyId, { error: '--round 必须为正整数' })
     process.exit(1)
   }
 }
@@ -651,9 +666,9 @@ switch (command) {
     cmdStatus(storyId)
     break
   default:
-    console.log(JSON.stringify({
+    emit(storyId, {
       error: `未知命令: ${command}`,
       validCommands: ['archive', 'restore', 'list', 'status']
-    }, null, 2))
+    })
     process.exit(1)
 }
