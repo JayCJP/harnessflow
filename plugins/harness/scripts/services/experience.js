@@ -38,6 +38,7 @@
 const fs = require('fs')
 const path = require('path')
 const { getStoryDir } = require('../lib/state')
+const { ARTIFACT } = require('../lib/artifacts')
 
 /**
  * 经验库根目录 — 全局跨项目共享
@@ -116,9 +117,9 @@ function recordFailurePattern (pattern) {
   // 去重: phase + failureType + rootCauseKey 三维去重
   const rck = rootCauseKey(pattern.rootCause)
   const existingIdx = data.patterns.findIndex(
-    p => p.phase === pattern.phase
-      && p.failureType === pattern.failureType
-      && rootCauseKey(p.rootCause) === rck
+    p => p.phase === pattern.phase &&
+      p.failureType === pattern.failureType &&
+      rootCauseKey(p.rootCause) === rck
   )
 
   if (existingIdx >= 0) {
@@ -213,7 +214,7 @@ function getLessonsForPhase (phase, maxItems = 5) {
     for (const p of pending) {
       lines.push(`     - failureType: unknown | 根因: ${p.rootCause.slice(0, 80)} | 出现 ${p.occurrences} 次`)
     }
-    lines.push(`     → 请分析后补充到 policy.js RECOVERY_SUGGESTIONS 并设置 reviewStatus=confirmed`)
+    lines.push('     → 请分析后补充到 policy.js RECOVERY_SUGGESTIONS 并设置 reviewStatus=confirmed')
   }
 
   return `\n\n## 📚 历史经验教训 (Phase ${phase})\n以下问题曾在历史 Story 中出现，请注意避免:\n${lines.join('\n')}\n`
@@ -288,9 +289,9 @@ function archiveFailureCase (storyId, state, failureAnalysis) {
   )
 
   // 归档 trace（如果存在）
-  const traceFile = path.join(getStoryDir(storyId), 'trace.jsonl')
+  const traceFile = path.join(getStoryDir(storyId), ARTIFACT.TRACE)
   if (fs.existsSync(traceFile)) {
-    fs.copyFileSync(traceFile, path.join(archiveDir, 'trace.jsonl'))
+    fs.copyFileSync(traceFile, path.join(archiveDir, ARTIFACT.TRACE))
   }
 
   // 归档时间戳
@@ -336,9 +337,9 @@ function confirmUnknownPattern (phase, rootCauseKeyStr, confirmedType, resolutio
   const rck = rootCauseKeyStr.toLowerCase().trim()
 
   const idx = data.patterns.findIndex(
-    p => p.phase === phase
-      && p.failureType === 'unknown'
-      && rootCauseKey(p.rootCause) === rck
+    p => p.phase === phase &&
+      p.failureType === 'unknown' &&
+      rootCauseKey(p.rootCause) === rck
   )
 
   if (idx < 0) return false
@@ -366,11 +367,11 @@ function confirmUnknownPattern (phase, rootCauseKeyStr, confirmedType, resolutio
 function recordHookFailure (recordFailure, phase = -1, storyId = '') {
   if (!recordFailure || !recordFailure.failureType) return
   recordFailurePattern({
-    phase: phase,
+    phase,
     failureType: recordFailure.failureType,
     rootCause: recordFailure.rootCause || '',
     resolution: recordFailure.resolution || '',
-    storyId: storyId,
+    storyId,
     blockers: []
   })
 }

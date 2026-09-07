@@ -38,7 +38,8 @@
 
 const fs = require('fs')
 const path = require('path')
-const { PLANS_DIR, getStoryDir } = require('./state')
+const { getStoryDir } = require('./paths')
+const { ARTIFACT } = require('./artifacts')
 
 /**
  * 追加一条 trace 记录到 story 的 trace.jsonl
@@ -57,7 +58,7 @@ function appendTrace (storyId, entry) {
   const storyDir = getStoryDir(storyId)
   if (!fs.existsSync(storyDir)) return
 
-  const traceFile = path.join(storyDir, 'trace.jsonl')
+  const traceFile = path.join(storyDir, ARTIFACT.TRACE)
   const record = {
     ts: new Date().toISOString(),
     storyId,
@@ -293,7 +294,7 @@ if (require.main === module) {
       usage: {
         'agent-spawn': 'node trace.js agent-spawn <storyId> <agentName> [taskId] [phase]',
         'agent-result': 'node trace.js agent-result <storyId> <agentName> <completed|failed> [detailsJSON]',
-        'git': 'node trace.js git <storyId> <init|add|commit|push|mr> [success|failed] [detailsJSON]'
+        git: 'node trace.js git <storyId> <init|add|commit|push|mr> [success|failed] [detailsJSON]'
       }
     }, null, 2))
   }

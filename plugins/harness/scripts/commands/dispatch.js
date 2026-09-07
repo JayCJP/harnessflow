@@ -65,6 +65,7 @@ const {
   readStateFile,
   getPhaseName,
   getPhaseAgent,
+  checkOpenQuestions,
   errorToString,
   errorToType
 } = require('../lib/state')
@@ -119,23 +120,23 @@ function baseResult (storyId, state) {
 }
 
 /**
- * 检查 open-questions.json 中是否有未确认项
+ * 把 open-questions 契约检查结果转成告警文案（不阻塞，仅提示用户确认）
+ *
+ * 判定逻辑统一由 state.js 的 checkOpenQuestions 提供 —— 这里原有一份私有实现，
+ * 与 state.js 版在 resolved 判定与文件缺失时的行为都不一致，脏数据下两处结论会分叉。
+ *
  * @param {string} storyId - Story ID
- * @returns {string[]} 告警列表
+ * @returns {string[]} 告警列表；文件不存在或全部已确认时为空
  */
-function checkOpenQuestions (storyId) {
-  const p = path.join(PLANS_DIR, storyId, 'open-questions.json')
-  if (!fs.existsSync(p)) return []
-  try {
-    const data = JSON.parse(fs.readFileSync(p, 'utf-8'))
-    const list = Array.isArray(data.questions) ? data.questions : (Array.isArray(data) ? data : [])
-    const unresolved = list.filter(q => q && q.resolved !== true)
-    if (unresolved.length === 0) return []
-    const ids = unresolved.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
-    return [`open-questions.json 中有 ${unresolved.length} 个未确认问题: ${ids}。请与用户确认后再继续。`]
-  } catch (e) {
-    return [`open-questions.json 解析失败: ${e.message}`]
+function openQuestionWarnings (storyId) {
+  const check = checkOpenQuestions(storyId)
+  if (check.unresolved.length > 0) {
+    const ids = check.unresolved.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
+    return [`open-questions.json 中有 ${check.unresolved.length} 个未确认问题: ${ids}。请与用户确认后再继续。`]
   }
+  // 文件不存在不告警（Phase 0 完成前属正常状态）；解析失败仍要提示
+  const parseErr = (check.errors || []).find(e => e.includes('解析失败'))
+  return parseErr ? [`open-questions.json ${parseErr}`] : []
 }
 
 /**
@@ -240,7 +241,7 @@ function dispatch (storyId) {
   }
 
   // ── open-questions 告警（不阻塞，仅提示用户确认） ─────────
-  result.warnings.push(...checkOpenQuestions(storyId))
+  result.warnings.push(...openQuestionWarnings(storyId))
 
   // ── 门控预检: 判断当前 Phase 的产出物是否已就绪 ───────────
   // 注意: 这里只是"预读"，真正的裁定权在 advance-phase.js。

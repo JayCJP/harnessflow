@@ -360,16 +360,16 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode, opts = {}) {
     stateFile: stateFilePath,
     storyInputFile,
     message: bypass
-      ? `✅ 工作流已创建（bypass 模式），直接进入 Phase 2 (代码开发)，dev-pass 已签发`
+      ? '✅ 工作流已创建（bypass 模式），直接进入 Phase 2 (代码开发)，dev-pass 已签发'
       : `✅ 工作流已创建（mode=${workflowMode}），当前 Phase 0 (需求分析)，请 spawn 需求分析师 (agent 注册名: requirement-analyst)` +
-        (storyInputFile ? `\n   story-input.json: ✅ 已摄入，原型/Figma 判定已按输入算准，无需 --refresh-input` : '') +
+        (storyInputFile ? '\n   story-input.json: ✅ 已摄入，原型/Figma 判定已按输入算准，无需 --refresh-input' : '') +
         (protoRequired.required
           ? `\n   原型文档: 必需 — ${protoRequired.reason}，由需求分析师产出 prototype-analysis.md`
           : `\n   原型文档: 免除 — ${protoRequired.reason}`) +
         `\n   Figma 门控: ${figma.enabled ? '开启' : '关闭'} — ${figma.reason}` +
         (storyInputFile
           ? ''
-          : `\n   ⚠️ 若 story-input.json 是在本命令之后才写入的，请执行:` +
+          : '\n   ⚠️ 若 story-input.json 是在本命令之后才写入的，请执行:' +
             `\n      node ${path.basename(__filename)} ${storyId} --refresh-input`)
   }
 }

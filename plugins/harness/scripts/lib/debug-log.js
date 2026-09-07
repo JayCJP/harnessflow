@@ -21,10 +21,10 @@
  *   - 零写权限于状态机：只写自己的 debug.jsonl，不碰 e2e-state.json / dev-pass.json
  *
  * 说明:
- *   - 对 lib/state.js 的依赖采用**惰性 require**：state.js 的 writeStateFile 会调用本模块
- *     记录 state_change，顶层互 require 会形成加载期循环依赖（state 加载到一半时
- *     debug-log 反过来 require state 拿到不完整的 exports）。record() 只在运行期被调用，
- *     那时 state.js 早已加载完成，惰性 require 拿到的是完整缓存模块。
+ *   - 只依赖 lib/paths.js 取 Story 目录，**不 require lib/state.js**：state.js 的
+ *     writeStateFile 会调用本模块记录 state_change，若本模块反过来顶层 require state，
+ *     会形成加载期循环依赖（state 加载到一半时拿到不完整的 exports）。历史做法是惰性
+ *     require 规避，现在两侧都只依赖零依赖的 paths.js，环从根上消失，无需再绕。
  *   - seq 为 story 内单调递增序号：追加前从文件尾部读上一条的 seq（文件为追加型，
  *     尾读 8KB 足够；读不到按 0 起步）。回放时按文件顺序渲染，seq 供引用（「记录 #42」）。
  *
@@ -32,18 +32,12 @@
  */
 
 const fs = require('fs')
-const path = require('path')
 const crypto = require('crypto')
+const { getStoryDir } = require('./paths')
+const { ARTIFACT, artifactPath } = require('./artifacts')
 
 /** 单条 payload 的截断上限（字符数）。超出截断并记指纹，防止巨型输出撑爆日志 */
 const MAX_PAYLOAD_CHARS = 64 * 1024
-
-/** debug-log 对 lib/state.js 的惰性引用（避免与 writeStateFile 的加载期循环依赖） */
-let _state = null
-function stateModule () {
-  if (!_state) _state = require('./state')
-  return _state
-}
 
 /**
  * 判断 debug 日志是否启用
@@ -61,11 +55,7 @@ function isEnabled () {
  * @returns {string} debug.jsonl 绝对路径
  */
 function debugFilePath (storyId, round) {
-  const storyDir = stateModule().getStoryDir(storyId)
-  if (round != null) {
-    return path.join(storyDir, 'archive', `round-${round}`, 'debug.jsonl')
-  }
-  return path.join(storyDir, 'debug.jsonl')
+  return artifactPath(storyId, ARTIFACT.DEBUG, round)
 }
 
 /**
@@ -108,7 +98,7 @@ function lastSeq (filePath) {
 function record (storyId, kind, data, opts = {}) {
   try {
     if (!isEnabled() || !storyId) return false
-    const storyDir = stateModule().getStoryDir(storyId)
+    const storyDir = getStoryDir(storyId)
     if (!fs.existsSync(storyDir)) return false
 
     // 截断保护：巨型 payload（如全量 build 日志）截断并记 sha1 指纹供对账
