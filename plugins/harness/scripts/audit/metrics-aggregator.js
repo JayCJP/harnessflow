@@ -45,7 +45,6 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  PLANS_DIR,
   PROJECT_ROOT,
   listStoryDirs,
   readStateFile,
@@ -53,6 +52,7 @@ const {
   getPhaseName,
   PHASE_SLUGS
 } = require('../lib/state')
+const { ARTIFACT } = require('../lib/artifacts')
 
 const experience = require('../services/experience')
 
@@ -78,7 +78,7 @@ const THRESHOLDS = {
  * @returns {Array<Object>} trace 事件列表
  */
 function readTraceEvents (storyId) {
-  const traceFile = path.join(getStoryDir(storyId), 'trace.jsonl')
+  const traceFile = path.join(getStoryDir(storyId), ARTIFACT.TRACE)
   if (!fs.existsSync(traceFile)) return []
 
   const events = []
@@ -133,7 +133,6 @@ function aggregateMetrics () {
   let fixLoopCount = 0
   let fixLoopSucceeded = 0
   let totalBlockers = 0
-  let remainingBlockers = 0
   let totalDevPass = 0
   let preciseDevPass = 0
   let completedStories = 0
@@ -184,7 +183,7 @@ function aggregateMetrics () {
     let storyValidFixLoopCount = 0
 
     // 读取 fix-verification.json 判断是否有真实修复（status=fixed），用于区分误报空转
-    const fixVerificationPath = path.join(getStoryDir(storyId), 'fix-verification.json')
+    const fixVerificationPath = path.join(getStoryDir(storyId), ARTIFACT.FIX_VERIFICATION)
     let fixHasRealFix = false
     if (fs.existsSync(fixVerificationPath)) {
       try {
@@ -470,7 +469,7 @@ if (jsonOnly) {
 console.log(`\n📊 度量聚合 — 项目: ${PROJECT_NAME}`)
 console.log(`   Story 数: ${metrics.storyCount}`)
 console.log(`   已完成: ${metrics.completedStories}`)
-console.log(`   Phase 耗时统计:`)
+console.log('   Phase 耗时统计:')
 for (const [phase, stats] of Object.entries(metrics.phaseDurations)) {
   console.log(`     Phase ${phase}(${getPhaseName(parseInt(phase, 10))}): avg=${Math.round(stats.avg / 60000)}min, max=${Math.round(stats.max / 60000)}min`)
 }
@@ -479,7 +478,7 @@ console.log(`   Fix-loop 触发率: ${Math.round(metrics.fixLoopTriggerRate * 10
 console.log(`   Fix-loop 成功率: ${Math.round(metrics.fixLoopSuccessRate * 100)}%`)
 console.log(`   dev-pass 限域精度: ${Math.round(metrics.devPassPrecision * 100)}%`)
 const ru = metrics.resourceUsage || {}
-console.log(`\n🔧 资源使用:`)
+console.log('\n🔧 资源使用:')
 console.log(`   Skill 调用: ${ru.skillCalls || 0} 次 (kb-query/graphify: ${ru.kbCalls || 0} 次)`)
 console.log(`   MCP 调用: ${ru.mcpCalls || 0} 次`)
 if (ru.skillCounts && Object.keys(ru.skillCounts).length > 0) {
@@ -497,9 +496,9 @@ for (const i of insights) {
 // 合并到全局
 if (insights.length > 0) {
   experience.mergeInsightsToGlobal(insights, PROJECT_NAME)
-  console.log(`\n✅ 已合并到全局经验库: ~/.codebuddy/experience/metrics-insights.json`)
+  console.log('\n✅ 已合并到全局经验库: ~/.codebuddy/experience/metrics-insights.json')
 } else {
-  console.log(`\nℹ️ 无新洞察需要合并`)
+  console.log('\nℹ️ 无新洞察需要合并')
 }
 
 process.exit(0)

@@ -32,7 +32,8 @@
 const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
-const { getStoryDir, readJsonArtifact, readStateFile, getPhaseName, PHASE_SLUGS, PHASE_ARTIFACTS, loadRepos } = require('../lib/state')
+const { getStoryDir, readStateFile, getPhaseName, PHASE_ARTIFACTS, loadRepos } = require('../lib/state')
+const { ARTIFACT } = require('../lib/artifacts')
 const experience = require('./experience')
 
 /**
@@ -47,12 +48,11 @@ function generatePhaseSummary (storyId, phase) {
   if (!state) return null
 
   const phaseName = getPhaseName(phase)
-  const phaseSlug = PHASE_SLUGS[phase] || 'unknown'
   const summaryLines = [
     `# Phase ${phase} (${phaseName}) 完成摘要`,
     '',
     `> Story: ${storyId} | 完成时间: ${new Date().toISOString()}`,
-    `> 本文件供下个 Agent 加载，替代完整对话历史。`,
+    '> 本文件供下个 Agent 加载，替代完整对话历史。',
     '',
     '## 关键产出物',
     ''
@@ -84,7 +84,7 @@ function generatePhaseSummary (storyId, phase) {
 
   // 待确认项状态 — 从 open-questions.json 读取
   summaryLines.push('', '## 待确认项状态', '')
-  const oqJsonPath = path.join(storyDir, 'open-questions.json')
+  const oqJsonPath = path.join(storyDir, ARTIFACT.OPEN_QUESTIONS)
   if (fs.existsSync(oqJsonPath)) {
     try {
       const oqData = JSON.parse(fs.readFileSync(oqJsonPath, 'utf-8'))
@@ -137,7 +137,7 @@ function generatePhaseSummary (storyId, phase) {
  */
 function injectMustCheck (storyId) {
   const storyDir = getStoryDir(storyId)
-  const taskDagPath = path.join(storyDir, 'task-dag.json')
+  const taskDagPath = path.join(storyDir, ARTIFACT.TASK_DAG_JSON)
   if (!fs.existsSync(taskDagPath)) return false
 
   try {
@@ -230,7 +230,7 @@ function capList (list, limit = CAP_LIMIT) {
  */
 function readTrace (storyId) {
   const storyDir = getStoryDir(storyId)
-  const traceFile = path.join(storyDir, 'trace.jsonl')
+  const traceFile = path.join(storyDir, ARTIFACT.TRACE)
   if (!fs.existsSync(traceFile)) return []
   const entries = []
   let raw = ''
@@ -381,7 +381,7 @@ function evidenceKbRefresh (storyId) {
       lines.push(`  - 当前 HEAD \`${head ? head.slice(0, 8) : 'N/A'}\``)
       lines.push(`  - 最后更新 ${stat.mtime.toISOString()}`)
       if (recordedHash && head && recordedHash !== head) {
-        lines.push(`  - ⚠️ 记录 hash 与当前 HEAD 不一致（陈述事实，不判失败）`)
+        lines.push('  - ⚠️ 记录 hash 与当前 HEAD 不一致（陈述事实，不判失败）')
       }
     } catch (e) { /* 单仓库失败跳过 */ }
   }
@@ -455,11 +455,11 @@ function getContractFiles (storyId, phase) {
   // 修复回路上下文：Phase 3 审查时，如果存在 fix-request.json，
   // 增加修复相关契约文件供审查师加载（增量审查锚点）
   if (nextPhase === 3) {
-    const fixRequestFile = path.join(storyDir, 'fix-request.json')
+    const fixRequestFile = path.join(storyDir, ARTIFACT.FIX_REQUEST)
     if (fs.existsSync(fixRequestFile)) {
       contracts.push('.codebuddy/plans/' + storyId + '/fix-request.json')
       contracts.push('.codebuddy/plans/' + storyId + '/fix-context.md')
-      const fixVerificationFile = path.join(storyDir, 'fix-verification.json')
+      const fixVerificationFile = path.join(storyDir, ARTIFACT.FIX_VERIFICATION)
       if (fs.existsSync(fixVerificationFile)) {
         contracts.push('.codebuddy/plans/' + storyId + '/fix-verification.json')
       }

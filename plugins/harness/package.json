@@ -4,10 +4,17 @@
   "description": "Harness 8-Phase 前端研发流水线插件",
   "main": "index.js",
   "scripts": {
-    "test": "node scripts/__tests__/run-all.js"
+    "test": "node scripts/__tests__/run-all.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {}
+  "comment:dependencies": "运行时必须零依赖 —— 插件被安装后 node 直跑，不能要求 npm install。ajv 以 vendor/ajv.bundle.js 形式内联。lint 工具只进 devDependencies。",
+  "dependencies": {},
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "neostandard": "0.13.0"
+  }
 }

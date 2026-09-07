@@ -17,40 +17,21 @@
  */
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
+const { makeSandbox, ok, section, summarize } = require('./_helpers')
+
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
-// ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-flow-'))
-process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
-process.env.CLAUDE_PROJECT_DIR = SANDBOX
-fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
+// ── 沙箱: 必须在 require state.js 之前建好，PLANS_DIR 是模块加载期求值的 ──
+const sandbox = makeSandbox('harness-flow-')
+const SANDBOX = sandbox.root
+const storyDir = sandbox.storyDir
 
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const { createWorkflow } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
 const policy = require(path.join(SCRIPTS_DIR, 'services/policy'))
-
-let pass = 0
-const failures = []
-
-function ok (name, cond, detail) {
-  if (cond) {
-    pass++
-    console.log(`  OK   ${name}`)
-  } else {
-    failures.push(name)
-    console.log(`  FAIL ${name}${detail ? '  ->  ' + detail : ''}`)
-  }
-}
-
-function section (title) {
-  console.log(`\n-- ${title} --`)
-}
-
-const storyDir = id => path.join(SANDBOX, '.codebuddy', 'plans', id)
 
 // ════════════════════════════════════════════════════════════
 section('1. fixloop 独立预算（review/test 各 2 次）')
@@ -199,9 +180,9 @@ const adv = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'commands/advanc
   encoding: 'utf-8',
   env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
 })
-const advJsonAt = (adv.stdout || '').lastIndexOf('{\n  "success"')
+// stdout 现在只有 JSON（进度文本走 stderr），可直接解析
 let out = null
-try { out = JSON.parse(adv.stdout.slice(advJsonAt)) } catch (e) { /* 下面断言会报 */ }
+try { out = JSON.parse(adv.stdout) } catch (e) { /* 下面断言会报 */ }
 ok('advance-phase 1→2 输出可解析的 JSON', !!out, (adv.stdout || '').slice(-300) + (adv.stderr || ''))
 ok('advance-phase 1→2 推进成功', out && out.success === true,
   out ? JSON.stringify(out.blockers || out.gateChecks) : '')
@@ -222,16 +203,4 @@ if (out && out.success === true) {
 }
 
 // ════════════════════════════════════════════════════════════
-try {
-  fs.rmSync(SANDBOX, { recursive: true, force: true })
-} catch (e) { /* 清理失败不影响结论 */ }
-
-const total = pass + failures.length
-console.log(`\n${'='.repeat(48)}`)
-if (failures.length === 0) {
-  console.log(`通过 ${pass} / ${total}   [全绿]`)
-  process.exit(0)
-} else {
-  console.log(`通过 ${pass} / ${total}\n失败项:\n  - ${failures.join('\n  - ')}`)
-  process.exit(1)
-}
+summarize(sandbox)

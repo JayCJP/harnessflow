@@ -16,18 +16,18 @@
  */
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
+const { makeSandbox, ok, section, summarize } = require('./_helpers')
+
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
-// ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-input-'))
-process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
-process.env.CLAUDE_PROJECT_DIR = SANDBOX
-const PLANS = path.join(SANDBOX, '.codebuddy', 'plans')
-fs.mkdirSync(PLANS, { recursive: true })
+// ── 沙箱: 必须在 require state.js 之前建好，PLANS_DIR 是模块加载期求值的 ──
+const sandbox = makeSandbox('harness-input-')
+const SANDBOX = sandbox.root
+const PLANS = sandbox.plansDir
+const storyDir = sandbox.storyDir
 
 const {
   createWorkflow,
@@ -36,24 +36,6 @@ const {
   takeFlagValue
 } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
 
-let pass = 0
-const failures = []
-
-function ok (name, cond, detail) {
-  if (cond) {
-    pass++
-    console.log(`  OK   ${name}`)
-  } else {
-    failures.push(name)
-    console.log(`  FAIL ${name}${detail ? '  ->  ' + detail : ''}`)
-  }
-}
-
-function section (title) {
-  console.log(`\n-- ${title} --`)
-}
-
-const storyDir = id => path.join(PLANS, id)
 const readState = id => JSON.parse(fs.readFileSync(path.join(storyDir(id), 'e2e-state.json'), 'utf-8'))
 
 /** 把一份 input 写到沙箱里的独立位置（模拟「文件还在 Story 目录之外」） */
@@ -266,18 +248,4 @@ section('8. dispatch: 摄入后能正常起跑')
 }
 
 // ════════════════════════════════════════════════════════════
-try {
-  fs.rmSync(SANDBOX, { recursive: true, force: true })
-} catch (e) { /* 清理失败不影响结论 */ }
-
-const total = pass + failures.length
-console.log(`\n${'='.repeat(48)}`)
-if (failures.length === 0) {
-  console.log(`通过 ${pass} / ${total}   [全绿]`)
-  process.exit(0)
-} else {
-  console.log(`通过 ${pass} / ${total}\n失败项:\n  - ${failures.join('\n  - ')}`)
-  process.exit(1)
-}
-
-
+summarize(sandbox)

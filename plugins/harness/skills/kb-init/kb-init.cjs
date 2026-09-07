@@ -66,7 +66,7 @@ function inferProjectType () {
 function inferSourceRoot (projectType) {
   let result
   switch (projectType) {
-    case 'plugin':
+    case 'plugin': {
       // 插件：找 plugins/ 下的第一个子目录，或 .claude-plugin 所在目录
       const pluginsDir = path.join(PROJECT_ROOT, 'plugins')
       if (fs.existsSync(pluginsDir)) {
@@ -75,6 +75,7 @@ function inferSourceRoot (projectType) {
       }
       result = 'plugins'
       break
+    }
     case 'backend':
       result = fs.existsSync(path.join(PROJECT_ROOT, 'server')) ? 'server' : 'src'
       break
@@ -289,7 +290,7 @@ const domains = discoverDomains(projectType, sourceRoot)
 // 2.5 扫描编码规范来源
 const conventionSources = discoverConventionSources()
 
-let created = 0, skipped = 0
+let created = 0; let skipped = 0
 const errors = []
 
 console.log('kb-init v2 — 知识库目录骨架初始化（项目画像 + 动态域扫描）')
@@ -323,8 +324,7 @@ const DIRS = [
 
 for (const dir of DIRS) {
   if (fs.existsSync(dir)) { skipped++; continue }
-  try { fs.mkdirSync(dir, { recursive: true }); created++; console.log(`  ✅ ${path.relative(PROJECT_ROOT, dir)}`) }
-  catch (e) { errors.push(`创建失败: ${dir}`) }
+  try { fs.mkdirSync(dir, { recursive: true }); created++; console.log(`  ✅ ${path.relative(PROJECT_ROOT, dir)}`) } catch (e) { errors.push(`创建失败: ${dir}`) }
 }
 
 // 4. 写项目画像 .profile.yaml
@@ -337,8 +337,7 @@ if (!fs.existsSync(PROFILE_PATH) || force) {
     `domain_axis: "${profile.domain_axis}"`,
     ''
   ].join('\n')
-  try { fs.writeFileSync(PROFILE_PATH, profileYaml, 'utf-8'); created++; console.log(`  ✅ .profile.yaml`) }
-  catch (e) { errors.push(`写入失败: ${PROFILE_PATH}`) }
+  try { fs.writeFileSync(PROFILE_PATH, profileYaml, 'utf-8'); created++; console.log('  ✅ .profile.yaml') } catch (e) { errors.push(`写入失败: ${PROFILE_PATH}`) }
 }
 
 // 5. custom/README.md
@@ -347,16 +346,14 @@ const CUSTOM_README = (d) =>
 for (const d of domains) {
   const f = path.join(KB_ROOT, 'business', d, 'custom', 'README.md')
   if (fs.existsSync(f) && !force) { skipped++; continue }
-  try { fs.writeFileSync(f, CUSTOM_README(d), 'utf-8'); created++; console.log(`  ✅ business/${d}/custom/README.md`) }
-  catch (e) { errors.push(`写入失败: ${f}`) }
+  try { fs.writeFileSync(f, CUSTOM_README(d), 'utf-8'); created++; console.log(`  ✅ business/${d}/custom/README.md`) } catch (e) { errors.push(`写入失败: ${f}`) }
 }
 
 // 6. common/README.md（通用切面索引）
-const COMMON_README = `# 通用知识\n\n<!-- CUSTOM:START -->\n跨域共享的开发规范、常用库指南、技术专题。\n<!-- CUSTOM:END -->\n`
+const COMMON_README = '# 通用知识\n\n<!-- CUSTOM:START -->\n跨域共享的开发规范、常用库指南、技术专题。\n<!-- CUSTOM:END -->\n'
 const commonReadme = path.join(KB_ROOT, 'common', 'README.md')
 if (!fs.existsSync(commonReadme) || force) {
-  try { fs.writeFileSync(commonReadme, COMMON_README, 'utf-8'); created++; console.log(`  ✅ common/README.md`) }
-  catch (e) { errors.push(`写入失败: ${commonReadme}`) }
+  try { fs.writeFileSync(commonReadme, COMMON_README, 'utf-8'); created++; console.log('  ✅ common/README.md') } catch (e) { errors.push(`写入失败: ${commonReadme}`) }
 }
 
 // 6.5 生成编码规范文档骨架（common/conventions.md）
@@ -397,13 +394,11 @@ if (!fs.existsSync(conventionsPath) || force) {
     '<!-- CUSTOM:END -->',
     ''
   ].join('\n')
-  try { fs.writeFileSync(conventionsPath, conventionsDoc, 'utf-8'); created++; console.log(`  ✅ common/conventions.md`) }
-  catch (e) { errors.push(`写入失败: ${conventionsPath}`) }
+  try { fs.writeFileSync(conventionsPath, conventionsDoc, 'utf-8'); created++; console.log('  ✅ common/conventions.md') } catch (e) { errors.push(`写入失败: ${conventionsPath}`) }
 }
 
 // 7. 复制模板（common + 本项目类型的特有模板，Skill 捆绑 → 项目）
 const selectedTemplates = selectTemplates(projectType)
-const commonTemplates = ['overview', 'architecture', 'config', 'conventions', 'pitfalls', 'log']
 // 先复制 common 通用模板
 if (fs.existsSync(TMPL_COMMON)) {
   for (const f of fs.readdirSync(TMPL_COMMON).filter(f => f.endsWith('.template.md'))) {

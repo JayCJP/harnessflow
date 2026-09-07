@@ -58,6 +58,7 @@ const {
   getStoryMode,
   findBugAnalysisReports
 } = require('../lib/state')
+const { ARTIFACT } = require('../lib/artifacts')
 
 const schemaValidator = require('./schema-validator')
 const debugLog = require('../lib/debug-log')
@@ -133,14 +134,14 @@ const RECOVERY_SUGGESTIONS = {
     action: 'task-dag.json 中应使用 "title" 而非 "name"',
     autoFixable: true,
     autoFix: function (storyId) {
-      const data = readJsonArtifact(storyId, 'task-dag.json')
+      const data = readJsonArtifact(storyId, ARTIFACT.TASK_DAG_JSON)
       if (!data || !Array.isArray(data.tasks)) return false
       let fixed = false
       for (const t of data.tasks) {
         if (t.name && !t.title) { t.title = t.name; delete t.name; fixed = true }
       }
       if (fixed) {
-        const filePath = path.join(getStoryDir(storyId), 'task-dag.json')
+        const filePath = path.join(getStoryDir(storyId), ARTIFACT.TASK_DAG_JSON)
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
       }
       return fixed
@@ -158,14 +159,14 @@ const RECOVERY_SUGGESTIONS = {
     action: '为每个 task 添加 title 字段（使用 title 而非 name）',
     autoFixable: true,
     autoFix: function (storyId) {
-      const data = readJsonArtifact(storyId, 'task-dag.json')
+      const data = readJsonArtifact(storyId, ARTIFACT.TASK_DAG_JSON)
       if (!data || !Array.isArray(data.tasks)) return false
       let fixed = false
       for (const t of data.tasks) {
         if (t.name && !t.title) { t.title = t.name; delete t.name; fixed = true }
       }
       if (fixed) {
-        const filePath = path.join(getStoryDir(storyId), 'task-dag.json')
+        const filePath = path.join(getStoryDir(storyId), ARTIFACT.TASK_DAG_JSON)
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
       }
       return fixed
@@ -274,7 +275,7 @@ const RECOVERY_SUGGESTIONS = {
     action: 'acceptance-verification.json 中 evidence 应为字符串数组',
     autoFixable: true,
     autoFix: function (storyId) {
-      const data = readJsonArtifact(storyId, 'acceptance-verification.json')
+      const data = readJsonArtifact(storyId, ARTIFACT.ACCEPTANCE_VERIFICATION)
       if (!data || !Array.isArray(data.results)) return false
       let fixed = false
       // 修复字段名: verificationResults → results, acId → id
@@ -287,7 +288,7 @@ const RECOVERY_SUGGESTIONS = {
         if (typeof r.evidence === 'string') { r.evidence = [r.evidence]; fixed = true }
       }
       if (fixed) {
-        const filePath = path.join(getStoryDir(storyId), 'acceptance-verification.json')
+        const filePath = path.join(getStoryDir(storyId), ARTIFACT.ACCEPTANCE_VERIFICATION)
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
       }
       return fixed
@@ -504,8 +505,8 @@ function checkResourceIntegrity (storyId, phaseNum, state, result) {
   if (phaseNum !== 3) return
 
   // 读 trace.jsonl 里的 tool_call 事件
-  const traceFile = path.join(getStoryDir(storyId), 'trace.jsonl')
-  let toolCalls = []
+  const traceFile = path.join(getStoryDir(storyId), ARTIFACT.TRACE)
+  const toolCalls = []
   if (fs.existsSync(traceFile)) {
     try {
       const lines = fs.readFileSync(traceFile, 'utf-8').split('\n')
@@ -612,11 +613,11 @@ function checkPhase0Gate (storyId, state, result) {
  *   fixbugs 模式不要求（Bug 修复没有 PRD 功能点可枚举）。
  */
 function checkPrdCoverage (storyId, result) {
-  const input = readJsonArtifact(storyId, 'story-input.json')
+  const input = readJsonArtifact(storyId, ARTIFACT.STORY_INPUT)
   // 读不到 input 时不阻塞（老 Story 或输入缺失，另有门控覆盖）
   if (!input || input._parseError || input.mode !== 'run') return
 
-  const ac = readJsonArtifact(storyId, 'acceptance-criteria.json')
+  const ac = readJsonArtifact(storyId, ARTIFACT.ACCEPTANCE_CRITERIA)
   if (!ac || ac._parseError) return
 
   const fps = ac.featurePoints
@@ -715,7 +716,7 @@ function checkBugReportScope (storyId, result) {
 
   if (hints.length > 0) {
     result.warnings.push(
-      `Bug 分析报告疑似包含修复方案章节（应只记录事实，修复设计属于开发工程师）:\n` +
+      'Bug 分析报告疑似包含修复方案章节（应只记录事实，修复设计属于开发工程师）:\n' +
       hints.map(h => `  - ${h}`).join('\n')
     )
   }
@@ -755,7 +756,8 @@ function checkPhase1Gate (storyId, state, result) {
         type = 'task_missing_title'
         level = 1
         resolution = '为每个 task 添加 title 字段（使用 title 而非 name）'
-      } else if (lower.includes('acceptancecriteria') && lower.includes('空') || lower.includes('缺少')) {
+      // 括号仅为显式化优先级：此处语义是 (含 acceptancecriteria 且含「空」) 或 含「缺少」
+      } else if ((lower.includes('acceptancecriteria') && lower.includes('空')) || lower.includes('缺少')) {
         type = 'empty_ac_ref'
         resolution = '每个 task 的 acceptanceCriteria 至少引用 1 条 AC'
       } else if (lower.includes('重复') && lower.includes('task') && lower.includes('id')) {
@@ -948,7 +950,7 @@ function checkPhase2Gate (storyId, state, result) {
  *       当检测到 BLOCKER 时，附加 fixLoopAvailable 标记供主 Agent 触发修复回路。
  */
 function checkPhase3Gate (storyId, result) {
-  const crJsonPath = path.join(PLANS_DIR, storyId, 'code-review.json')
+  const crJsonPath = path.join(PLANS_DIR, storyId, ARTIFACT.CODE_REVIEW)
 
   // 读取 code-review.json（唯一信源）
   if (!fs.existsSync(crJsonPath)) return
@@ -971,9 +973,9 @@ function checkPhase3Gate (storyId, result) {
     }
 
     // 修复回路上下文检查
-    const fixRequestPath = path.join(PLANS_DIR, storyId, 'fix-request.json')
+    const fixRequestPath = path.join(PLANS_DIR, storyId, ARTIFACT.FIX_REQUEST)
     if (fs.existsSync(fixRequestPath)) {
-      const fixVerificationPath = path.join(PLANS_DIR, storyId, 'fix-verification.json')
+      const fixVerificationPath = path.join(PLANS_DIR, storyId, ARTIFACT.FIX_VERIFICATION)
       if (!fs.existsSync(fixVerificationPath)) {
         result.warnings.push('修复回路复查: 缺少 fix-verification.json，开发者未产出修复核对报告')
       } else {
@@ -1103,10 +1105,12 @@ function checkPhase4Gate (storyId, result) {
 
   // open-questions 检查: Phase 4→5 提交前提醒未 resolve 的问题
   const oqCheck = checkOpenQuestions(storyId)
-  if (oqCheck.exists && oqCheck.unresolvedCount > 0) {
+  // 原先读 oqCheck.unresolvedCount —— checkOpenQuestions 从未返回该字段，
+  // undefined > 0 恒为 false，这条告警此前从未触发过
+  if (oqCheck.exists && oqCheck.unresolved.length > 0) {
     const unresolvedList = oqCheck.unresolved.map(q => `${q.id}: ${q.question}`).join('; ')
     result.warnings.push(
-      `open-questions.json 中有 ${oqCheck.unresolvedCount} 个未 resolve 的问题: ${unresolvedList}。` +
+      `open-questions.json 中有 ${oqCheck.unresolved.length} 个未 resolve 的问题: ${unresolvedList}。` +
       '需后端配合的问题请标记 resolved:true + resolution:"前端已预留，待后端配合"；前端可确认的问题请在开发过程中确认并标记 resolved'
     )
   }
@@ -1125,7 +1129,7 @@ function checkPhase4Gate (storyId, result) {
  *   要么修问题，要么把该 AC 从 passed 改成 failed，不允许两者并存。
  */
 function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
-  const crJsonPath = path.join(PLANS_DIR, storyId, 'code-review.json')
+  const crJsonPath = path.join(PLANS_DIR, storyId, ARTIFACT.CODE_REVIEW)
   if (!fs.existsSync(crJsonPath)) return
 
   let crData
@@ -1181,7 +1185,7 @@ function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
  * evidenceType 缺失按 static 处理（schema 已要求必填，缺失即未如实声明）。
  */
 function checkEvidenceQuality (storyId, avCheck, result) {
-  const ac = readJsonArtifact(storyId, 'acceptance-criteria.json')
+  const ac = readJsonArtifact(storyId, ARTIFACT.ACCEPTANCE_CRITERIA)
   if (!ac || ac._parseError) return
 
   const testTypeById = new Map(

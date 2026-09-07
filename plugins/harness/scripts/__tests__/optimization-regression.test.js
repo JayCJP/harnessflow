@@ -23,49 +23,23 @@
  */
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
+const { makeSandbox, ok, section, summarize } = require('./_helpers')
+
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
-// ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-opt-'))
-process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
-process.env.CLAUDE_PROJECT_DIR = SANDBOX
-fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
+// ── 沙箱: 必须在 require state.js 之前建好，PLANS_DIR 是模块加载期求值的 ──
+const sandbox = makeSandbox('harness-opt-')
+const SANDBOX = sandbox.root
+const storyDir = sandbox.storyDir
 
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const policy = require(path.join(SCRIPTS_DIR, 'services/policy'))
 const promptBuilder = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 const { dispatch } = require(path.join(SCRIPTS_DIR, 'commands/dispatch'))
 const experience = require(path.join(SCRIPTS_DIR, 'services/experience'))
-
-let pass = 0
-const failures = []
-
-/**
- * 断言辅助：通过计数 / 失败记录
- * @param {string} name - 断言名
- * @param {boolean} cond - 断言条件
- * @param {string} [detail] - 失败时的补充信息
- */
-function ok (name, cond, detail) {
-  if (cond) {
-    pass++
-    console.log(`  OK   ${name}`)
-  } else {
-    failures.push(name)
-    console.log(`  FAIL ${name}${detail ? '  ->  ' + detail : ''}`)
-  }
-}
-
-/** 分节输出 */
-function section (title) {
-  console.log(`\n-- ${title} --`)
-}
-
-const storyDir = id => path.join(SANDBOX, '.codebuddy', 'plans', id)
 
 /**
  * 写 e2e-state.json（Phase N running）
@@ -152,9 +126,8 @@ const advBA = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'commands/adva
   encoding: 'utf-8',
   env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
 })
-const advBAAt = (advBA.stdout || '').lastIndexOf('{\n  "success"')
 let outBA = null
-try { outBA = JSON.parse(advBA.stdout.slice(advBAAt)) } catch (e) { /* 断言会报 */ }
+try { outBA = JSON.parse(advBA.stdout) } catch (e) { /* 断言会报 */ }
 ok('advance 1→2 推进成功', outBA && outBA.success === true,
   outBA ? JSON.stringify(outBA.blockers || outBA.gateChecks) : (advBA.stdout || '').slice(-300))
 if (outBA && outBA.success === true) {
@@ -173,7 +146,10 @@ fs.mkdirSync(storyDir('OPT-INC'), { recursive: true })
 writeState('OPT-INC', 3)
 writeAC('OPT-INC')
 fs.writeFileSync(path.join(storyDir('OPT-INC'), 'fix-request.json'), JSON.stringify({
-  source: 'code-review', sourcePhase: 3, round: 1, maxRounds: 2,
+  source: 'code-review',
+  sourcePhase: 3,
+  round: 1,
+  maxRounds: 2,
   issues: [{ id: 'FIX-01', severity: 'BLOCKER', file: 'src/a.vue', line: '10', description: '描述', suggestion: '建议' }],
   affectedFiles: ['src/a.vue']
 }))
@@ -191,14 +167,17 @@ ok('incremental 模式给 fix-request.json 绝对路径', /增量修复上下文
 ok('incremental 模式跳过 Figma 设计规格摘要', !inc.agentPrompt.includes('Figma 设计规格摘要'))
 
 const flp = promptBuilder.buildFixLoopSpawnPrompt({
-  storyId: 'OPT-INC', round: 1, maxRounds: 2, sourcePhase: 3,
+  storyId: 'OPT-INC',
+  round: 1,
+  maxRounds: 2,
+  sourcePhase: 3,
   issues: [{ id: 'FIX-01', severity: 'BLOCKER', file: 'src/a.vue', line: '10', description: '描述', suggestion: '建议' }],
   affectedFiles: ['src/a.vue']
 })
 ok('fix-loop prompt 含轮次头', /## 🔧 修复任务 \(第 1\/2 轮\)/.test(flp))
 ok('fix-loop prompt 含 issue 清单', flp.includes('FIX-01') && flp.includes('src/a.vue:10'))
 ok('fix-loop prompt 含限域约束', /仅修复以上列出的文件/.test(flp))
-ok('fix-loop prompt 的修复请求为绝对路径', new RegExp('[A-Za-z]:[\\\\/].*fix-request\\.json').test(flp))
+ok('fix-loop prompt 的修复请求为绝对路径', /[A-Za-z]:[\\/].*fix-request\.json/.test(flp))
 
 // Figma designSpec 只在 Phase 2 注入（与 buildFigmaAlignInstruction 的 Phase 过滤对齐）。
 // 此前无该过滤，代码审查 / 功能测试 / 发布的 prompt 都带着色值间距圆角，纯噪音
@@ -295,9 +274,15 @@ ok('blockers 无 unknown 类型（P2-2）', !typesA.includes('unknown'), JSON.st
 fs.writeFileSync(path.join(storyDir('OPT-TD'), 'task-dag.json'), JSON.stringify({
   tasks: [
     {
-      id: 'task-1', title: '跨仓改动', description: '改 L10-L20', files: ['src/x.js'],
-      acceptanceCriteria: ['AC-1'], parallelizable: false, project: 'other',
-      repoPath: rsOther, evidence: { source: 'kb', ref: 'kb 文档' }
+      id: 'task-1',
+      title: '跨仓改动',
+      description: '改 L10-L20',
+      files: ['src/x.js'],
+      acceptanceCriteria: ['AC-1'],
+      parallelizable: false,
+      project: 'other',
+      repoPath: rsOther,
+      evidence: { source: 'kb', ref: 'kb 文档' }
     }
   ]
 }))
@@ -309,9 +294,15 @@ ok('evidence.source=kb 单独不通过（v3 只认 graphify）', gB.blockers.som
 fs.writeFileSync(path.join(storyDir('OPT-TD'), 'task-dag.json'), JSON.stringify({
   tasks: [
     {
-      id: 'task-1', title: '跨仓改动', description: '改 L10-L20', files: ['src/x.js'],
-      acceptanceCriteria: ['AC-1'], parallelizable: false, project: 'other',
-      repoPath: rsOther, evidence: { source: 'graphify', ref: 'graphify query "登录模块"' }
+      id: 'task-1',
+      title: '跨仓改动',
+      description: '改 L10-L20',
+      files: ['src/x.js'],
+      acceptanceCriteria: ['AC-1'],
+      parallelizable: false,
+      project: 'other',
+      repoPath: rsOther,
+      evidence: { source: 'graphify', ref: 'graphify query "登录模块"' }
     }
   ]
 }))
@@ -390,9 +381,8 @@ try {
     encoding: 'utf-8',
     env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
   })
-  const advPGAt = (advPG.stdout || '').lastIndexOf('{\n  "success"')
   let outPG = null
-  try { outPG = JSON.parse(advPG.stdout.slice(advPGAt)) } catch (e) { /* 断言会报 */ }
+  try { outPG = JSON.parse(advPG.stdout) } catch (e) { /* 断言会报 */ }
   ok('advance 0→1 推进成功', outPG && outPG.success === true,
     outPG ? JSON.stringify(outPG.blockers) : (advPG.stdout || '').slice(-300))
 
@@ -416,16 +406,4 @@ try {
 }
 
 // ════════════════════════════════════════════════════════════
-try {
-  fs.rmSync(SANDBOX, { recursive: true, force: true })
-} catch (e) { /* 清理失败不影响结论 */ }
-
-const total = pass + failures.length
-console.log(`\n${'='.repeat(48)}`)
-if (failures.length === 0) {
-  console.log(`通过 ${pass} / ${total}   [全绿]`)
-  process.exit(0)
-} else {
-  console.log(`通过 ${pass} / ${total}\n失败项:\n  - ${failures.join('\n  - ')}`)
-  process.exit(1)
-}
+summarize(sandbox)

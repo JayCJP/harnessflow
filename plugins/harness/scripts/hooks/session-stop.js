@@ -47,16 +47,15 @@ const {
   PROJECT_ROOT,
   PLANS_DIR,
   listStoryDirs,
-  readStateFile,
   getPhaseName,
-  revokeDevPass,
   readStdin
 } = require('../lib/state')
 const experience = require('../services/experience')
+const { HARNESS_ACTIVE_FLAG } = require('../lib/artifacts')
 
 // ─── 常量 ────────────────────────────────────────────────────────
 
-const HARNESS_ACTIVE_FILE = path.join(PLANS_DIR, '.harness-active')
+const HARNESS_ACTIVE_FILE = HARNESS_ACTIVE_FLAG
 const GIT_TIMEOUT = 5000
 
 /** 非代码文件目录前缀，不计入 src 变更统计 */
@@ -74,7 +73,7 @@ const MAX_SRC_FILES = 50
  * 单次扫描所有 Story 目录，同时分类为 active / completed
  * @returns {{ active: Array, completed: Array }}
  */
-function scanAllWorkflows() {
+function scanAllWorkflows () {
   const dirs = listStoryDirs()
   const active = []
   const completed = []
@@ -99,7 +98,7 @@ function scanAllWorkflows() {
 // ─── Git 变更检测 ────────────────────────────────────────────────
 
 /** 安全执行 git 命令，失败返回空字符串 */
-function safeGit(args) {
+function safeGit (args) {
   try {
     return execSync(`git ${args}`, {
       cwd: PROJECT_ROOT,
@@ -114,7 +113,7 @@ function safeGit(args) {
 /**
  * 获取本次 session 所有变更文件（去重）
  */
-function getChangedFiles() {
+function getChangedFiles () {
   const staged = safeGit('diff --cached --name-only').split('\n').filter(Boolean)
   const unstaged = safeGit('diff --name-only').split('\n').filter(Boolean)
   const untracked = safeGit('ls-files --others --exclude-standard').split('\n').filter(Boolean)
@@ -123,7 +122,7 @@ function getChangedFiles() {
 }
 
 /** src/ 下是否有变更 */
-function hasSrcChanges(files) {
+function hasSrcChanges (files) {
   return files.some(f => {
     const n = f.replace(/\\/g, '/')
     return n.startsWith('src/') && !NON_SRC_PREFIXES.some(p => n.startsWith(p))
@@ -132,7 +131,7 @@ function hasSrcChanges(files) {
 
 // ─── 知识库更新 ──────────────────────────────────────────────────
 
-function checkKbUpdateTasks(activeWorkflows, changedFiles) {
+function checkKbUpdateTasks (activeWorkflows, changedFiles) {
   if (!hasSrcChanges(changedFiles)) return []
 
   return activeWorkflows
@@ -151,7 +150,7 @@ function checkKbUpdateTasks(activeWorkflows, changedFiles) {
 
 // ─── Dev-Pass 清理 ───────────────────────────────────────────────
 
-function cleanupDevPasses() {
+function cleanupDevPasses () {
   if (!fs.existsSync(PLANS_DIR)) return
 
   const dirs = listStoryDirs()
@@ -176,7 +175,7 @@ function cleanupDevPasses() {
 
 // ─── Trace 经验沉淀 ──────────────────────────────────────────────
 
-function recordHookRejectionsFromTraces() {
+function recordHookRejectionsFromTraces () {
   if (!fs.existsSync(PLANS_DIR)) return
 
   const dirs = listStoryDirs()
@@ -221,7 +220,7 @@ function recordHookRejectionsFromTraces() {
  * @param {Array} completedWorkflows - 已完成工作流列表
  * @returns {{ ended: boolean, message: string }}
  */
-function autoEndHarness(activeWorkflows, completedWorkflows) {
+function autoEndHarness (activeWorkflows, completedWorkflows) {
   if (!fs.existsSync(HARNESS_ACTIVE_FILE)) {
     return { ended: false, message: 'Harness 模式未激活' }
   }
@@ -283,7 +282,7 @@ function autoEndHarness(activeWorkflows, completedWorkflows) {
 
 // ─── 摘要构建 ────────────────────────────────────────────────────
 
-function buildSummary(activeWorkflows, completedWorkflows, changedFiles, harnessResult, kbTasks) {
+function buildSummary (activeWorkflows, completedWorkflows, changedFiles, harnessResult, kbTasks) {
   const allSrcFiles = changedFiles
     .filter(f => f.replace(/\\/g, '/').startsWith('src/'))
     .map(f => f.replace(/\\/g, '/'))
@@ -321,7 +320,7 @@ function buildSummary(activeWorkflows, completedWorkflows, changedFiles, harness
  * @param {object} summary
  * @returns {string} 保证 length <= MAX_CONTEXT_CHARS 的 JSON 字符串
  */
-function serializeSummary(summary) {
+function serializeSummary (summary) {
   let json = JSON.stringify(summary)
   if (json.length <= MAX_CONTEXT_CHARS) return json
 
@@ -352,7 +351,7 @@ function serializeSummary(summary) {
 
 // ─── 入口 ────────────────────────────────────────────────────────
 
-function main() {
+function main () {
   const startedAt = Date.now()
 
   // 0. 消费 stdin（避免管道场景 EPIPE），解析 Stop 输入

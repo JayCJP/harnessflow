@@ -13,40 +13,18 @@
  *   npm test            （在 plugins/harness 下，由 run-all.js 自动发现）
  */
 
-const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 
+const { makeSandbox, ok, section, summarize } = require('./_helpers')
+
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
-// ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-debuglog-'))
-process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
-process.env.CLAUDE_PROJECT_DIR = SANDBOX
-fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
+// ── 沙箱: 必须在 require state.js 之前建好，PLANS_DIR 是模块加载期求值的 ──
+const sandbox = makeSandbox('harness-debuglog-')
 
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const debugLog = require(path.join(SCRIPTS_DIR, 'lib/debug-log'))
-
-let pass = 0
-const failures = []
-
-function ok (name, cond, detail) {
-  if (cond) {
-    pass++
-    console.log(`  OK   ${name}`)
-  } else {
-    failures.push(name)
-    console.log(`  FAIL ${name}${detail ? '  ->  ' + detail : ''}`)
-  }
-}
-
-function section (title) {
-  console.log(`\n-- ${title} --`)
-}
-
-const storyDir = id => path.join(SANDBOX, '.codebuddy', 'plans', id)
 
 // ════════════════════════════════════════════════════════════
 section('1. 开关判定')
@@ -79,8 +57,15 @@ ok('kind 过滤', debugLog.read('DBG-1', { kind: 'hook_decision' }).length === 1
 ok('phase 过滤', debugLog.read('DBG-1', { phase: 2 }).length === 1)
 ok('limit 取末尾', debugLog.read('DBG-1', { limit: 2 }).length === 2 &&
   debugLog.read('DBG-1', { limit: 2 })[0].seq === 2)
+// 三条 record 是连续同步写入，很可能落在同一毫秒，此时 all[0].ts === since，
+// 写死「返回 2 条」会随进程时序间歇性假红。改为断言 since 的语义本身:
+// ts >= since 的全部返回、ts < since 的全部排除 —— 仍能抓出 > 与 >= 的实现错误。
 const since = all[1].ts
-ok('since 过滤（含边界）', debugLog.read('DBG-1', { since }).length === 2)
+const sinceRecs = debugLog.read('DBG-1', { since })
+const expectSince = all.filter(r => r.ts >= since)
+ok('since 过滤（含边界）',
+  sinceRecs.length === expectSince.length && sinceRecs.every(r => r.ts >= since),
+  `got ${sinceRecs.length}, expect ${expectSince.length}`)
 ok('不存在的 story 返回空数组', debugLog.read('NOT-EXIST').length === 0)
 
 // ════════════════════════════════════════════════════════════
@@ -134,16 +119,4 @@ ok('uptoSeq 重建到历史时刻', mid && mid.phase === 1, JSON.stringify(mid))
 ok('无 state_change 的 story 返回 null', debugLog.rebuildStateAt('DBG-1') === null)
 
 // ════════════════════════════════════════════════════════════
-try {
-  fs.rmSync(SANDBOX, { recursive: true, force: true })
-} catch (e) { /* 清理失败不影响结论 */ }
-
-const total = pass + failures.length
-console.log(`\n${'='.repeat(48)}`)
-if (failures.length === 0) {
-  console.log(`通过 ${pass} / ${total}   [全绿]`)
-  process.exit(0)
-} else {
-  console.log(`通过 ${pass} / ${total}\n失败项:\n  - ${failures.join('\n  - ')}`)
-  process.exit(1)
-}
+summarize(sandbox)

@@ -19,42 +19,19 @@
  */
 
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
+
+const { makeSandbox, ok, section, summarize } = require('./_helpers')
 
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 
-// ── 沙箱: 必须在 require state.js 之前设好，PLANS_DIR 是模块加载期求值的 ──
-// 同时覆盖 CODEBUDDY_PROJECT_DIR 与 CLAUDE_PROJECT_DIR —— state.js 的 PROJECT_ROOT
-// 优先取 CODEBUDDY_PROJECT_DIR（CodeBuddy 宿主会设置该变量），只覆盖 CLAUDE_PROJECT_DIR
-// 会导致沙箱失效、读到真实项目目录。
-const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-figma-'))
-process.env.CODEBUDDY_PROJECT_DIR = SANDBOX
-process.env.CLAUDE_PROJECT_DIR = SANDBOX
-fs.mkdirSync(path.join(SANDBOX, '.codebuddy', 'plans'), { recursive: true })
+// ── 沙箱: 必须在 require state.js 之前建好，两个环境变量都要覆盖（原因见 _helpers.js 头注释）──
+const sandbox = makeSandbox('harness-figma-')
+const storyDir = sandbox.storyDir
 
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const { buildAgentPrompt } = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 const { createWorkflow, refreshStoryInput } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
-
-let pass = 0
-const failures = []
-
-function ok (name, cond, detail) {
-  if (cond) {
-    pass++
-    console.log(`  OK   ${name}`)
-  } else {
-    failures.push(name)
-    console.log(`  FAIL ${name}${detail ? '  ->  ' + detail : ''}`)
-  }
-}
-
-function section (title) {
-  console.log(`\n-- ${title} --`)
-}
-
-const storyDir = id => path.join(SANDBOX, '.codebuddy', 'plans', id)
 
 function writeInput (id, obj) {
   fs.mkdirSync(storyDir(id), { recursive: true })
@@ -248,16 +225,4 @@ ok('无 UI task -> 不注入对齐段',
   !/Figma 设计稿对齐/.test(buildAgentPrompt({ storyId: 'FG-DETECT', targetPhase: 2 }).agentPrompt))
 
 // ════════════════════════════════════════════════════════════
-try {
-  fs.rmSync(SANDBOX, { recursive: true, force: true })
-} catch (e) { /* 清理失败不影响结论 */ }
-
-const total = pass + failures.length
-console.log(`\n${'='.repeat(48)}`)
-if (failures.length === 0) {
-  console.log(`通过 ${pass} / ${total}   [全绿]`)
-  process.exit(0)
-} else {
-  console.log(`通过 ${pass} / ${total}\n失败项:\n  - ${failures.join('\n  - ')}`)
-  process.exit(1)
-}
+summarize(sandbox)

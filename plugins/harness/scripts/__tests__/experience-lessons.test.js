@@ -21,28 +21,13 @@
 
 const path = require('path')
 
+const { ok, section, summarize } = require('./_helpers')
+
 const SCRIPTS_DIR = path.resolve(__dirname, '..')
 const experience = require(path.join(SCRIPTS_DIR, 'services/experience'))
 const raw = require(path.join(SCRIPTS_DIR, 'experience/failure-patterns.json'))
 
 const MAX_ITEMS = 5 // 与 getLessonsForPhase 默认值一致
-
-let pass = 0
-const failures = []
-
-function ok (name, cond, detail) {
-  if (cond) {
-    pass++
-    console.log(`  OK   ${name}`)
-  } else {
-    failures.push(name)
-    console.log(`  FAIL ${name}${detail ? '  ->  ' + detail : ''}`)
-  }
-}
-
-function section (title) {
-  console.log(`\n-- ${title} --`)
-}
 
 /**
  * 归并键 —— 与 getLessonsForPhase 的 `failureType + resolution` 等价。
@@ -153,11 +138,5 @@ ok('不再出现已删除的输出字段名',
   !/phaseSummaryContent|promptInjectionTemplate/.test(allInjected))
 
 // ════════════════════════════════════════════════════════════
-console.log(`\n${'─'.repeat(48)}`)
-if (failures.length === 0) {
-  console.log(`✅ ${pass} 项断言全部通过`)
-  process.exit(0)
-} else {
-  console.log(`❌ ${failures.length} 项失败 / 共 ${pass + failures.length} 项:\n  - ${failures.join('\n  - ')}`)
-  process.exit(1)
-}
+// 本测试无沙箱（EXPERIENCE_DIR 由 __dirname 推导，不受环境变量影响），故不传 sandbox
+summarize()

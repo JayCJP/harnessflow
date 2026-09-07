@@ -114,15 +114,9 @@ function readStdin () {
  * 输出 JSON 格式的 HookOutput 到 stdout
  */
 function main () {
-  let inputData = {}
-  try {
-    const stdinData = readStdin()
-    if (stdinData.trim()) {
-      inputData = JSON.parse(stdinData)
-    }
-  } catch (e) {
-    // stdin 为空或 JSON 解析失败，忽略
-  }
+  // 消费 stdin：本 hook 无字段需要解析（工作流信息从 findActiveWorkflows 现取），
+  // 但保留读取动作与其余 hook 一致，避免宿主写入侧行为分叉
+  try { readStdin() } catch (e) { /* stdin 为空或读取失败，忽略 */ }
 
   // 扫描活跃工作流（复用 hook-utils 的新版路径逻辑）
   const activeWorkflows = hookUtils.findActiveWorkflows()

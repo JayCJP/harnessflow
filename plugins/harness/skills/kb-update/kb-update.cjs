@@ -32,7 +32,7 @@ function parseMetaYaml (content) {
   const domainsBlock = content.match(/domains:\s*\n([\s\S]*?)(?=\n\S|$)/)
   if (!domainsBlock) return result
 
-  const idRe = /^  - id:\s*"([^"]+)"/gm
+  const idRe = /^ {2}- id:\s*"([^"]+)"/gm
   let m
   while ((m = idRe.exec(domainsBlock[1])) !== null) {
     result.domains.push({ id: m[1], path: '', files: [] })
@@ -52,7 +52,7 @@ function parseMetaYaml (content) {
     const block = blockMatch[1]
 
     // 匹配任意 *_files / stores / apis / components / files 等字段
-    const fileFieldRe = /\b(\w*(?:files|stores|apis|components|entries))\s*:\s*(\[[\s\S]*?\]|\n\s*- "[\s\S]*?(?=\n\s{4}\w|\n  -|\n\s*$))/g
+    const fileFieldRe = /\b(\w*(?:files|stores|apis|components|entries))\s*:\s*(\[[\s\S]*?\]|\n\s*- "[\s\S]*?(?=\n\s{4}\w|\n {2}-|\n\s*$))/g
     let fm
     const collected = []
     while ((fm = fileFieldRe.exec(block)) !== null) {
@@ -88,8 +88,8 @@ function matchFileToDomain (file, domain) {
 let changedFiles = []
 const errors = []
 
-try { var currentHash = execSync('git rev-parse HEAD', { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 10000 }).trim() }
-catch (e) { errors.push('git rev-parse failed: ' + e.message); currentHash = '' }
+let currentHash = ''
+try { currentHash = execSync('git rev-parse HEAD', { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 10000 }).trim() } catch (e) { errors.push('git rev-parse failed: ' + e.message); currentHash = '' }
 
 let lastHash = currentHash
 if (fs.existsSync(META_PATH)) {
@@ -113,7 +113,7 @@ if (fs.existsSync(META_PATH)) {
 }
 
 // 匹配受影响域
-let affectedDomains = []
+const affectedDomains = []
 if (changedFiles.length > 0) {
   for (const domain of meta.domains) {
     const matched = changedFiles.filter(f => matchFileToDomain(f, domain))

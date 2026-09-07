@@ -18,33 +18,14 @@ const PROJECT_ROOT = process.cwd()
 // v2：去掉 frontend 硬编码层，知识库根为 .docs/llm-knowledge/
 const KB_ROOT = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
 const META_PATH = path.join(KB_ROOT, 'meta.yaml')
-// v2：源码根从 .profile.yaml 读取（不再写死 src/）
-const PROFILE_PATH = path.join(KB_ROOT, '.profile.yaml')
 
-/**
- * 从 .profile.yaml 读取源码根，兜底返回 'src'
- * @returns {string} 相对 PROJECT_ROOT 的源码根
- */
-function readSourceRoot () {
-  try {
-    if (fs.existsSync(PROFILE_PATH)) {
-      const content = fs.readFileSync(PROFILE_PATH, 'utf-8')
-      const m = content.match(/source_root:\s*"([^"]+)"/)
-      if (m) return m[1]
-    }
-  } catch (e) { /* ignore */ }
-  return 'src'
-}
-
-const SRC_ROOT = path.join(PROJECT_ROOT, readSourceRoot())
-
-function parseMetaYaml(content) {
+function parseMetaYaml (content) {
   const result = { git: {}, domains: [] }
   const hm = content.match(/hash:\s*"([^"]+)"/)
   if (hm) result.git.hash = hm[1]
 
   // 逐个提取 domain 块（v2：文件字段通用化，不再假设 stores/apis/components）
-  const domainRegex = /\n  - id:\s*"([^"]+)"([\s\S]*?)(?=\n  - id:\s*"|\n\S|$)/g
+  const domainRegex = /\n {2}- id:\s*"([^"]+)"([\s\S]*?)(?=\n {2}- id:\s*"|\n\S|$)/g
   let match
   while ((match = domainRegex.exec(content)) !== null) {
     const id = match[1]
@@ -61,7 +42,7 @@ function parseMetaYaml(content) {
       d.files.push(...im[2].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean))
     }
     // 多行数组: field:\n  - "a"\n  - "b"
-    const mlRe = /(\w*(?:files|stores|apis|components|entries))\s*:\s*\n([\s\S]*?)(?=\n\s{4}\w|\n  -|\n\s*$)/g
+    const mlRe = /(\w*(?:files|stores|apis|components|entries))\s*:\s*\n([\s\S]*?)(?=\n\s{4}\w|\n {2}-|\n\s*$)/g
     let mm
     while ((mm = mlRe.exec(block)) !== null) {
       const items = mm[2].match(/- "([^"]+)"/g)
