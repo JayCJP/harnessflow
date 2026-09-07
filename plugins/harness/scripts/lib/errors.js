@@ -16,7 +16,8 @@
  *
  * 说明:
  *   - level 是恢复等级：1=自动修复，2=提示修复，3=降级，4=人工介入。
- *     policy.js 的 attemptAutoRecovery 只处理 level 1。
+ *     当前 policy.js 的 RECOVERY_SUGGESTIONS 无 level 1 条目（历史 3 个 autoFix 永不执行，
+ *     已连同其驱动函数 attemptAutoRecovery 一并删除），实际只用到 2/3/4。
  *   - 本模块零依赖，可安全被任意层引用。
  */
 

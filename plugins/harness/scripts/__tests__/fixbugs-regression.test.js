@@ -135,7 +135,7 @@ ok('P0 给出 story-input.json 路径（不内联原文，优化上下文）', /
 ok('P0 含自行调 skill 指引', p0.agentPrompt.includes('tapd-bug-analyzer'))
 ok('P0 含「不写修复方案」', /不要写修复方案|不写修复方案|只记录事实|只记事实/.test(p0.agentPrompt))
 // expectedOutputs 是主 Agent 校验子 Agent 产出物汇报的依据，
-// 只进 expectedDescriptions（prompt 文字）会导致漏检 —— 见 harness-conductor/SKILL.md
+// 只进 expectedDescriptions（prompt 文字）会导致漏检 —— 见 harness/SKILL.md
 ok('P0 expectedOutputs 含 bug分析报告', JSON.stringify(p0.expectedOutputs).includes('bug分析报告'))
 ok('P0 产出要求文字含 bug分析报告', p0.agentPrompt.includes('bug分析报告'))
 

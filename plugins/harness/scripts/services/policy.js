@@ -5,16 +5,16 @@
  * 职责:
  *   - runGateCheck: 按 Phase 执行门控（产出物存在性 → JSON Schema → Phase 特定契约 → 资源完整性）
  *   - 产出结构化 blocker（携带 failureType），供 experience.js 直接沉淀，无需从文本反推类型
- *   - matchRecoverySuggestion / attemptAutoRecovery: 为 blocker 匹配分级恢复建议并尝试自动修复
+ *   - matchRecoverySuggestion: 为 blocker 匹配分级恢复建议（level 决定主 Agent 的下一步）
  *   - checkContractRegression: 契约回归检查（增量 lint + build）
  *
  * 用法:
  *   作为模块引用:
- *     const { runGateCheck, attemptAutoRecovery } = require('./services/policy')
+ *     const { runGateCheck, matchRecoverySuggestion } = require('./services/policy')
  *
  * 使用场景:
  *   - commands/advance-phase.js 每次 Phase 推进前调用 runGateCheck 裁定能否推进
- *     （:893 失败时先 attemptAutoRecovery 再重跑，:928 为残余 blocker 取恢复建议）
+ *     （失败时为残余 blocker 取恢复建议，随 structuredBlockers 一并返回给主 Agent）
  *   - commands/dispatch.js 调度前的门控「预检」，仅用于决定该干活还是该修复，
  *     裁定权始终在 advance-phase.js，dispatch 不写状态
  *   - 内部依赖 services/schema-validator.js 做 JSON 产出物的 Schema 校验
@@ -23,12 +23,13 @@
  * 说明:
  *   - 三层解耦中的「门控层」——独立于编排逻辑，是推理链条之外不受污染的检查点：
  *     门控层的价值正在于它是整条 agent 推理链条之外的决策节点，不参与推理、不受推理结果影响
- *   - v2.0 结构化 blocker: 每个 blocker 携带 failureType，直接用于经验沉淀；
- *     兜底策略为无匹配类型 → unknown → 自动沉淀 + 人工补录
- *   - 设计原则 (来自腾讯云 MAS Harness 文章): 硬性规则不可绕过（数据访问边界、操作黑名单）；
- *     软性规则触发审批/降级（风险评分、低置信度二次确认）；动态规则来自经验沉淀（历史失败模式）
+ *   - v2.1 failureType 由 lib/contracts.js 在校验产生处标记（issues[].type），本模块不再
+ *     用字符串关键词反推类型（2026-09 移除 4 段 includes() 猜谜：改文案即掉 unknown）
  *   - RECOVERY_SUGGESTIONS 分 4 级: Level 1 自动修复 / Level 2 提示修复 / Level 3 降级通过 /
- *     Level 4 阻止并人工介入
+ *     Level 4 阻止并人工介入。当前无 Level 1 条目 —— 历史上有 3 个 autoFix（name→title 等）
+ *     但触发条件与修复条件互斥，永不执行，已连同 7 条死条目一并删除
+ *   - 新增校验必须在 RECOVERY_SUGGESTIONS 登记 type，否则 blocker 落 unknown；
+ *     __tests__/optimization-regression.test.js 第 9 节有静态扫描护栏
  *
  * @module policy
  */
@@ -116,36 +117,11 @@ const RECOVERY_SUGGESTIONS = {
     action: '验收标准 ID 必须唯一，请检查并修正重复 ID',
     autoFixable: false
   },
-  // Phase 0→1: open-questions 有未解决项
-  open_questions_unresolved: {
-    level: 3,
-    action: '逐项确认 open-questions 中的问题并更新 resolved 字段',
-    autoFixable: false
-  },
   // Phase 1→2: Figma frame 缺少 id/name/link/type
   figma_frame_incomplete: {
     level: 2,
     action: '每个 Figma frame 必须有 id、name、link 字段',
     autoFixable: false
-  },
-  // Phase 1→2: task-dag 字段名错误 (name→title)
-  task_field_name: {
-    level: 1,
-    action: 'task-dag.json 中应使用 "title" 而非 "name"',
-    autoFixable: true,
-    autoFix: function (storyId) {
-      const data = readJsonArtifact(storyId, ARTIFACT.TASK_DAG_JSON)
-      if (!data || !Array.isArray(data.tasks)) return false
-      let fixed = false
-      for (const t of data.tasks) {
-        if (t.name && !t.title) { t.title = t.name; delete t.name; fixed = true }
-      }
-      if (fixed) {
-        const filePath = path.join(getStoryDir(storyId), ARTIFACT.TASK_DAG_JSON)
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
-      }
-      return fixed
-    }
   },
   // Phase 1→2: task 缺少 id
   task_missing_id: {
@@ -154,23 +130,12 @@ const RECOVERY_SUGGESTIONS = {
     autoFixable: false
   },
   // Phase 1→2: task 缺少 title
+  // 原为 level 1 + autoFix(name→title)，但触发条件是「task 既无 name 也无 title」，
+  // autoFix 里的 `if (t.name && !t.title)` 恒 false —— 声称可自动修复实则永不执行，故降为 level 2
   task_missing_title: {
-    level: 1,
+    level: 2,
     action: '为每个 task 添加 title 字段（使用 title 而非 name）',
-    autoFixable: true,
-    autoFix: function (storyId) {
-      const data = readJsonArtifact(storyId, ARTIFACT.TASK_DAG_JSON)
-      if (!data || !Array.isArray(data.tasks)) return false
-      let fixed = false
-      for (const t of data.tasks) {
-        if (t.name && !t.title) { t.title = t.name; delete t.name; fixed = true }
-      }
-      if (fixed) {
-        const filePath = path.join(getStoryDir(storyId), ARTIFACT.TASK_DAG_JSON)
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
-      }
-      return fixed
-    }
+    autoFixable: false
   },
   // Phase 1→2: 跨项目 task description 缺少行号引用
   task_missing_line_ref: {
@@ -220,6 +185,12 @@ const RECOVERY_SUGGESTIONS = {
     action: 'Task 引用的 AC ID 必须在 acceptance-criteria.json 中存在',
     autoFixable: false
   },
+  // Phase 1→2: AC↔Task 交叉引用 - 引用写成了 "AC-1: 描述" 而非纯 ID
+  ac_ref_format_drift: {
+    level: 3,
+    action: 'task-dag.json 的 acceptanceCriteria 必须写纯 AC ID（如 "AC-1"），不能带描述文本（"AC-1: 描述"）',
+    autoFixable: false
+  },
   // Phase 0→1: PRD 功能点未全部落到 AC 上
   prd_coverage_missing: {
     level: 2,
@@ -263,37 +234,6 @@ const RECOVERY_SUGGESTIONS = {
     autoFixable: false,
     resolution: 'advance-phase.js <storyId> 2 --fix-loop'
   },
-  // Phase 3→4: code-review.json 不存在
-  code_review_missing: {
-    level: 4,
-    action: '需先 spawn 代码审查师 (code-reviewer) 产出 code-review.json',
-    autoFixable: false
-  },
-  // Phase 4→5: evidence 字符串→数组
-  evidence_not_array: {
-    level: 1,
-    action: 'acceptance-verification.json 中 evidence 应为字符串数组',
-    autoFixable: true,
-    autoFix: function (storyId) {
-      const data = readJsonArtifact(storyId, ARTIFACT.ACCEPTANCE_VERIFICATION)
-      if (!data || !Array.isArray(data.results)) return false
-      let fixed = false
-      // 修复字段名: verificationResults → results, acId → id
-      if (data.verificationResults && !data.results) {
-        data.results = data.verificationResults; delete data.verificationResults; fixed = true
-      }
-      if (!Array.isArray(data.results)) return false
-      for (const r of data.results) {
-        if (r.acId && !r.id) { r.id = r.acId; delete r.acId; fixed = true }
-        if (typeof r.evidence === 'string') { r.evidence = [r.evidence]; fixed = true }
-      }
-      if (fixed) {
-        const filePath = path.join(getStoryDir(storyId), ARTIFACT.ACCEPTANCE_VERIFICATION)
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
-      }
-      return fixed
-    }
-  },
   // Phase 4→5: AC 验收未通过
   ac_verification_failed: {
     level: 2,
@@ -319,30 +259,17 @@ const RECOVERY_SUGGESTIONS = {
     action: 'acceptance-verification.json 每条 result 必须有 evidence 数组',
     autoFixable: false
   },
+  // Phase 4→5: acceptance-verification.json 不存在（不可达：policy.js 有 exists 守卫，
+  // 仅 checkAcceptanceVerification 被独立调用时可能出现，登记以免落 unknown）
+  av_missing_file: {
+    level: 2,
+    action: '请先产出 acceptance-verification.json',
+    autoFixable: false
+  },
   // 产出物缺失
   artifact_missing: {
     level: 4,
     action: '请先完成对应 Phase 的产出物',
-    autoFixable: false
-  },
-  // Phase 3/4 修复回路：代码审查发现 BLOCKER → 回退 Phase 2
-  fix_loop_code_review: {
-    level: 2,
-    action: '代码审查发现 BLOCKER，执行修复回路回退到 Phase 2 由前端开发工程师修复',
-    autoFixable: false,
-    resolution: `${ADVANCE_CMD} <storyId> 2 --fix-loop`
-  },
-  // Phase 3/4 修复回路：功能测试失败 → 回退 Phase 2
-  fix_loop_test_failed: {
-    level: 2,
-    action: '功能测试未通过，执行修复回路回退到 Phase 2 由前端开发工程师修复',
-    autoFixable: false,
-    resolution: `${ADVANCE_CMD} <storyId> 2 --fix-loop`
-  },
-  // 修复回路耗尽：已达最大轮次（按失败源独立预算：code-review 与 test 各 2 次）
-  fix_loop_exhausted: {
-    level: 4,
-    action: '已达当前失败源的最大修复轮次 (代码审查 2 次 / 功能测试 2 次，独立计数)，需人工介入：1)人工评审剩余BLOCKER 2)联系需求分析师确认AC 3)联系任务规划师重新拆解',
     autoFixable: false
   },
   // JSON 产出物解析失败（语法错误）
@@ -377,8 +304,8 @@ function matchRecoverySuggestion (blocker) {
   const lower = errorToString(blocker).toLowerCase()
   if (lower.includes('阻塞级待确认') || lower.includes('blocking')) return RECOVERY_SUGGESTIONS.blocking_unresolved
   if (lower.includes('acceptance-criteria') && lower.includes('缺少')) return RECOVERY_SUGGESTIONS.ac_format_error
-  if (lower.includes('缺少 title') || lower.includes('"name"')) return RECOVERY_SUGGESTIONS.task_field_name
-  if (lower.includes('evidence')) return RECOVERY_SUGGESTIONS.evidence_not_array
+  if (lower.includes('缺少 title') || lower.includes('"name"')) return RECOVERY_SUGGESTIONS.task_missing_title
+  if (lower.includes('evidence')) return RECOVERY_SUGGESTIONS.task_missing_evidence
   if (lower.includes('blocker')) return RECOVERY_SUGGESTIONS.code_review_blocker
   if (lower.includes('acceptancecriteria') && lower.includes('空')) return RECOVERY_SUGGESTIONS.empty_ac_ref
   if (lower.includes('行号引用') || lower.includes('line 45') || lower.includes('l123')) return RECOVERY_SUGGESTIONS.task_missing_line_ref
@@ -533,41 +460,13 @@ function checkResourceIntegrity (storyId, phaseNum, state, result) {
  *   完整性与 nodeId 引用在 Phase 1→2 门控 checkPhase1Gate 校验）
  */
 function checkPhase0Gate (storyId, state, result) {
-  // 验收标准 — 将 errors 字符串转为结构化 blocker
+  // 验收标准 — issues 由 contracts.js 在产生处标记 type/level/resolution，此处直接转 blocker
   // 注意：acceptance-criteria.json 的文件存在性已由 checkPhaseArtifact 覆盖，
   //       此处 checkAcceptanceCriteria 返回 exists=false 时不重复记录，只处理内容错误
   const acCheck = checkAcceptanceCriteria(storyId)
   if (acCheck.exists && !acCheck.valid) {
-    for (const e of acCheck.errors) {
-      // 从 error 文本推断 failureType
-      const lower = String(e).toLowerCase()
-      let type = 'ac_format_error'
-      let level = 2
-      let resolution = '检查 acceptance-criteria.json 格式'
-
-      if (lower.includes('缺少 id') || lower.includes('缺少id')) {
-        type = 'ac_missing_id'
-        resolution = '为每条验收标准添加唯一 id 字段'
-      } else if (lower.includes('缺少 description') || lower.includes('缺少description')) {
-        type = 'ac_missing_description'
-        resolution = '为每条验收标准添加 description 字段'
-      } else if (lower.includes('为空') || lower.includes('至少')) {
-        type = 'ac_empty_criteria'
-        resolution = 'criteria 数组至少需要 1 条验收标准'
-      } else if (lower.includes('重复') && lower.includes('id')) {
-        type = 'ac_duplicate_id'
-        resolution = '验收标准 ID 必须唯一，请检查并修正重复 ID'
-      } else if (lower.includes('不存在')) {
-        type = 'ac_format_error'
-        level = 4
-        resolution = 'acceptance-criteria.json 文件不存在，请先产出此文件'
-      } else if (lower.includes('解析失败')) {
-        type = 'ac_format_error'
-        resolution = 'JSON 格式错误，请检查文件内容'
-      }
-
-      const blocker = structuredError(type, String(e), level, resolution)
-      result.blockers.push(blocker)
+    for (const issue of acCheck.issues) {
+      result.blockers.push(structuredError(issue.type, issue.message, issue.level, issue.resolution))
       result.passed = false
     }
   }
@@ -726,56 +625,13 @@ function checkBugReportScope (storyId, result) {
  * Phase 1→2 门控: task-dag + AC↔Task 交叉引用 + Figma frame-inventory 完整性 & nodeId 引用（条件性，仅 hasFigmaDesign）
  */
 function checkPhase1Gate (storyId, state, result) {
+  // task-dag — issues 由 contracts.js 在产生处标记 type/level/resolution
+  // 不设 exists 守卫: 文件不存在/解析失败的 blocker（artifact_missing / json_parse_error）
+  // 正是从这里产出的，加守卫会让它们消失
   const taskCheck = checkTaskDagJson(storyId)
   if (!taskCheck.valid) {
-    for (const e of taskCheck.errors) {
-      const lower = String(e).toLowerCase()
-      let type = 'unknown'
-      let level = 2
-      let resolution = '需人工分析此错误模式'
-
-      // P2-2（2026-09）: 补齐跨项目 task 校验的结构化映射 —— 实跑中「跨项目 task
-      // 必须指定 repoPath / 必须有 description / 行号引用」等 dispatch 预检 blocker
-      // 的 failureType 全是 unknown（D4），经验库只能进「待人工补录」
-      if (lower.includes('repopath')) {
-        type = 'task_missing_repo_path'
-        resolution = '跨项目 task（project ≠ 主仓）必须指定 repoPath'
-      } else if (lower.includes('evidence')) {
-        type = 'task_missing_evidence'
-        resolution = '跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索'
-      } else if (lower.includes('description')) {
-        type = 'task_missing_description'
-        resolution = '跨项目 task 必须有 description 字段（含行号引用）'
-      } else if (lower.includes('行号引用')) {
-        type = 'task_missing_line_ref'
-        resolution = '跨项目 task 的 description 必须包含行号引用（如 L123 或 line 45）'
-      } else if (lower.includes('缺少 id') && lower.includes('task')) {
-        type = 'task_missing_id'
-        resolution = '为每个 task 添加唯一 id 字段'
-      } else if (lower.includes('缺少 title') || lower.includes('"name"')) {
-        type = 'task_missing_title'
-        level = 1
-        resolution = '为每个 task 添加 title 字段（使用 title 而非 name）'
-      // 括号仅为显式化优先级：此处语义是 (含 acceptancecriteria 且含「空」) 或 含「缺少」
-      } else if ((lower.includes('acceptancecriteria') && lower.includes('空')) || lower.includes('缺少')) {
-        type = 'empty_ac_ref'
-        resolution = '每个 task 的 acceptanceCriteria 至少引用 1 条 AC'
-      } else if (lower.includes('重复') && lower.includes('task') && lower.includes('id')) {
-        type = 'task_duplicate_id'
-        resolution = 'Task ID 必须唯一'
-      } else if (lower.includes('不存在')) {
-        type = 'artifact_missing'
-        level = 4
-        resolution = 'task-dag.json 文件不存在，请先产出此文件'
-      } else if (lower.includes('解析失败')) {
-        type = 'json_parse_error'
-        resolution = 'JSON 格式错误，请检查 task-dag.json'
-      } else if (lower.includes('为空') && lower.includes('tasks')) {
-        type = 'empty_ac_ref'
-        resolution = 'tasks 数组不能为空'
-      }
-
-      result.blockers.push(structuredError(type, String(e), level, resolution))
+    for (const issue of taskCheck.issues) {
+      result.blockers.push(structuredError(issue.type, issue.message, issue.level, issue.resolution))
       result.passed = false
     }
   }
@@ -788,25 +644,8 @@ function checkPhase1Gate (storyId, state, result) {
   }
 
   if (!refCheck.valid) {
-    for (const e of refCheck.errors) {
-      const lower = String(e).toLowerCase()
-      let type = 'unknown'
-      let level = 2
-      let resolution = '需人工分析此错误模式'
-
-      if (lower.includes('未被') && lower.includes('引用') && lower.includes('验收')) {
-        type = 'orphan_ac'
-        resolution = '每条验收标准至少被 1 个 Task 引用'
-      } else if (lower.includes('不存在') && lower.includes('ac')) {
-        type = 'invalid_ac_ref'
-        resolution = 'Task 引用的 AC ID 必须在 acceptance-criteria.json 中存在'
-      } else if (lower.includes('均不存在')) {
-        type = 'invalid_ac_ref'
-        level = 4
-        resolution = 'acceptance-criteria.json 和 task-dag.json 均不存在'
-      }
-
-      result.blockers.push(structuredError(type, String(e), level, resolution))
+    for (const issue of refCheck.issues) {
+      result.blockers.push(structuredError(issue.type, issue.message, issue.level, issue.resolution))
       result.passed = false
     }
   }
@@ -1061,29 +900,8 @@ function checkPhase4Gate (storyId, result) {
   checkEvidenceQuality(storyId, avCheck, result)
 
   // AV 内部校验错误 → 结构化
-  for (const e of avCheck.errors) {
-    const lower = String(e).toLowerCase()
-    let type = 'unknown'
-    let level = 2
-    let resolution = '需人工分析'
-
-    if (lower.includes('缺少 id') || lower.includes('缺少id')) {
-      type = 'av_missing_id'
-      resolution = '每条 result 必须有 id 字段（对应 AC ID）'
-    } else if (lower.includes('缺少 evidence') || lower.includes('缺少evidence')) {
-      type = 'av_missing_evidence'
-      resolution = '每条 result 必须有 evidence 数组（至少 1 条）'
-    } else if (lower.includes('缺少验收结果') || lower.includes('缺少')) {
-      type = 'ac_missing_verification'
-      level = 4
-      resolution = '每条验收标准必须有对应的验收结果'
-    } else if (lower.includes('缺少 results')) {
-      type = 'ac_verification_failed'
-      level = 4
-      resolution = 'acceptance-verification.json 必须有 results 数组'
-    }
-
-    result.blockers.push(structuredError(type, String(e), level, resolution))
+  for (const issue of avCheck.issues) {
+    result.blockers.push(structuredError(issue.type, issue.message, issue.level, issue.resolution))
     result.passed = false
   }
 
@@ -1385,41 +1203,6 @@ function runBuildCheck (repoRoot) {
   }
 }
 
-// ─── 错误恢复执行 ───────────────────────────────────────────────
-
-/**
- * 尝试自动修复门控失败
- * @param {string} storyId
- * @param {Array} recoveries - 恢复建议列表
- * @returns {{ fixed: boolean, fixedCount: number, details: string[] }}
- */
-function attemptAutoRecovery (storyId, recoveries) {
-  const details = []
-  let fixedCount = 0
-
-  for (const r of recoveries) {
-    if (!r.suggestion || !r.suggestion.autoFixable || !r.suggestion.autoFix) continue
-
-    try {
-      const fixed = r.suggestion.autoFix(storyId)
-      if (fixed) {
-        fixedCount++
-        details.push(`✅ 自动修复: ${r.suggestion.action}`)
-      }
-    } catch (e) {
-      details.push(`❌ 自动修复失败: ${r.suggestion.action} - ${e.message}`)
-    }
-  }
-
-  // debug 载荷层：自动恢复过程留痕（每项尝试的成功/失败明细）
-  debugLog.record(storyId, 'method_output', {
-    method: 'attemptAutoRecovery',
-    result: { fixed: fixedCount > 0, fixedCount, details }
-  }, { source: 'policy.js' })
-
-  return { fixed: fixedCount > 0, fixedCount, details }
-}
-
 module.exports = {
   RECOVERY_SUGGESTIONS,
   runGateCheck,
@@ -1428,6 +1211,5 @@ module.exports = {
   checkPhase3Gate,
   checkPhase4Gate,
   checkContractRegression,
-  matchRecoverySuggestion,
-  attemptAutoRecovery
+  matchRecoverySuggestion
 }

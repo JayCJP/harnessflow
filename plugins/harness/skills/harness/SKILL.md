@@ -1,17 +1,64 @@
 ---
-name: harness-conductor
+name: harness
 description: >
-  Harness 工作流编排器 — 调度 Agent、管理 Phase 推进、错误恢复决策。
-  由 harness-start 交棒后加载，也可在已有工作流中途直接加载继续编排。
-  骨架含三步循环与铁律；8 Phase 门控详情与脚本 API 文档在 references/ 下按需读取。
+  Harness 工作流执行器 — 8 Phase 端到端流水线（Bug 分析 → 需求分析 → 任务规划 →
+  代码开发 → 审查 → 测试 → 部署）。两条入口：新建工作流（识别 run / fixbugs 意图、
+  写 story-input.json、启动）与继续编排（已有工作流中途恢复）。
+  用户说「做个需求 / 开发功能 / 实现某页面」「修 bug / 处理 TAPD 缺陷 / 某功能报错」
+  「继续 / 恢复某个 Story」，或直接调用 /harness 时使用本 skill。
 ---
 
-# Harness Conductor — 工作流编排器
+# Harness — 工作流执行器
 
-> **渐进式披露**：本文档只保留每次循环必用的**骨架**（核心原则、执行流程、Spawn 前置注入、铁律）。
-> 条件性内容已外移到 `references/`：8 Phase 逐相门控（`phases/phase-N.md`）、
-> 脚本 API（`api/*.md`）、错误恢复、代码检索、工作流生命周期、Prompt 单一信源。
-> 用到时按索引表 `read_file`，避免常驻 context 浪费。
+> **渐进式披露**：本文档只保留两件必用内容 —— **入口判模**与**三步循环骨架**。
+> 条件性内容已外移到 `references/`：新建工作流与 story-input schema（`启动入口.md`）、
+> 8 Phase 逐相门控（`phases/phase-N.md`）、脚本 API（`api/*.md`）、错误恢复、代码检索、
+> 工作流生命周期、Prompt 单一信源。用到时按文末索引表 `read_file`，避免常驻 context 浪费。
+
+## 入口：先选一条
+
+两条入口互斥，走完一条就进三步循环：
+
+| 条件 | 走哪条 |
+|------|--------|
+| 还没有 Story（`.codebuddy/plans/<storyId>/e2e-state.json` 不存在） | **入口 A：新建** |
+| 工作流已存在，或入口 A 刚启动完 | **入口 B：继续编排** |
+
+两套流程（run / fixbugs）走**同一条** 8 Phase 流水线。它们的全部差异都由脚本按
+`story-input.json` 自动处理（`getStoryMode` / `isPrototypeRequired` / `detectFigmaSource` /
+`prompt-builder` 的 mode 分支），**你不需要为两种模式做任何额外动作** —— 只要 mode 和 sources 写对。
+
+### 入口 A：新建工作流
+
+三步：**判模式 → 写输入 → 启动**。
+
+#### A1. 识别意图 —— 入口 A 里唯一需要判断的动作
+
+| 信号 | 判定 |
+|------|------|
+| TAPD 链接 + 「修 / bug / 缺陷 / 反馈 / 报错 / 异常 / 不生效 / 白屏」 | `fixbugs` |
+| 明确的故障描述（现有功能坏了、行为不对） | `fixbugs` |
+| 原型链接 / Figma 链接 / 「新增 / 开发 / 实现 / 支持 / 做一个」 | `run` |
+| 两类信号并存，或都没有 | 用 `AskUserQuestion` 问一次，**不要猜** |
+| 用户拒答或仍无法判定 | 兜底 `run` |
+
+**兜底为什么选 `run`**：误判成 `fixbugs` 会**静默**关掉 Figma 硬门控，UI 开发全程没有 frame 清单
+校验且没人会发现；误判成 `run` 只会在 Phase 0 门控处**显性**阻塞（要求原型分析 / featurePoints），
+一眼可见、一步可改。fail-loud 优于 fail-silent。
+
+#### A2. 写输入并启动
+
+`sources` 字段表、两个 JSON 样例、schema 约束、启动命令全部在 `references/启动入口.md` ——
+**现在 `read_file` 它**，按 Step 2A / 2B 执行。
+
+> 🚫 入口 A 到此为止 —— 不要在这里判断 Phase、不要拼 prompt、不要自己调 `advance-phase.js`。
+> 那些是下面三步循环的事。
+
+启动成功后进 **入口 B**。
+
+### 入口 B：继续编排
+
+进入下面的**三步循环**。这是本 skill 的核心，也是运行时唯一需要反复执行的部分。
 
 ## 核心原则
 
@@ -28,7 +75,7 @@ description: >
 **触发权 ≠ 决定权**：命令由主 Agent 敲，但是否合法由 `advance-phase.js` 独立裁定。
 主 Agent 传错 targetPhase（越界／跨阶／倒退）会被脚本拒绝，不会写坏状态。
 
-## 执行流程
+## 执行流程（三步循环）
 
 每个循环只有三步。**主 Agent 不读状态、不做判断、不拼 prompt。**
 
@@ -99,20 +146,34 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 
 ## 铁律
 
-- 🚫 AI 不直接写/改 `e2e-state.json`
-- 🚫 AI 不直接写/改 `dev-pass.json`
-- 🚫 AI 不跳过 Phase
-- 🚫 AI 不自标记 `open-questions.json` resolved
-- 🚫 AI（主 Agent）不直接写/改 Phase 契约产出物（`acceptance-criteria.json` / `task-dag.json` /
+**状态与契约**（门控的自证性，破了就等于自己放行）:
+
+- 🚫 不直接写 / 改 `e2e-state.json` 或 `dev-pass.json`（状态机唯一信源，hook 会拦截）
+- 🚫 不跳过 Phase
+- 🚫 不自标记 `open-questions.json` resolved
+- 🚫 主 Agent 不直接写 / 改 Phase 契约产出物（`acceptance-criteria.json` / `task-dag.json` /
   `*-verification.json` 等）—— 门控校验的就是这些文件，主 Agent 手改等于自己放行；要改就派对应
   子 Agent 增量更新（P3-1，2026-09 实跑诊断：主 Agent 曾手改 AC/task-dag/自写 fix-verification）
+
+**职责不越界**（分析必须在子 Agent 上下文内完成）:
+
+- 🚫 主 Agent 不加载 `tapd-bug-analyzer`、不调任何 TAPD MCP 工具 —— 中间推理会在跨 Agent 传递中
+  丢失，且上下文被原始数据撑满，后续 8 个 Phase 全程带着无关内容
+- 🚫 主 Agent 不分析 Bug / 不判断改哪些文件 —— 那是 Phase 0 与 Phase 2 的职责
+- 🚫 主 Agent 不自行拼 Phase 0 prompt —— `agentPrompt` 是唯一出口，自行拼装会导致注入内容逐轮不一致
 
 ---
 
 ## 按需读取的资源（渐进式披露）
 
-> 下面三张表的触发条件都是**动作**，不是「想了解就读」。没发生对应动作就不要读，
+> 下面四张表的触发条件都是**动作**，不是「想了解就读」。没发生对应动作就不要读，
 > 常驻 context 只需要上面的骨架。
+
+### 启动
+
+| 场景 | 读取文件 |
+|------|---------|
+| 需要新建工作流 / 写 `story-input.json` / 查 `sources` 字段与样例 | `references/启动入口.md` |
 
 ### 编排通用
 

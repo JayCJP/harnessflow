@@ -69,20 +69,41 @@ function readJsonArtifact (storyId, fileName) {
 }
 
 /**
+ * 记录一条结构化校验问题
+ *
+ * 双写设计: issues 带 type/level/resolution 供 policy.js 直接转成 blocker，
+ * errors 同步写入纯字符串供既有外部消费者（harness-audit.js / validate-contracts.js /
+ * dispatch.js / __tests__）读取 —— 这些消费者只读字符串，改结构会波及它们。
+ * 双写保证两者永不漂移，且省去在每个 return 前做 errors = issues.map(i => i.message)。
+ *
+ * @param {Object} result - check* 函数的累积结果对象（须含 issues[] 与 errors[]）
+ * @param {string} type - failureType，必须与 policy.js 的 RECOVERY_SUGGESTIONS key 对齐
+ * @param {string} message - 中文人读描述
+ * @param {number} [level=2] - 恢复等级: 1=自动修复 2=提示修复 3=降级通过 4=阻止并人工介入
+ * @param {string} [resolution=''] - 给 Agent 的修复建议
+ * @returns {void}
+ */
+function pushIssue (result, type, message, level = 2, resolution = '') {
+  result.issues.push({ type, message, level, resolution })
+  result.errors.push(message)
+}
+
+/**
  * 检查验收标准契约 (acceptance-criteria.json) 是否完整
  * @param {string} storyId - Story ID
- * @returns {{ exists: boolean, valid: boolean, count: number, errors: string[] }}
+ * @returns {{ exists: boolean, valid: boolean, count: number, issues: Array, errors: string[] }}
  */
 function checkAcceptanceCriteria (storyId) {
-  const result = { exists: false, valid: false, count: 0, errors: [] }
+  const result = { exists: false, valid: false, count: 0, issues: [], errors: [] }
   const data = readJsonArtifact(storyId, ACCEPTANCE_CRITERIA_FILE)
 
   if (!data) {
-    result.errors.push(`${ACCEPTANCE_CRITERIA_FILE} 不存在`)
+    // 不可达: policy.js 有 exists 守卫前置，此处仅为函数被独立调用时保持语义完整
+    pushIssue(result, 'ac_format_error', `${ACCEPTANCE_CRITERIA_FILE} 不存在`, 4, 'acceptance-criteria.json 文件不存在，请先产出此文件')
     return result
   }
   if (data._parseError) {
-    result.errors.push(`JSON 解析失败: ${data._parseError}`)
+    pushIssue(result, 'ac_format_error', `JSON 解析失败: ${data._parseError}`, 2, 'JSON 格式错误，请检查文件内容')
     return result
   }
 
@@ -90,23 +111,23 @@ function checkAcceptanceCriteria (storyId) {
 
   // 检查 criteria 数组
   if (!Array.isArray(data.criteria)) {
-    result.errors.push('缺少 criteria 数组')
+    pushIssue(result, 'ac_format_error', '缺少 criteria 数组', 2, '检查 acceptance-criteria.json 格式')
   } else {
     result.count = data.criteria.length
     if (result.count === 0) {
-      result.errors.push('criteria 数组为空，至少需要 1 条验收标准')
+      pushIssue(result, 'ac_empty_criteria', 'criteria 数组为空，至少需要 1 条验收标准', 2, 'criteria 数组至少需要 1 条验收标准')
     }
     // 检查每条 AC 的必填字段
     for (let i = 0; i < data.criteria.length; i++) {
       const ac = data.criteria[i]
-      if (!ac.id) result.errors.push(`AC[${i}]: 缺少 id`)
-      if (!ac.description) result.errors.push(`AC[${i}]: 缺少 description`)
+      if (!ac.id) pushIssue(result, 'ac_missing_id', `AC[${i}]: 缺少 id`, 2, '为每条验收标准添加唯一 id 字段')
+      if (!ac.description) pushIssue(result, 'ac_missing_description', `AC[${i}]: 缺少 description`, 2, '为每条验收标准添加 description 字段')
     }
     // 检查 ID 唯一性
     const ids = data.criteria.map(c => c.id).filter(Boolean)
     const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
     if (dupes.length > 0) {
-      result.errors.push(`重复的 AC ID: ${[...new Set(dupes)].join(', ')}`)
+      pushIssue(result, 'ac_duplicate_id', `重复的 AC ID: ${[...new Set(dupes)].join(', ')}`, 2, '验收标准 ID 必须唯一，请检查并修正重复 ID')
     }
   }
 
@@ -158,29 +179,29 @@ function checkOpenQuestions (storyId) {
  * @returns {{ exists: boolean, valid: boolean, tasks: Array, errors: string[], warnings: string[] }}
  */
 function checkTaskDagJson (storyId) {
-  const result = { exists: false, valid: false, tasks: [], errors: [], warnings: [] }
+  const result = { exists: false, valid: false, tasks: [], issues: [], errors: [], warnings: [] }
   const data = readJsonArtifact(storyId, TASK_DAG_JSON_FILE)
   const repos = loadRepos(storyId)
 
   if (!data) {
-    result.errors.push(`${TASK_DAG_JSON_FILE} 不存在`)
+    pushIssue(result, 'artifact_missing', `${TASK_DAG_JSON_FILE} 不存在`, 4, 'task-dag.json 文件不存在，请先产出此文件')
     return result
   }
   if (data._parseError) {
-    result.errors.push(`JSON 解析失败: ${data._parseError}`)
+    pushIssue(result, 'json_parse_error', `JSON 解析失败: ${data._parseError}`, 2, 'JSON 格式错误，请检查 task-dag.json')
     return result
   }
 
   result.exists = true
 
   if (!Array.isArray(data.tasks)) {
-    result.errors.push('缺少 tasks 数组')
+    pushIssue(result, 'empty_ac_ref', '缺少 tasks 数组', 2, '每个 task 的 acceptanceCriteria 至少引用 1 条 AC')
     return result
   }
 
   result.tasks = data.tasks
   if (data.tasks.length === 0) {
-    result.errors.push('tasks 数组为空')
+    pushIssue(result, 'empty_ac_ref', 'tasks 数组为空', 2, 'tasks 数组不能为空')
   }
 
   for (let i = 0; i < data.tasks.length; i++) {
@@ -188,12 +209,12 @@ function checkTaskDagJson (storyId) {
     const prefix = `Task[${task.id || i}]`
 
     // 检查必填字段
-    if (!task.id) result.errors.push(`${prefix}: 缺少 id`)
-    if (!task.title) result.errors.push(`${prefix}: 缺少 title`)
+    if (!task.id) pushIssue(result, 'task_missing_id', `${prefix}: 缺少 id`, 2, '为每个 task 添加唯一 id 字段')
+    if (!task.title) pushIssue(result, 'task_missing_title', `${prefix}: 缺少 title`, 2, '为每个 task 添加 title 字段（使用 title 而非 name）')
 
     // 检查 acceptanceCriteria 引用
     if (!Array.isArray(task.acceptanceCriteria) || task.acceptanceCriteria.length === 0) {
-      result.errors.push(`${prefix}: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）`)
+      pushIssue(result, 'empty_ac_ref', `${prefix}: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）`, 2, '每个 task 的 acceptanceCriteria 至少引用 1 条 AC')
     }
 
     // 检查 files 范围（用于 dev-pass 限域）
@@ -203,7 +224,7 @@ function checkTaskDagJson (storyId) {
 
     // 跨项目 task 校验：有 project 字段时必须有 repoPath
     if (task.project && task.project !== repos.primary && !task.repoPath) {
-      result.errors.push(`${prefix}: 跨项目 task (project=${task.project}) 必须指定 repoPath`)
+      pushIssue(result, 'task_missing_repo_path', `${prefix}: 跨项目 task (project=${task.project}) 必须指定 repoPath`, 2, '跨项目 task（project ≠ 主仓）必须指定 repoPath，否则 dev-pass 无法把改动定位到正确仓库')
     }
 
     // 跨项目 task 强制细化：description 必须包含行号引用
@@ -211,9 +232,9 @@ function checkTaskDagJson (storyId) {
       // 检查是否有 description 字段且包含行号格式（如 L123 或 L12-L45）
       const desc = task.description || ''
       if (!desc) {
-        result.errors.push(`${prefix}: 跨项目 task 必须有 description 字段`)
+        pushIssue(result, 'task_missing_description', `${prefix}: 跨项目 task 必须有 description 字段`, 2, '跨项目 task 必须有 description 字段（含行号引用）')
       } else if (!/L\d+/i.test(desc) && !/\bline\s*\d+/i.test(desc)) {
-        result.errors.push(`${prefix}: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）`)
+        pushIssue(result, 'task_missing_line_ref', `${prefix}: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）`, 2, '跨项目 task 的 description 必须包含行号引用（如 L123 或 line 45）')
       }
     }
 
@@ -224,9 +245,9 @@ function checkTaskDagJson (storyId) {
       const ev = task.evidence
       const sourceOk = ev && typeof ev.source === 'string' && ev.source.includes('graphify')
       if (!sourceOk) {
-        result.errors.push(`${prefix}: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索`)
+        pushIssue(result, 'task_missing_evidence', `${prefix}: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索`, 2, '跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索')
       } else if (!ev.ref || typeof ev.ref !== 'string') {
-        result.errors.push(`${prefix}: 跨项目 task 的 evidence.ref 不能为空（填实际执行的 graphify query 或命中的文档路径）`)
+        pushIssue(result, 'task_missing_evidence', `${prefix}: 跨项目 task 的 evidence.ref 不能为空（填实际执行的 graphify query 或命中的文档路径）`, 2, '跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索')
       }
     }
   }
@@ -235,7 +256,7 @@ function checkTaskDagJson (storyId) {
   const ids = data.tasks.map(t => t.id).filter(Boolean)
   const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
   if (dupes.length > 0) {
-    result.errors.push(`重复的 Task ID: ${[...new Set(dupes)].join(', ')}`)
+    pushIssue(result, 'task_duplicate_id', `重复的 Task ID: ${[...new Set(dupes)].join(', ')}`, 2, 'Task ID 必须唯一')
   }
 
   result.valid = result.errors.length === 0
@@ -249,14 +270,14 @@ function checkTaskDagJson (storyId) {
  * @returns {{ valid: boolean, orphanACs: string[], invalidRefs: Array, errors: string[] }}
  */
 function validateContractReferences (storyId) {
-  const result = { valid: false, orphanACs: [], invalidRefs: [], errors: [], warnings: [] }
+  const result = { valid: false, orphanACs: [], invalidRefs: [], issues: [], errors: [], warnings: [] }
 
   const acData = readJsonArtifact(storyId, ACCEPTANCE_CRITERIA_FILE)
   const taskData = readJsonArtifact(storyId, TASK_DAG_JSON_FILE)
 
   // 两个契约文件都不存在 → 无法验证
   if (!acData && !taskData) {
-    result.errors.push('acceptance-criteria.json 和 task-dag.json 均不存在，无法验证交叉引用')
+    pushIssue(result, 'invalid_ac_ref', 'acceptance-criteria.json 和 task-dag.json 均不存在，无法验证交叉引用', 2, 'Task 引用的 AC ID 必须在 acceptance-criteria.json 中存在')
     return result
   }
 
@@ -294,24 +315,28 @@ function validateContractReferences (storyId) {
     // 避免格式问题传播到下游，减少后续 Story 重复出现
     if (formatDrifts.length > 0) {
       const driftedTaskIds = [...new Set(formatDrifts.map(d => d.taskId))]
-      result.errors.push(
+      pushIssue(
+        result,
+        'ac_ref_format_drift',
         `检测到 ${formatDrifts.length} 处 AC 引用格式漂移（Task: ${driftedTaskIds.join(', ')}），` +
         'acceptanceCriteria 必须使用纯 ID（如 "AC-1"）而非 "AC-1: 描述"。请修复 task-dag.json 后重新提交。' +
-        `（示例: 将 "${formatDrifts[0].rawValue}" 改为 "${formatDrifts[0].normalizedId}"）`
+        `（示例: 将 "${formatDrifts[0].rawValue}" 改为 "${formatDrifts[0].normalizedId}"）`,
+        3,
+        'acceptanceCriteria 必须使用纯 AC ID（如 "AC-1"），不能写成 "AC-1: 描述文本"'
       )
     }
 
     // 找出未被任何 Task 引用的孤立 AC
     result.orphanACs = allACIds.filter(id => !referencedACIds.has(id))
     if (result.orphanACs.length > 0) {
-      result.errors.push(`${result.orphanACs.length} 条验收标准未被任何 Task 引用: ${result.orphanACs.join(', ')}`)
+      pushIssue(result, 'orphan_ac', `${result.orphanACs.length} 条验收标准未被任何 Task 引用: ${result.orphanACs.join(', ')}`, 2, '每条验收标准至少被 1 个 Task 引用，请检查 task-dag.json 的 acceptanceCriteria')
     }
   }
 
   if (result.invalidRefs.length > 0) {
-    result.errors.push(
-      ...result.invalidRefs.map(r => `Task ${r.taskId} 引用了不存在的 AC: ${r.referencedAC}`)
-    )
+    for (const r of result.invalidRefs) {
+      pushIssue(result, 'invalid_ac_ref', `Task ${r.taskId} 引用了不存在的 AC: ${r.referencedAC}`, 2, 'Task 引用的 AC ID 必须在 acceptance-criteria.json 中存在')
+    }
   }
 
   result.valid = result.errors.length === 0
@@ -325,22 +350,23 @@ function validateContractReferences (storyId) {
  * @returns {{ exists: boolean, allPassed: boolean, results: Array, failed: Array, errors: string[] }}
  */
 function checkAcceptanceVerification (storyId) {
-  const result = { exists: false, allPassed: false, results: [], failed: [], unverifiable: [], errors: [] }
+  const result = { exists: false, allPassed: false, results: [], failed: [], unverifiable: [], issues: [], errors: [] }
   const data = readJsonArtifact(storyId, ACCEPTANCE_VERIFICATION_FILE)
 
   if (!data) {
-    result.errors.push(`${ACCEPTANCE_VERIFICATION_FILE} 不存在`)
+    // 不可达: policy.js:1023 有 exists 守卫前置，此处仅为函数被独立调用时保持语义完整
+    pushIssue(result, 'av_missing_file', `${ACCEPTANCE_VERIFICATION_FILE} 不存在`, 2, '请先产出 acceptance-verification.json')
     return result
   }
   if (data._parseError) {
-    result.errors.push(`JSON 解析失败: ${data._parseError}`)
+    pushIssue(result, 'json_parse_error', `JSON 解析失败: ${data._parseError}`, 2, 'JSON 格式错误，请检查 acceptance-verification.json')
     return result
   }
 
   result.exists = true
 
   if (!Array.isArray(data.results)) {
-    result.errors.push('缺少 results 数组')
+    pushIssue(result, 'ac_missing_verification', '缺少 results 数组', 4, 'acceptance-verification.json 必须有 results 数组')
     return result
   }
 
@@ -359,7 +385,7 @@ function checkAcceptanceVerification (storyId) {
     const prefix = `Result[${r.id || i}]`
 
     if (!r.id) {
-      result.errors.push(`${prefix}: 缺少 id`)
+      pushIssue(result, 'av_missing_id', `${prefix}: 缺少 id`, 2, '每条 result 必须有 id 字段（对应 AC ID）')
       continue
     }
     verifiedACIds.add(r.id)
@@ -371,7 +397,7 @@ function checkAcceptanceVerification (storyId) {
     }
 
     if (!Array.isArray(r.evidence) || r.evidence.length === 0) {
-      result.errors.push(`${prefix}: 缺少 evidence（需提供验收证据）`)
+      pushIssue(result, 'av_missing_evidence', `${prefix}: 缺少 evidence（需提供验收证据）`, 2, '每条 result 必须有 evidence 数组（至少 1 条）')
     }
   }
 
@@ -379,7 +405,7 @@ function checkAcceptanceVerification (storyId) {
   if (expectedACIds) {
     for (const acId of expectedACIds) {
       if (!verifiedACIds.has(acId)) {
-        result.errors.push(`AC ${acId}: 缺少验收结果`)
+        pushIssue(result, 'ac_missing_verification', `AC ${acId}: 缺少验收结果`, 4, '每条验收标准必须有对应的验收结果')
       }
     }
   }

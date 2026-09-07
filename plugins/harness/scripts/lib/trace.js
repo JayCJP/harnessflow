@@ -26,7 +26,8 @@
  * 说明:
  *   - trace.jsonl 每行一条 JSON，字段含 ts / storyId / type，type 覆盖
  *     agent_spawn、agent_result、tool_call、agent_message、gate_decision、
- *     phase_transition、error_recovery、experience、git
+ *     phase_transition、experience、git
+ *     （error_recovery 曾由 --auto-fix 写入，该 flag 已移除，故此类型不再产生）
  *   - tool_call 与 agent_message 互补: tool_call 记录「调了什么工具」，
  *     agent_message 记录「产出/消费了哪些产物、命中了哪些知识库域」，两者结合才能还原完整证据链
  *   - tool_call 的 ts 与 resourceHash 是「时间戳前置校验」与「特征指纹」的依据，
@@ -45,7 +46,7 @@ const { ARTIFACT } = require('./artifacts')
  * 追加一条 trace 记录到 story 的 trace.jsonl
  * @param {string} storyId - Story ID
  * @param {Object} entry - trace 条目
- * @param {string} entry.type - 事件类型: agent_spawn|tool_call|gate_decision|agent_message|phase_transition|error_recovery|experience
+ * @param {string} entry.type - 事件类型: agent_spawn|tool_call|gate_decision|agent_message|phase_transition|experience
  * @param {string} [entry.agent] - 涉及的 Agent 名称
  * @param {string} [entry.tool] - 工具名称
  * @param {string} [entry.phase] - Phase 编号
@@ -197,24 +198,6 @@ function tracePhaseTransition (storyId, fromPhase, toPhase) {
 }
 
 /**
- * 记录错误恢复
- * @param {string} storyId
- * @param {number} phase - Phase 编号
- * @param {string} errorType - 错误类型
- * @param {string} recoveryAction - 恢复动作
- * @param {boolean} recovered - 是否成功恢复
- */
-function traceErrorRecovery (storyId, phase, errorType, recoveryAction, recovered) {
-  appendTrace(storyId, {
-    type: 'error_recovery',
-    phase: String(phase),
-    result: recovered ? 'recovered' : 'failed',
-    reason: errorType,
-    details: { recoveryAction }
-  })
-}
-
-/**
  * 记录 Git 操作事件（commit、push、MR 等）
  * @param {string} storyId
  * @param {string} action - 操作: init|add|commit|push|mr
@@ -257,7 +240,6 @@ module.exports = {
   traceGitEvent,
   traceGateDecision,
   tracePhaseTransition,
-  traceErrorRecovery,
   traceExperience
 }
 

@@ -2,7 +2,7 @@
   "version": 1,
   "marketplaceName": "harness-marketplace",
   "manifestMtime": 1785490576449.2356,
-  "createdAt": 1788514871386,
+  "createdAt": 1788754029398,
   "plugins": [
     {
       "name": "harness",
@@ -53,7 +53,7 @@
         },
         {
           "name": "test-engineer",
-          "description": "Phase 4 功能测试。逐条验证 acceptance-criteria.json 中的每条 AC 是否通过（支持 Playwright MCP 实跑），产出 test-report.md 与 acceptance-verification.json。只验证，不改代码。",
+          "description": "Phase 4 功能测试。逐条验证 acceptance-criteria.json 中的每条 AC 是否通过（人工点验 + 静态审读 + 真实接口验证），产出 test-report.md 与 acceptance-verification.json。只验证，不改代码。",
           "path": "agents\\测试工程师.md"
         },
         {

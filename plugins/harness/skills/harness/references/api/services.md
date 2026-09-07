@@ -39,14 +39,15 @@
 ```js
 { RECOVERY_SUGGESTIONS, runGateCheck, checkPhase0Gate, checkPhase1Gate,
   checkPhase3Gate, checkPhase4Gate, checkContractRegression,
-  matchRecoverySuggestion, attemptAutoRecovery }
+  matchRecoverySuggestion }
 ```
 
 `runGateCheck(storyId, phaseNum, state)` → `{ passed, blockers[], warnings[], recoveries[], _meta }`。
 `phaseNum` 是**当前**（来源）Phase，判定「能否离开它」。
 
 每个 blocker 是结构化对象 `{ type, message, level, resolution }`，`type` 即 failureType，
-供 `experience.js` 直接沉淀，无需从文本反推。`level`：1=自动修复 2=提示修复 3=降级 4=人工。
+由 `lib/contracts.js` 在校验产生处标记（`pushIssue`），供 `experience.js` 直接沉淀。
+`level`：2=提示修复 3=降级 4=人工（level 1 自动修复当前无条目，见 `../../错误恢复.md`）。
 
 未登记的 failureType 会命中 `RECOVERY_SUGGESTIONS.unknown`（level 3）并产生 warning，
 提示补录为独立条目 —— 见到这个 warning 就该往 `RECOVERY_SUGGESTIONS` 加条目。

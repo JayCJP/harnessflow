@@ -44,11 +44,14 @@ node $HARNESS/dispatch.js <storyId>
 node $HARNESS/advance-phase.js <storyId> <phase>              # 推进（必须等于 currentPhase+1）
 node $HARNESS/advance-phase.js <storyId> 2 --renew-pass       # 续签 dev-pass，不推进
 node $HARNESS/advance-phase.js <storyId> 3 --lint-fix         # 按 task-dag 仓库逐个 eslint --fix
-node $HARNESS/advance-phase.js <storyId> <phase> --auto-fix   # 门控失败先尝试自动恢复再重跑
 node $HARNESS/advance-phase.js <storyId> <phase> --rollback   # 回退：归档中间产出物
-node $HARNESS/advance-phase.js <storyId> 2 --fix-loop         # 修复回路
+node $HARNESS/advance-phase.js <storyId> 2 --fix-loop         # 修复回路（仅 Phase 3/4 可用）
 HARNESS_RUN_BUILD=1 node $HARNESS/advance-phase.js <id> 3     # 启用本地编译校验
 ```
+
+> `--auto-fix` 已移除：它驱动的 `attemptAutoRecovery` 依赖 `RECOVERY_SUGGESTIONS` 的
+> `autoFixable` 条目，而现有条目全为 `false`，该通道实际从不修复任何东西。
+> 门控失败请按输出里的 `structuredBlockers[].resolution` 逐项修复后重跑。
 
 **输出只看 `success` 一个字段**：
 - `true` → 回 Step 1 重新 dispatch

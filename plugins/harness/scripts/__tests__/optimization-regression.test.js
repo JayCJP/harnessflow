@@ -406,4 +406,44 @@ try {
 }
 
 // ════════════════════════════════════════════════════════════
+section('9. 结构化 issues: type 必须已登记在 RECOVERY_SUGGESTIONS')
+
+// 护栏: contracts.js 现在在产生处用 pushIssue 标记 failureType，policy.js 不再做
+// 字符串关键词反推。新增校验时若写了一个未登记的 type，blocker 会静默落 unknown，
+// 经验库就只能进「待人工补录」—— 与 P2-2 要消灭的 D4 是同一个问题。
+// 这里静态扫描 contracts.js 的 pushIssue 调用，把漏登记挡在提交前。
+const contractsSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib/contracts.js'), 'utf-8')
+const pushedTypes = [...contractsSrc.matchAll(/pushIssue\(\s*result\s*,\s*'([a-z_]+)'/g)].map(m => m[1])
+ok('contracts.js 至少提取到 15 个 pushIssue type', pushedTypes.length >= 15, `实际 ${pushedTypes.length}`)
+
+const registeredTypes = Object.keys(policy.RECOVERY_SUGGESTIONS)
+const unregistered = [...new Set(pushedTypes)].filter(t => !registeredTypes.includes(t))
+ok('所有 pushIssue type 均已登记 RECOVERY_SUGGESTIONS', unregistered.length === 0,
+  `未登记: ${unregistered.join(', ')}`)
+
+// errors 必须与 issues 一一对应 —— 否则外部消费者（dispatch/audit/validate-contracts）
+// 读到的字符串视图会与结构化数据漂移
+fs.mkdirSync(storyDir('OPT-IS'), { recursive: true })
+writeState('OPT-IS', 1)
+fs.writeFileSync(path.join(storyDir('OPT-IS'), 'task-dag.json'), JSON.stringify({
+  tasks: [
+    { id: 'task-1', title: 't', files: ['src/x.js'], acceptanceCriteria: [], parallelizable: false },
+    { title: '无 id', files: ['src/y.js'], acceptanceCriteria: ['AC-1'], parallelizable: false }
+  ]
+}))
+const isAc = state.checkAcceptanceCriteria('OPT-IS')
+const isTd = state.checkTaskDagJson('OPT-IS')
+for (const [name, chk] of [['checkTaskDagJson', isTd], ['checkAcceptanceCriteria', isAc]]) {
+  ok(`${name} 同时返回 issues 与 errors`, Array.isArray(chk.issues) && Array.isArray(chk.errors))
+  ok(`${name} 的 errors 与 issues 一一对应`,
+    chk.errors.length === chk.issues.length && chk.issues.every(i => chk.errors.includes(i.message)),
+    `errors=${JSON.stringify(chk.errors)} issues=${JSON.stringify(chk.issues.map(i => i.type))}`)
+}
+ok('errors 仍是纯字符串（未破坏外部消费者）',
+  isTd.errors.every(e => typeof e === 'string'), JSON.stringify(isTd.errors))
+ok('issues 带 type/level/resolution',
+  isTd.issues.length > 0 && isTd.issues.every(i => i.type && typeof i.level === 'number' && i.resolution),
+  JSON.stringify(isTd.issues))
+
+// ════════════════════════════════════════════════════════════
 summarize(sandbox)

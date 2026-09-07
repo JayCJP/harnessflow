@@ -1,6 +1,6 @@
 # 8 Phase 流水线索引（按需读取）
 
-> 本目录从 `harness-conductor/SKILL.md` 与已删除的 `harness-run/SKILL.md` 附录 A/B/D 外移。
+> 本目录从 `harness/SKILL.md` 与已归档的旧 skill 附录 A/B/D 外移。
 > **不要整目录通读**：`advance-phase.js` 在 Phase N→N+1 报门控失败时，只读 `phase-N.md`。
 
 ## 总表
@@ -12,9 +12,9 @@
 | 2 | 代码开发 | `frontend-developer` | 代码变更（git diff） | `checkPhase2Gate` |
 | 3 | 代码审查 | `code-reviewer` | `code-review.json` | `checkPhase3Gate` |
 | 4 | 功能测试 | `test-engineer` | `test-report.md` `acceptance-verification.json` | `checkPhase4Gate` |
-| 5 | Git 提交 | `release-assistant` | commit + push + MR | 仅产出物存在性 |
-| 6 | 知识库更新 | `release-assistant` | meta.yaml 刷新 | 仅产出物存在性 |
-| 7 | 云端部署 | `release-assistant` | 部署 URL + 构建号 | 仅产出物存在性 |
+| 5 | Git 提交 | `release-assistant` | commit + push + MR | **无门控**（见下方说明） |
+| 6 | 知识库更新 | `release-assistant` | meta.yaml 刷新 | **无门控**（见下方说明） |
+| 7 | 云端部署 | `release-assistant` | 部署 URL + 构建号 | **无门控**（见下方说明） |
 | 8 | —（终态） | — | 流程结束 | — |
 
 产出物清单唯一信源：`lib/state.js` 的 `PHASE_ARTIFACTS`。
@@ -31,6 +31,18 @@ Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.j
    不符即 BLOCKER（`schema_validation_failed`, level 2）。fail-closed，不降级放行。
 3. **资源完整性** `checkResourceIntegrity` — 只在 phaseNum=3 时执行：
    开发阶段 kb-query / graphify 调用为 0 → WARNING（记 debt，不阻断）。
+
+> ⚠️ **Phase 5/6/7 三道检查全部空转**，`runGateCheck` 恒返回 `passed: true`。
+> 原因：`PHASE_ARTIFACTS[5/6/7]` 的产出物是 `fileName: null`（commit / 知识库 / 部署），
+> ① 存在性检查里 `if (!a.fileName) return false` 把它们过滤掉；
+> ② `getPhaseArtifacts(5/6/7)` 返回 `[]`；③ `policy.js` 的 Phase 专属分支只到 4。
+>
+> 也就是说，**Git push、创建 MR、触发云端部署这三个不可逆动作没有任何程序拦截**。
+> 「禁止 `--no-verify`」「不推 main 分支」等约束只存在于 `phase-5.md` 与 Agent 指令文本中，
+> 靠 Agent 自觉遵守，门控看不见。
+>
+> `advance-phase.js` 写入 `state.gateChecks` 时会带 `gateImplemented: false` 标记，
+> 让上下文摘要与度量统计能区分「检查通过」与「压根没查」。
 
 ## Story 目录结构
 

@@ -3,13 +3,13 @@
 ## 职责
 
 原有 4 个命令入口已迁移为可直接触发的 Skill；其中 run / fixbugs 进一步合并为单一入口
-`harness-start`（意图识别决定 mode）。脚本命令仍位于 `plugins/harness/scripts/commands/`。
+`harness`（意图识别决定 mode，见「入口 A」）。脚本命令仍位于 `plugins/harness/scripts/commands/`。
 
 ## 命令清单
 
 | 入口 | Skill | 用途 |
 |------|------|------|
-| run / fixbugs | harness-start | 统一入口：识别意图判 mode，梳理输入，启动后交棒 conductor |
+| run / fixbugs | harness | 入口 A：识别意图判 mode，梳理输入，启动后进三步循环 |
 | archive | harness-archive | Story 归档 |
 | evolve | harness-evolve | Harness 自进化（体检→度量→诊断→治疗→验证） |
 

@@ -16,8 +16,6 @@
  *     Phase 2 续签 dev-pass，不推进相位
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 3 --lint-fix
  *     Phase 2→3 时按 task-dag.json 涉及的仓库逐个执行 eslint --fix
- *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase> --auto-fix
- *     门控失败时先让 policy.js 尝试自动恢复，再重跑一遍门控
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase> --rollback
  *     回退到更早 Phase：归档中间产出物；targetPhase <= 2 时重置修复预算
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 2 --fix-loop
@@ -40,7 +38,8 @@
  *     取回 spawnPrompt，交给前端开发工程师做限域修复
  *   - Phase 2 开发未完成但 dev-pass 已过期时，用 --renew-pass 续签，避免回退重来
  *   - 发现前一 Phase 方向错误（如任务拆解不合理）需要重做时，用 --rollback 归档中间产物并回退
- *   - 门控因格式类问题（如 acceptance-criteria.json 字段缺失）失败时，加 --auto-fix 先尝试自动恢复
+ *   - 门控失败时无自动恢复通道：RECOVERY_SUGGESTIONS 里没有 autoFixable 条目，
+ *     所有 blockers 都需 Agent 按 resolution 修好后重试（或 Phase 3/4 走 --fix-loop）
  *
  * 说明:
  *   - --renew-pass / --rollback / --fix-loop 三条分支的实现下沉在 phase-ops/ 下各自独立文件
@@ -134,6 +133,18 @@ const ADVANCE_CMD = `node "${path.resolve(__dirname, 'advance-phase.js').replace
 /** archive-story.js 的绝对调用形式（同上，动态推导 + 正斜杠，无需手工改写路径） */
 const ARCHIVE_CMD = `node "${path.resolve(__dirname, 'archive-story.js').replace(/\\/g, '/')}"`
 
+/**
+ * 无门控的 Phase 列表
+ *
+ * 这些 Phase 的 PHASE_ARTIFACTS 产出物是 `fileName: null`（代码变更 / commit+push / 知识库 / 部署），
+ * 导致 runGateCheck 的三道通用检查全部空转：
+ *   1. 产出物存在性   — artifacts-check.js 里 `if (!a.fileName) return false`，直接被过滤
+ *   2. JSON Schema    — schema-validator.js 的 getPhaseArtifacts(5/6/7) 返回 []
+ *   3. Phase 专属契约 — policy.js 的分支只处理 phaseNum 0-4
+ * 因此它们恒返回 passed:true。提交/部署的安全性依赖 Agent prompt 指令，不依赖程序拦截。
+ */
+const NO_GATE_PHASES = [5, 6, 7]
+
 // ========================
 // CLI 参数解析
 // ========================
@@ -143,7 +154,6 @@ let storyId = null
 let targetPhase = null
 let renewFlag = false
 let lintFixFlag = false
-let autoFixFlag = false
 let rollbackFlag = false
 let fixLoopFlag = false
 
@@ -157,7 +167,6 @@ for (let i = 0; i < args.length; i++) {
   const arg = args[i]
   if (arg === '--renew-pass') renewFlag = true
   else if (arg === '--lint-fix') lintFixFlag = true
-  else if (arg === '--auto-fix') autoFixFlag = true
   else if (arg === '--rollback') rollbackFlag = true
   else if (arg === '--fix-loop') fixLoopFlag = true
   else if (/^\d+$/.test(arg)) numericArgs.push(arg)
@@ -176,7 +185,7 @@ if (numericArgs.length > 0) {
 
 if (!storyId || targetPhase === null) {
   emit({
-    error: '用法: node advance-phase.js <storyId> <phase> [--renew-pass] [--lint-fix] [--auto-fix] [--rollback] [--fix-loop]',
+    error: '用法: node advance-phase.js <storyId> <phase> [--renew-pass] [--lint-fix] [--rollback] [--fix-loop]',
     example: '  node advance-phase.js STORY-002 2\n  node advance-phase.js STORY-002 1 --rollback\n  node advance-phase.js STORY-002 2 --fix-loop'
   })
   process.exit(1)
@@ -369,6 +378,22 @@ if (rollbackFlag) {
 // ========================
 
 if (fixLoopFlag) {
+  // 修复回路只服务于 Phase 3/4（代码审查 / 功能测试失败 → 回退 Phase 2 重做）。
+  // 依据: dispatch.js 的 isReviewOrTest = phase === 3 || phase === 4；
+  //       policy.js 的 _meta.fixLoopAvailable 也只在这两个 Phase 设置。
+  // 越界的后果比一般边界严重: Phase 5 之后代码已 commit+push，此处放行会让
+  // fix-loop 把 3..currentPhase 标 rolled_back、回退到 Phase 2 并重新签发 dev-pass，
+  // 等于给已发布代码重新发一张写权限通行证。
+  if (currentPhase < 3 || currentPhase > 4) {
+    emit({
+      error: `修复回路仅支持 Phase 3/4（当前 Phase ${currentPhase}(${currentPhaseName})）。` +
+        'Phase 5 之后代码已提交/部署，回退重发 dev-pass 会覆盖已发布代码。' +
+        '需要返工请新建 Story，或用 --rollback 显式回滚',
+      storyId,
+      currentPhase
+    })
+    process.exit(1)
+  }
   const looped = runFixLoop({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   emit(looped.output)
   process.exit(looped.exitCode)
@@ -447,7 +472,7 @@ if (targetPhase !== currentPhase + 1) {
 // ========================
 
 /** @type {{ passed: boolean, blockers: Array<{type:string,message:string,level:number,resolution:string}>, warnings: string[], recoveries: Array, _meta: Object }} */
-let combinedResult = { passed: true, blockers: [], warnings: [], recoveries: [], _meta: {} }
+const combinedResult = { passed: true, blockers: [], warnings: [], recoveries: [], _meta: {} }
 
 for (let p = currentPhase; p < targetPhase; p++) {
   console.error(`\n--- Phase ${p}(${getPhaseName(p)}) → Phase ${p + 1}(${getPhaseName(p + 1)}) 门控检查 ---`)
@@ -493,37 +518,6 @@ for (let p = currentPhase; p < targetPhase; p++) {
 // ========================
 
 if (!combinedResult.passed) {
-  // Level 1: 尝试自动修复
-  if (autoFixFlag && combinedResult.recoveries.length > 0) {
-    console.error('\n--- 🔧 自动修复尝试 ---')
-    const recovery = policy.attemptAutoRecovery(storyId, combinedResult.recoveries)
-    for (const d of recovery.details) {
-      console.error(`  ${d}`)
-    }
-
-    if (recovery.fixed) {
-      console.error('\n--- 🔄 重新门控检查 ---')
-      // 重新执行门控
-      combinedResult = { passed: true, blockers: [], warnings: [], recoveries: [], _meta: {} }
-      for (let p = currentPhase; p < targetPhase; p++) {
-        const gateResult = policy.runGateCheck(storyId, p, state)
-        trace.traceErrorRecovery(storyId, p, 'gate_failure', 'auto_fix', gateResult.passed)
-        combinedResult.passed = combinedResult.passed && gateResult.passed
-        for (const b of gateResult.blockers) {
-          const bType = errorToType(b)
-          if (!combinedResult.blockers.find(cb => errorToType(cb) === bType)) {
-            combinedResult.blockers.push(b)
-          }
-        }
-        combinedResult.warnings.push(...gateResult.warnings)
-        if (gateResult._meta) {
-          combinedResult._meta = { ...combinedResult._meta, ...gateResult._meta }
-        }
-        if (!gateResult.passed) break
-      }
-    }
-  }
-
   // 仍然失败: 记录经验 — 按 failureType 聚合，避免同根因产生大量重复记录
   if (!combinedResult.passed) {
     // 1. 按 failureType 聚合 blockers
@@ -581,11 +575,12 @@ if (!combinedResult.passed) {
       .map(r => `  → ${r.suggestion.action} (Level ${r.suggestion.level})`)
 
     // nextAction 强语义输出：降低主 Agent 理解成本，直接给出下一步动作
+    // 无 --auto-fix 分支: 该 flag 曾驱动 policy.attemptAutoRecovery，但 RECOVERY_SUGGESTIONS
+    // 里已无任何 autoFixable 条目（历史 3 个 autoFix 的触发条件与修复条件互斥，永不执行），
+    // 整个 Level 1 通道连同 flag 一并删除，不留「可尝试自动修复」的空承诺
     const nextAction = combinedResult._meta?.fixLoopAvailable
       ? { action: 'run_fix_loop', command: combinedResult._meta.fixLoopHint, description: '执行修复回路: 提取问题 → 回退 Phase 2 → 签发限域 dev-pass → Spawn 开发者修复' }
-      : (autoFixFlag
-          ? { action: 'manual_fix', command: null, description: '自动修复未能解决所有 blockers，需人工分析处理' }
-          : { action: 'retry_with_auto_fix', command: `${ADVANCE_CMD} ${storyId} ${targetPhase} --auto-fix`, description: '可尝试 --auto-fix 自动修复格式类问题' })
+      : { action: 'manual_fix', command: null, description: '需人工分析 blockers 并修复后重试' }
 
     emit({
       success: false,
@@ -602,7 +597,7 @@ if (!combinedResult.passed) {
       recoverySuggestions: recoveryHints.length > 0 ? recoveryHints : undefined,
       hint: combinedResult._meta?.fixLoopAvailable
         ? `发现可修复问题，建议执行: ${combinedResult._meta.fixLoopHint}`
-        : (autoFixFlag ? '自动修复未能解决所有问题，请手动处理' : '可添加 --auto-fix 尝试自动修复')
+        : '请按 blockers 逐项修复后重试'
     })
     process.exit(1)
   }
@@ -636,9 +631,15 @@ if (!Array.isArray(state.gateChecks.gateValidationResults)) {
 }
 state.gateChecks.gateValidationResults.push({
   targetPhase,
-  pass: true,
+  // 走到此处说明门控已通过（失败分支早已 exit），pass/blockers 直接从结果取，不再硬编码。
+  // gateImplemented=false 表示本 Phase 的产出物是 fileName:null（git diff / commit / 部署），
+  // 三道通用检查全部空转 —— 是「没查」而非「查了通过」。
+  // 下游 context-refresh.js（上下文摘要）与 metrics-aggregator.js（BLOCKER 统计）
+  // 据此区分两者，避免把零检查当成全绿。
+  gateImplemented: !NO_GATE_PHASES.includes(currentPhase),
+  pass: combinedResult.passed,
   timestamp: now.toISOString(),
-  blockers: [],
+  blockers: combinedResult.blockers,
   warnings: combinedResult.warnings
 })
 
