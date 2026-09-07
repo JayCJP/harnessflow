@@ -804,6 +804,54 @@ function buildAgentPrompt (opts) {
   return result
 }
 
+/**
+ * 构造 Phase 2 的逐 batch spawn 序列
+ *
+ * 收编自 dispatch.js 分支 A 的批次构造逻辑。此前该逻辑在 dispatch.js 与
+ * advance-phase.js 各有一份逐行同构的实现，两处判定「要不要拆批」的口径一旦分叉，
+ * 主 Agent 会拿到两种粒度不同的批次划分。收敛到信源层后只剩一处判定。
+ *
+ * 只在 task-dag.json 声明了 **多个** batch 时产出；单批/无 batches 字段（旧数据）
+ * 返回空序列 —— 单批场景主通道是整份 Phase 2 prompt，多给一层批次包装是噪音。
+ *
+ * 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 白名单」，
+ * task 正文仍以 task-dag.json 为唯一信源（遵守 v2「不再内联截断契约内容」）。
+ *
+ * @param {Object} opts
+ * @param {string} opts.storyId - Story ID
+ * @param {number} [opts.summaryPhase] - 取摘要的 Phase，缺省 targetPhase - 1
+ * @param {number} [opts.targetPhase] - 目标 Phase，缺省 2
+ * @returns {{ batches: Array<{batchId:number, taskIds:string[], agent:string|null,
+ *   agentLabel:string|null, agentPrompt:string, expectedOutputs:string[]}>,
+ *   instruction: string|null }} 无需拆批时返回 { batches: [], instruction: null }
+ */
+function buildBatchSequence (opts) {
+  const { storyId } = opts
+  const targetPhase = opts.targetPhase !== undefined ? opts.targetPhase : 2
+  const summaryPhase = opts.summaryPhase !== undefined ? opts.summaryPhase : targetPhase - 1
+
+  const { batches } = readTaskBatches(storyId)
+  if (batches.length <= 1) return { batches: [], instruction: null }
+
+  const seq = batches.map(b => {
+    const pb = buildAgentPrompt({ storyId, targetPhase, summaryPhase, batchId: b.batchId })
+    return {
+      batchId: b.batchId,
+      taskIds: b.taskIds,
+      agent: pb.agent,
+      agentLabel: pb.agentLabel,
+      agentPrompt: pb.agentPrompt,
+      expectedOutputs: pb.expectedOutputs
+    }
+  })
+
+  // Spawn 的 Agent 各 batch 相同（都是 Phase 2 的开发者），取首项即可
+  const agent = seq[0] ? seq[0].agent : null
+  const instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${agent} 并注入该 batch 的 agentPrompt（files 白名单已注入各 batch prompt），全部 batch 完成后再执行 advanceCommand`
+
+  return { batches: seq, instruction }
+}
+
 module.exports = {
   buildAgentPrompt,
   buildFixLoopContext,
@@ -815,6 +863,7 @@ module.exports = {
   buildTaskPlannerFigmaInstruction,
   // P1-1 / P1-2 / P1-3（2026-09 REAL_RUN 诊断优化）
   readTaskBatches,
+  buildBatchSequence,
   buildBatchScopeSection,
   buildIncrementalFixSection,
   buildFixLoopSpawnPrompt,

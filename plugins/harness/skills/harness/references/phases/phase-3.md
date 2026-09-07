@@ -76,7 +76,8 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
 
 ## 常见失败与对策
 
-- **WARNING 级问题带病过关**：本门控只看 BLOCKER。但如果 WARNING 的 `impact` 里写了「影响 AC-3」，
-  而 Phase 4 把 AC-3 判 passed，**Phase 4→5 会以 `review_acceptance_conflict` 阻断** ——
+- **WARNING 级问题带病过关**：本门控只看 BLOCKER。但如果问题的 `impact` 里写了「影响 AC-3」，
+  而 Phase 4 把 AC-3 判 passed，Phase 4→5 会检出矛盾 —— **BLOCKER 级才阻断推进，
+  WARNING/SUGGESTION 级只作提示**（提 AC 编号常为定位上下文，不等于声称该 AC 未达成）。
   所以填 `impact` 不是可选的礼貌，它是下一道门控的输入。见 [phase-4.md](./phase-4.md)。
 - **顶层多写字段被拒**：如加了 `reviewedAt` 之类。放进 `issues[]` 内或删掉。

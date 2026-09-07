@@ -68,12 +68,18 @@ description: >
 
 ```
 ┌─ dispatch.js      = 读状态 + 说下一步   （只读，零写权限）      ─┐
+│                     ↑ 下一步指令 / agentPrompt 的唯一出口        │
 │  advance-phase.js = 判门控 + 写状态     （相位跃迁唯一执行者）   │
+│                     ↑ 只报推进结果，不输出下一步、不输出 prompt  │
 └─ 主 Agent         = 触发                （无判断权，机械执行）  ─┘
 ```
 
 **触发权 ≠ 决定权**：命令由主 Agent 敲，但是否合法由 `advance-phase.js` 独立裁定。
 主 Agent 传错 targetPhase（越界／跨阶／倒退）会被脚本拒绝，不会写坏状态。
+
+**推进后一律回 Step 1**：`advance-phase.js` 无论成功失败都不给下一步命令 ——
+成功回 Step 1 取新 Phase 指令，失败回 Step 1 取 `recovery.command`。
+命令只有一个信源，主 Agent 不自行拼 `--fix-loop` 之类的命令。
 
 ## 执行流程（三步循环）
 
@@ -93,6 +99,10 @@ Step 2: 按 status 分支（四态互斥且穷尽，无「其他情况自行处�
 
 Step 3: 子 Agent 汇报产出物路径 → 回到 Step 1
 ```
+
+> **advanceCommand 执行完，无论成功失败都回 Step 1。**
+> `advance-phase.js` 的输出只回答「推进了没有 / 门卡在哪」，`success: false` 时不要
+> 自己找恢复命令 —— 回 Step 1，dispatch 会按 status 给 `recovery.command`。
 
 如有 `warnings` → 转述给用户确认，但不因此改变分支。
 

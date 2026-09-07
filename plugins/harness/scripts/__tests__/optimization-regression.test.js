@@ -121,7 +121,7 @@ fs.writeFileSync(path.join(storyDir('OPT-NB'), 'task-dag.json'), JSON.stringify(
 }))
 ok('无 batches 字段时 readTaskBatches 返回空数组（单批兼容）', promptBuilder.readTaskBatches('OPT-NB').batches.length === 0)
 
-// 端到端: advance-phase 1→2 推进输出带 batch 级 spawn 序列（Phase 2 agentPrompt 的主通道）
+// 端到端: 推进到 Phase 2 后，dispatch 输出 batch 级 spawn 序列（Phase 2 的唯一主通道）
 const advBA = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'commands/advance-phase.js'), 'OPT-BA', '2'], {
   encoding: 'utf-8',
   env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
@@ -131,12 +131,32 @@ try { outBA = JSON.parse(advBA.stdout) } catch (e) { /* 断言会报 */ }
 ok('advance 1→2 推进成功', outBA && outBA.success === true,
   outBA ? JSON.stringify(outBA.blockers || outBA.gateChecks) : (advBA.stdout || '').slice(-300))
 if (outBA && outBA.success === true) {
-  ok('推进输出含 batches 序列（2 个）', Array.isArray(outBA.batches) && outBA.batches.length === 2,
-    JSON.stringify(outBA.batches && outBA.batches.length))
-  ok('batches[0] 为 batch 1 且含 files 白名单', outBA.batches[0].batchId === 1 && outBA.batches[0].agentPrompt.includes('src/views/login/**'))
-  ok('batches[0] 不内联 task 正文', !outBA.batches[0].agentPrompt.includes('SECRETDESC'))
-  ok('batches[1] 为 batch 2', outBA.batches[1].batchId === 2 && outBA.batches[1].agentPrompt.includes('src/api/x.js'))
-  ok('推进输出含逐 batch 指令说明', /逐 batch Spawn/.test(outBA.instruction || ''), outBA.instruction)
+  // 推进结果本身不再带 spawn 序列（职责归 dispatch）
+  ok('推进输出不再含 batches', !('batches' in outBA), JSON.stringify(Object.keys(outBA)))
+  ok('推进输出不再含 agentPrompt', !('agentPrompt' in outBA), JSON.stringify(Object.keys(outBA)))
+
+  // 回 Step 1 后 dispatch 是批次序列的唯一出口。沙箱无 git 变更时 Phase 2 门控空转
+  // （走分支 B，按契约不产出 batches），故批次内容用同一信源直调验证。
+  // 空值守卫: 字段缺失时只判失败，不让 TypeError 中断后续用例（此前会中断第 8、9 段）
+  const seqBA = dispatch('OPT-BA')
+  const bs = Array.isArray(seqBA.batches) ? seqBA.batches : []
+  const seq = promptBuilder.buildBatchSequence({ storyId: 'OPT-BA', summaryPhase: 1 })
+  const sb = seq.batches
+  const b0 = sb[0] || {}
+  const b1 = sb[1] || {}
+  const p0 = String(b0.agentPrompt || '')
+  const p1 = String(b1.agentPrompt || '')
+  ok('buildBatchSequence 产出 2 个 batch', sb.length === 2, JSON.stringify(sb.length))
+  ok('batches[0] 为 batch 1 且含 files 白名单', b0.batchId === 1 && p0.includes('src/views/login/**'),
+    JSON.stringify({ id: b0.batchId, has: p0.includes('src/views/login/**') }))
+  ok('batches[0] 不内联 task 正文', !p0.includes('SECRETDESC'))
+  ok('batches[1] 为 batch 2', b1.batchId === 2 && p1.includes('src/api/x.js'),
+    JSON.stringify({ id: b1.batchId, has: p1.includes('src/api/x.js') }))
+  ok('含逐 batch 指令说明', /逐 batch Spawn/.test(seq.instruction || ''), seq.instruction)
+  // 单批/无 batches 时不产出序列（避免给主 Agent 一层无意义的批次包装）
+  ok('单批 Story 不产出 batch 序列', promptBuilder.buildBatchSequence({ storyId: 'OPT-NB', summaryPhase: 1 }).batches.length === 0)
+  // 分支 B 按契约不产出 spawn 序列（prompt 归推进后的分支 A）
+  ok('分支 B 不产出 batches', bs.length === 0, JSON.stringify({ readyToAdvance: seqBA.readyToAdvance, n: bs.length }))
 }
 
 // ════════════════════════════════════════════════════════════

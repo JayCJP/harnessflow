@@ -4,10 +4,14 @@
  *
  * 职责:
  *   - 独立校验 targetPhase 入参合法性（范围 0~7、步长必须为 +1），越权一律拒绝
- *   - 委托 policy.js 执行门控校验，失败时输出结构化 blockers 与 nextAction
+ *   - 委托 policy.js 执行门控校验，失败时只输出结构化 blockers（不含任何下一步命令）
  *   - 门控通过后在 e2e-state.json 中完成相位跃迁，并签发/撤销 dev-pass
- *   - 生成 phase-N-summary.md 上下文摘要、委托 prompt-builder 构造下个 Agent 的 prompt
+ *   - 生成 phase-N-summary.md 上下文摘要（落盘，供 dispatch.js 构造 prompt 时读取）
  *   - 处理 --rollback 回退与 --fix-loop 修复回路两条特殊分支
+ *
+ * 不做什么（职责边界）:
+ *   - 不构造、不输出 agentPrompt / nextAgent / expectedOutputs / batches / instruction
+ *     ——「下一步怎么走」是 dispatch.js 的独占职责，本脚本只报推进结果。
  *
  * 用法:
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase>
@@ -24,8 +28,11 @@
  *   非数字参数（可带 plans/ 或 .codebuddy/plans/ 前缀）优先作为 storyId。
  *
  * 输出:
- *   - stdout: **只有**一份 JSON 结果（推进结果 / blockers / 下一步 Spawn 信息），
+ *   - stdout: **只有**一份 JSON 结果（推进结果 / 门控失败事实），
  *     调用方可直接 JSON.parse(stdout)，无需从混合文本里捞
+ *     成功: success / fromPhase / toPhase / gateChecks / devPass
+ *     失败: gatePassed=false / structuredBlockers / warnings / recoverySuggestions / hint
+ *     两种结果都**不含命令串** —— 推进后一律回 Step 1 重新执行 dispatch.js
  *   - stderr: 人类可读的进度文本（门控逐项结果、dev-pass 收发、eslint、摘要生成等）
  *   - 退出码: 0 = 成功，1 = 参数非法 / 门控失败 / 状态异常
  *   注: 2026-09 之前进度文本与 JSON 混在 stdout，测试不得不用
@@ -62,8 +69,12 @@
  *   - 归档状态守卫：Story 已归档时禁止 --rollback / --fix-loop，需先执行 archive-story.js restore。
  *   - 持久化顺序：writeStateFile 先于 trace 写入，确保 trace 不会领先于 state；
  *     summary 生成、trace 记录、度量聚合失败均不阻塞推进。
- *   - Agent prompt 统一委托 services/prompt-builder.js 构造，与 dispatch.js 共用同一信源，
- *     避免出现两份自称权威的 prompt 来源迫使主 Agent 自行拼接。
+ *   - 不 require services/prompt-builder: 本脚本不再构造 prompt。收敛前同一轮推进里
+ *     prompt 被生成三次（dispatch 分支 B 的残缺副本 → 本脚本 → 回 Step 1 后 dispatch
+ *     分支 A 那份真正被用的），prompt 唯一出口现在是 dispatch.js。
+ *   - 命令串（完整性校验失败时的 fixCommand / fixSteps 等）由 lib/paths.js 的 ADVANCE_CMD
+ *     统一提供，与 dispatch.js / policy.js 共用同一信源，不在此处二次拼装。
+ *     门控失败（最常见的失败路径）不给命令 —— 那是 dispatch.js 的 recovery 职责。
  *   - Phase 7 完成时自动触发 audit/metrics-aggregator.js 聚合度量，并标记工作流为 completed 终态。
  *
  * @module advance-phase
@@ -95,7 +106,9 @@ const trace = require('../lib/trace')
 const debugLog = require('../lib/debug-log')
 const experience = require('../services/experience')
 const contextRefresh = require('../services/context-refresh')
-const promptBuilder = require('../services/prompt-builder')
+// 命令路径与 Phase 常量收敛到 lib 公共出口（此前三处各拼一份 ADVANCE_CMD）
+const { ADVANCE_CMD, commandPath } = require('../lib/paths')
+const { MAX_PHASE } = require('../lib/phases')
 
 // 三个 --flag 子命令的实现（各自独立、都以 exit 收尾），主文件只做分派与出口
 const { runRenewPass } = require('./phase-ops/renew-pass')
@@ -123,15 +136,13 @@ function emit (o) {
 }
 
 /**
- * advance-phase.js 自身的绝对调用形式（P0-3: 运行时由脚本位置动态推导，
+ * 本脚本与 archive-story.js 的绝对调用形式（运行时由脚本位置动态推导，
  * 输出给主 Agent 的 fixCommand / nextSteps / hint 在任何 cwd、任何 shell 下可直接执行，
  * 消除「文档统一用 ${CLAUDE_PLUGIN_ROOT} 但 PowerShell 下不可执行」的缺陷 D9）。
+ * 实现下沉在 lib/paths.js，与 dispatch.js / policy.js 共用同一信源。
  * 正斜杠形式：规避 markdown 渲染层吃 `\.` 造成显示缺分隔符（2026-09 实跑反馈）
  */
-const ADVANCE_CMD = `node "${path.resolve(__dirname, 'advance-phase.js').replace(/\\/g, '/')}"`
-
-/** archive-story.js 的绝对调用形式（同上，动态推导 + 正斜杠，无需手工改写路径） */
-const ARCHIVE_CMD = `node "${path.resolve(__dirname, 'archive-story.js').replace(/\\/g, '/')}"`
+const ARCHIVE_CMD = commandPath('archive-story.js')
 
 /**
  * 无门控的 Phase 列表
@@ -229,8 +240,6 @@ const currentPhaseName = getPhaseName(currentPhase)
 //         写出 phase: 99 / phases["99_undefined"] 这类污染状态。
 // ========================
 
-const MAX_PHASE = PHASE_SLUGS.length - 1
-
 if (targetPhase < 0 || targetPhase > MAX_PHASE) {
   emit({
     error: `targetPhase 越界: ${targetPhase}，合法范围 0~${MAX_PHASE}`,
@@ -294,22 +303,28 @@ function reconcileDispatchPrecheck (storyId, completedPhase) {
   try {
     const precheck = JSON.parse(fs.readFileSync(precheckPath, 'utf-8'))
     if (Array.isArray(precheck.blockers) && precheck.blockers.length > 0) {
-      const blockerTypes = [...new Set(precheck.blockers.map(b => b.type || 'unknown'))]
-      experience.recordFailurePattern({
-        phase: completedPhase,
-        failureType: 'preGateBlocked',
-        rootCause: `dispatch 预检曾报 ${precheck.blockers.length} 个 blocker（类型: ${blockerTypes.join(', ')}，示例: ${String(precheck.blockers[0].message || '').slice(0, 150)}），修复后被门控放行`,
-        resolution: '预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS',
-        storyId,
-        blockers: precheck.blockers.map(b => String(b.message || b))
-      })
-      trace.appendTrace(storyId, {
-        type: 'experience',
-        phase: String(completedPhase),
-        result: 'captured',
-        reason: 'preGateBlocked',
-        details: { blockerCount: precheck.blockers.length, blockerTypes }
-      })
+      // artifact_missing 不计入失败经验: dispatch 首次派单到某 Phase 时，该 Phase 的产出物
+      // 必然尚未落盘 —— 这是「还没做」而不是「做了但没过门控」。不过滤的话每个 Story 的
+      // Phase 0 都会平白沉淀一条 preGateBlocked 假失败经验，并作为历史教训注入后续 Story。
+      const realBlockers = precheck.blockers.filter(b => (b.type || 'unknown') !== 'artifact_missing')
+      if (realBlockers.length > 0) {
+        const blockerTypes = [...new Set(realBlockers.map(b => b.type || 'unknown'))]
+        experience.recordFailurePattern({
+          phase: completedPhase,
+          failureType: 'preGateBlocked',
+          rootCause: `dispatch 预检曾报 ${realBlockers.length} 个 blocker（类型: ${blockerTypes.join(', ')}，示例: ${String(realBlockers[0].message || '').slice(0, 150)}），修复后被门控放行`,
+          resolution: '预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS',
+          storyId,
+          blockers: realBlockers.map(b => String(b.message || b))
+        })
+        trace.appendTrace(storyId, {
+          type: 'experience',
+          phase: String(completedPhase),
+          result: 'captured',
+          reason: 'preGateBlocked',
+          details: { blockerCount: realBlockers.length, blockerTypes }
+        })
+      }
     }
   } catch (e) {
     // 对账失败不阻塞推进（留痕文件损坏时按无记录处理）
@@ -574,30 +589,23 @@ if (!combinedResult.passed) {
       .filter(r => r.suggestion)
       .map(r => `  → ${r.suggestion.action} (Level ${r.suggestion.level})`)
 
-    // nextAction 强语义输出：降低主 Agent 理解成本，直接给出下一步动作
-    // 无 --auto-fix 分支: 该 flag 曾驱动 policy.attemptAutoRecovery，但 RECOVERY_SUGGESTIONS
-    // 里已无任何 autoFixable 条目（历史 3 个 autoFix 的触发条件与修复条件互斥，永不执行），
-    // 整个 Level 1 通道连同 flag 一并删除，不留「可尝试自动修复」的空承诺
-    const nextAction = combinedResult._meta?.fixLoopAvailable
-      ? { action: 'run_fix_loop', command: combinedResult._meta.fixLoopHint, description: '执行修复回路: 提取问题 → 回退 Phase 2 → 签发限域 dev-pass → Spawn 开发者修复' }
-      : { action: 'manual_fix', command: null, description: '需人工分析 blockers 并修复后重试' }
-
+    // 职责分离: 本脚本只报「门控没过」这一事实，不输出任何下一步命令。
+    // 此前这里输出 nextAction.command / fixLoopHint（一条 --fix-loop 命令），
+    // 与 dispatch.js 的 recovery.command 是两个信源拼出的同一条命令 —— 主 Agent
+    // 面对两个都自称权威的命令串只能自行挑一个（判断权回流）。
+    // 现在一律回 Step 1: dispatch.js 会按 status 给出 recovery.command（唯一信源）。
     emit({
       success: false,
       storyId,
       targetPhase,
       targetPhaseName: getPhaseName(targetPhase),
       gatePassed: false,
-      nextAction,
-      fixLoopAvailable: combinedResult._meta?.fixLoopAvailable || false,
-      fixLoopHint: combinedResult._meta?.fixLoopHint || null,
-      blockers: combinedResult.blockers.map(b => errorToString(b)),
-      structuredBlockers: combinedResult.blockers,  // ← 新增：结构化 blocker 供主 Agent 使用
+      // 只留结构化形态（含 type / message / level / resolution），
+      // 旧的 blockers 字符串数组是它的 map 派生，同一份数据两种形态无意义
+      structuredBlockers: combinedResult.blockers,
       warnings: combinedResult.warnings,
       recoverySuggestions: recoveryHints.length > 0 ? recoveryHints : undefined,
-      hint: combinedResult._meta?.fixLoopAvailable
-        ? `发现可修复问题，建议执行: ${combinedResult._meta.fixLoopHint}`
-        : '请按 blockers 逐项修复后重试'
+      hint: '推进被门控阻断。修复 structuredBlockers 后重新执行 dispatch.js 取下一步指令（本脚本不输出任何命令）'
     })
     process.exit(1)
   }
@@ -755,18 +763,13 @@ if (targetPhase === 5) {
 // 上下文刷新: 生成 Phase summary + 加载内容注入 (#2)
 // ========================
 
-/** @type {{ content: string, phase: number, path: string }|null} */
-let summaryInfo = null
-
+// 摘要仍要生成并落盘（供回 Step 1 后 dispatch.js 构造 prompt 时读取），
+// 但本脚本不再把它加载进 stdout —— 那是 prompt 的事，不是推进结果的事
 try {
   const summaryPath = contextRefresh.generatePhaseSummary(storyId, currentPhase)
   if (summaryPath) {
     console.error(`  ✓ 上下文摘要已生成: ${path.basename(summaryPath)}`)
     trace.appendTrace(storyId, { type: 'context_refresh', phase: String(currentPhase), result: 'success', details: { file: path.basename(summaryPath) } })
-
-    // 加载 summary 内容用于注入到 JSON 输出（供主 Agent 传给下个 Agent）
-    // 只取刚完成的 Phase 的 summary（currentPhase），不加载后续 Phase 的
-    summaryInfo = contextRefresh.loadLatestSummary(storyId, currentPhase)
   }
 } catch (e) {
   // summary 生成失败不阻塞推进
@@ -808,61 +811,16 @@ if (devPass) {
   result.devPass = { expiresAt: devPass.expiresAt, allowedFiles: devPass.allowedPaths.length, source: devPass.pathSource }
 }
 
-// 🆕 Agent Prompt 构造统一委托给 prompt-builder（单一信源）
-// 说明: prompt 的组装逻辑（摘要 + 教训 + 度量 + 契约内容 + 修复回路 + 约束）
-//       原先内联在此处，现抽到 services/prompt-builder.js，与 dispatch.js 共用，
-//       避免出现两份自称权威的 prompt 来源迫使主 Agent 自行拼接。
-const promptResult = promptBuilder.buildAgentPrompt({
-  storyId,
-  targetPhase,
-  summaryPhase: currentPhase,
-  summaryInfo
-})
+// 输出契约（v4，2026-09 收敛）: 只回「本次推进的结果」，不含任何 Spawn 信息。
+//
+// v3 曾在此构造下一 Phase 的 agentPrompt / nextAgent / expectedOutputs，
+// 与 dispatch.js 构成两个 prompt 出口: 同一轮推进里 prompt 被生成三次
+// （dispatch 分支 B 的残缺副本 → 本脚本 → 回 Step 1 后 dispatch 分支 A 那份真正被用的），
+// 主 Agent 上下文里同一段话出现两遍，且分支 B 那份连摘要都没有。
+// 职责收敛后: 推进归本脚本，「下一步怎么走」归 dispatch.js 独占。
 
-// 输出契约（v3，2026-09 收敛）:「本次推进的结果」+「下一步怎么 Spawn」，不再回吐 prompt 素材。
-// 已删除 phaseSummaryContent / phaseSummaryPhase / contractFilesToLoad / agentConstraints /
-// lessonsFromHistory / metricsInsights —— 它们都是 agentPrompt 里已有内容的第二份拷贝：
-//   - 摘要正文落盘在 phase-<N>-summary.md，agentPrompt 给的是它的路径，
-//     断点恢复另有 hooks/session-start.js 自己 loadLatestSummary 注入；
-//   - 契约文件清单、约束、教训、度量在 agentPrompt 中已逐条展开。
-// 全仓没有任何 .js 解析本脚本的 stdout，主 Agent 也只需 nextAgent + agentPrompt 就能 Spawn，
-// 多一份拷贝只是让主 Agent 上下文里同一段话出现两次。
-// fixLoopContext 保留: 它是结构化回路状态（round / maxRounds），编排层可能据此判断预算，
-// 与上面几项「纯 prompt 文本」性质不同。
-result.nextAgent = promptResult.agent
-result.nextAgentLabel = promptResult.agentLabel
-result.expectedOutputs = promptResult.expectedOutputs
-if (promptResult.fixLoopContext) result.fixLoopContext = promptResult.fixLoopContext
-
-// 完整可直接注入的 Agent prompt（无占位符，主 Agent 原样使用）
-result.agentPrompt = promptResult.agentPrompt
-
-// P1-1: 推进到 Phase 2 且 task-dag 声明多个 batch 时，逐 batch 输出 spawn 序列。
-// Phase 2 的 agentPrompt 主通道是本脚本的推进输出 —— 不在此给出 batch 粒度，
-// 主 Agent 就只能拿「整个 Phase 2」一种粒度自行拆批、手写 prompt（实跑 D1 的根因）。
-// 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 白名单」，不内联 task 正文。
-if (targetPhase === 2) {
-  const { batches } = promptBuilder.readTaskBatches(storyId)
-  if (batches.length > 1) {
-    result.batches = batches.map(b => {
-      const bpb = promptBuilder.buildAgentPrompt({
-        storyId,
-        targetPhase: 2,
-        summaryPhase: currentPhase,
-        batchId: b.batchId
-      })
-      return {
-        batchId: b.batchId,
-        taskIds: b.taskIds,
-        agent: bpb.agent,
-        agentLabel: bpb.agentLabel,
-        agentPrompt: bpb.agentPrompt,
-        expectedOutputs: bpb.expectedOutputs
-      }
-    })
-    result.instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${result.nextAgent} 并注入该 batch 的 agentPrompt（files 白名单已注入各 batch prompt），全部 batch 完成后再执行 dispatch 检查推进`
-  }
-}
+// Phase 2 的逐 batch spawn 序列同样只在 dispatch.js 输出（buildBatchSequence）。
+// 推进完成后主 Agent 回 Step 1 重新执行 dispatch.js 取新 Phase 指令。
 
 // Phase 7 完成时自动触发度量聚合 + 标记工作流为 completed（终态）
 if (currentPhase === 7 && targetPhase > 7) {

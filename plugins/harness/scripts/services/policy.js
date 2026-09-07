@@ -65,11 +65,13 @@ const schemaValidator = require('./schema-validator')
 const debugLog = require('../lib/debug-log')
 
 /**
- * advance-phase.js 的绝对调用形式（P0-3: 运行时由脚本位置动态推导，
- * resolution / fixLoopHint 中的命令主 Agent 可直接执行，无需手工改绝对路径）。
- * 正斜杠形式：规避 markdown 渲染层吃 `\.` 造成显示缺分隔符（2026-09 实跑反馈）
+ * advance-phase.js 的绝对调用形式 —— 复用 lib/paths.js 的公共出口。
+ *
+ * 此前本文件、dispatch.js、advance-phase.js 各拼过一份同一条命令（三份同物实现），
+ * 改一处参数只会让其中一份生效。收敛后本文件是 resolution / fixLoopHint 里命令的
+ * 唯一信源，dispatch.js 的 recovery.command 直接转发 fixLoopHint，不再二次拼装。
  */
-const ADVANCE_CMD = `node "${path.resolve(__dirname, '..', 'commands', 'advance-phase.js').replace(/\\/g, '/')}"`
+const { ADVANCE_CMD } = require('../lib/paths')
 
 // ─── 错误恢复建议表 ─────────────────────────────────────────────
 
@@ -448,8 +450,14 @@ function checkResourceIntegrity (storyId, phaseNum, state, result) {
   }
 
   // 知识库消费检查（软性资源 → WARNING，放行但记 debt）
+  // 前提: 仅跨仓场景提示。单仓时检索需求随 Story 而异（在空目录新建一个静态页这类 Story
+  // 本就没有既有代码可查），对每条单仓 Story 都提示「未做知识库检索」属于无差别噪音 ——
+  // 脚本只检测「有没有调用」，判断不了「该不该调用」（2026-09 修正）。
+  // 跨仓场景不需要这条告警兜底: contracts.js 对跨仓 task 有 evidence 硬门控
+  // （source 必须含 graphify），缺检索会直接卡门控，而不是只扣 Evo Score。
   const kbCalls = toolCalls.filter(e => e.skill === 'kb-query' || e.skill === 'graphify')
-  if (kbCalls.length === 0) {
+  const isMultiRepo = Object.keys(loadRepos(storyId).repos || {}).length > 1
+  if (kbCalls.length === 0 && isMultiRepo) {
     result.warnings.push('本 Story 开发阶段未调用 kb-query / graphify 做知识库检索，注入的历史教训可能未被查证（记 debt，Evo Score 扣分）')
   }
 }
@@ -708,6 +716,7 @@ function checkPhase2Gate (storyId, state, result) {
   const repoNames = Object.keys(repos.repos || {})
   const targets = repoNames.length > 0 ? repoNames : [null]
   let anyChange = false
+  let anyBuildScript = false
 
   for (const name of targets) {
     const repoRoot = getRepoRoot(name, repos)
@@ -717,6 +726,8 @@ function checkPhase2Gate (storyId, state, result) {
       result.warnings.push(`${label}仓库路径不存在，无法执行 lint/编译校验: ${repoRoot}（请检查 repos.json）`)
       continue
     }
+
+    if (findBuildScript(repoRoot)) anyBuildScript = true
 
     const changed = getChangedFiles(repoRoot)
     if (changed.length === 0) continue
@@ -777,7 +788,9 @@ function checkPhase2Gate (storyId, state, result) {
 
   // 编译校验关闭是全局默认行为，与是否检测到变更无关，故在循环外只提示一次 ——
   // 放在循环内会随仓库数重复出现，淹没真正的 warning。
-  if (process.env.HARNESS_RUN_BUILD !== '1') {
+  // 前提：仓库确实有构建脚本。纯静态 / 无构建步骤的项目（如单个 HTML 页）根本不会触发
+  // 编译错误，对它提示「SCSS/模板编译错误将只能在 Phase 7 暴露」是无差别噪音（2026-09 修正）。
+  if (process.env.HARNESS_RUN_BUILD !== '1' && anyBuildScript) {
     result.warnings.push('编译校验默认关闭（设 HARNESS_RUN_BUILD=1 启用），SCSS/模板编译错误将只能在 Phase 7 云端构建暴露')
   }
 }
@@ -942,9 +955,18 @@ function checkPhase4Gate (storyId, result) {
  *   就能带病过关 —— 即使问题描述里明写"影响 AC-3 选品交互的正确性"，而 AC-3 同时被判 passed。
  *   两份产出物各自自洽，合起来自相矛盾，没有任何一道门控看得见这个矛盾。
  *
- * 判定: open 状态的问题（任意 severity）文本中出现 AC-N，而该 AC 在
- *   acceptance-verification.json 中为 passed → BLOCKER。
- *   要么修问题，要么把该 AC 从 passed 改成 failed，不允许两者并存。
+ * 判定（按 severity 分级，2026-09 修正）: open 状态的问题文本中出现 AC-N，而该 AC 在
+ *   acceptance-verification.json 中为 passed → BLOCKER 级阻塞、其余级别仅提示。
+ *
+ * 为什么分级而不是「任意 severity 一律阻塞」:
+ *   初版对任意 severity 一律阻塞，实跑直接制造死锁 —— 审查师在描述里提 AC 编号常常只是为了
+ *   定位上下文，并不等于声称该 AC 未达成。典型案例: WARNING「render() 全量重建导致焦点丢失」
+ *   提到 AC-4，但勾选功能本身完全正确，测试判 AC-4 passed 与之并不矛盾。此时无论补多少
+ *   运行时证据都过不了这道门控，唯一的「出路」是把 AC 降级成 unverifiable，
+ *   结果就是整条 Story 带「0 条 AC 被实际验证」的强告警 —— 门控反而逼出了更差的结果。
+ *   反之若一律只看 BLOCKER，则本函数在 Phase 3 已拦截 open BLOCKER 的前提下永不触发，
+ *   沦为死代码（那正是它当初被设计出来要补的缺口）。
+ *   分级后: BLOCKER 级矛盾是真矛盾，阻塞；WARNING/SUGGESTION 级只提示，交由主 Agent 判断。
  */
 function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
   const crJsonPath = path.join(PLANS_DIR, storyId, ARTIFACT.CODE_REVIEW)
@@ -972,15 +994,23 @@ function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
     const conflicting = [...new Set(refs.map(r => r.toUpperCase()))].filter(id => passedACIds.has(id))
     if (conflicting.length === 0) continue
 
-    result.blockers.push(structuredError(
-      'review_acceptance_conflict',
-      `审查问题 ${issue.id || ''}(${issue.severity || 'WARNING'}, status=open) 自称影响 ` +
+    const label = `审查问题 ${issue.id || ''}(${issue.severity || 'WARNING'}, status=open) 自称影响 ` +
       `${conflicting.join('/')}，但该 AC 在 acceptance-verification.json 中为 passed` +
-      `${issue.title ? ': ' + issue.title : ''}`,
-      2,
-      `二选一: ① 修复该问题并把 status 改为 fixed；② 把 ${conflicting.join('/')} 的 status 从 passed 改为 failed 并走修复回路`
-    ))
-    result.passed = false
+      `${issue.title ? ': ' + issue.title : ''}`
+
+    if (issue.severity === 'BLOCKER') {
+      result.blockers.push(structuredError(
+        'review_acceptance_conflict',
+        label,
+        2,
+        `二选一: ① 修复该问题并把 status 改为 fixed；② 把 ${conflicting.join('/')} 的 status 从 passed 改为 failed 并走修复回路`
+      ))
+      result.passed = false
+    } else {
+      // 非 BLOCKER 级只提示：提 AC 编号常为定位上下文，不等于声称该 AC 未达成，
+      // 一律阻塞会把测试工程师逼向 unverifiable（见函数头注释）
+      result.warnings.push(label + ' —— 若为误引用请确认 AC 判定，否则考虑修复后复审')
+    }
   }
 }
 
@@ -1157,18 +1187,30 @@ function runIncrementalLint (repoRoot, files) {
  * @param {string} repoRoot
  * @returns {{ ok: boolean, details: string, command: string, skipped: boolean }}
  */
-function runBuildCheck (repoRoot) {
+/**
+ * 探测仓库是否配置了可执行构建脚本（只探测，不执行构建）
+ *
+ * 供 runBuildCheck 执行前与 checkPhase2Gate 判断「是否值得提示编译校验关闭」共用 ——
+ * 两处若各自维护脚本名优先级列表，一旦不同步就会出现「提示说有关闭的校验、实际执行时却跳过」的矛盾。
+ *
+ * @param {string} repoRoot - 仓库根目录绝对路径
+ * @returns {string|null} 构建脚本名（build:dev / build:test / build 中首个存在的），无则 null
+ */
+function findBuildScript (repoRoot) {
   const pkgPath = path.join(repoRoot, 'package.json')
-  if (!fs.existsSync(pkgPath)) return { ok: true, details: '', command: '', skipped: true }
+  if (!fs.existsSync(pkgPath)) return null
 
   let scripts = {}
   try {
     scripts = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).scripts || {}
   } catch (e) {
-    return { ok: true, details: '', command: '', skipped: true }
+    return null
   }
+  return ['build:dev', 'build:test', 'build'].find(s => scripts[s]) || null
+}
 
-  const name = ['build:dev', 'build:test', 'build'].find(s => scripts[s])
+function runBuildCheck (repoRoot) {
+  const name = findBuildScript(repoRoot)
   if (!name) return { ok: true, details: '', command: '', skipped: true }
 
   const command = `npm run ${name}`

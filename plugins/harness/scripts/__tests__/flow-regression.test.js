@@ -32,6 +32,8 @@ const storyDir = sandbox.storyDir
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const { createWorkflow } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
 const policy = require(path.join(SCRIPTS_DIR, 'services/policy'))
+const { dispatch } = require(path.join(SCRIPTS_DIR, 'commands/dispatch'))
+const promptBuilder = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 
 // ════════════════════════════════════════════════════════════
 section('1. fixloop 独立预算（review/test 各 2 次）')
@@ -171,11 +173,12 @@ ok('frame-inventory 完整（含 link）-> 无 figma_frame_incomplete BLOCKER', 
   JSON.stringify(g3.blockers.map(b => b.type + ':' + b.message)))
 
 // ════════════════════════════════════════════════════════════
-section('5. advance-phase.js 输出契约（2026-09 收敛）')
+section('5. advance-phase.js 输出契约（v4: 只含推进结果）')
 
 // FG1-OK 的 Phase 1 产出物齐备且门控通过，直接推到 Phase 2 验真实输出。
-// 契约: 只给「推进结果」+「下一步怎么 Spawn」，不回吐 prompt 素材 ——
-// 那些内容已在 agentPrompt 里展开，多一份拷贝只是让主 Agent 上下文里同一段话出现两次。
+// 契约: 推进结果归 advance-phase，「下一步怎么 Spawn」归 dispatch.js。
+// 收敛前同一轮推进里 prompt 被生成三次（dispatch 分支 B 的残缺副本 → advance-phase →
+// 回 Step 1 后分支 A 那份真正被用的），现在只剩分支 A 那一次。
 const adv = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'commands/advance-phase.js'), 'FG1-OK', '2'], {
   encoding: 'utf-8',
   env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
@@ -188,18 +191,40 @@ ok('advance-phase 1→2 推进成功', out && out.success === true,
   out ? JSON.stringify(out.blockers || out.gateChecks) : '')
 
 if (out && out.success === true) {
-  ok('保留 nextAgent', out.nextAgent === 'frontend-developer', String(out.nextAgent))
-  ok('保留 agentPrompt', typeof out.agentPrompt === 'string' && out.agentPrompt.length > 0)
-  ok('保留 expectedOutputs', Array.isArray(out.expectedOutputs))
-  for (const dropped of ['phaseSummaryContent', 'phaseSummaryPhase', 'contractFilesToLoad',
+  // 推进结果本体仍在
+  ok('保留推进结果 fromPhase/toPhase', out.fromPhase === 1 && out.toPhase === 2,
+    JSON.stringify({ from: out.fromPhase, to: out.toPhase }))
+  // 「下一步怎么 Spawn」整组移交 dispatch.js（含 v3 已删的 prompt 素材拷贝）
+  for (const dropped of ['nextAgent', 'nextAgentLabel', 'agentPrompt', 'expectedOutputs',
+    'fixLoopContext', 'batches', 'instruction',
+    'phaseSummaryContent', 'phaseSummaryPhase', 'contractFilesToLoad',
     'agentConstraints', 'lessonsFromHistory', 'metricsInsights']) {
     ok(`不再输出 ${dropped}`, !(dropped in out), JSON.stringify(Object.keys(out)))
   }
-  // 删掉的只是拷贝，本体仍进 agentPrompt / 落盘
+  // 摘要仍落盘 —— 回 Step 1 后 dispatch 构造 prompt 时要读它
   ok('摘要正文落盘为 phase-1-summary.md', fs.existsSync(path.join(dir4c, 'phase-1-summary.md')))
-  ok('agentPrompt 给出摘要文件路径', /phase-1-summary\.md/.test(out.agentPrompt))
-  ok('agentPrompt 展开契约文件清单', /task-dag\.json/.test(out.agentPrompt))
-  ok('agentPrompt 展开约束段', /## 约束/.test(out.agentPrompt))
+
+  // 推进后回 Step 1: dispatch 是 prompt 的唯一出口。走哪个分支取决于 Phase 2 门控
+  // （沙箱无 git 变更时门控空转 → 分支 B），故按分支分别断言契约
+  const d2 = dispatch('FG1-OK')
+  if (d2.readyToAdvance) {
+    // 分支 B: 只给推进命令，不构造 prompt —— 此时摘要虽已生成，但 prompt 该由
+    // 推进后再回 Step 1 的分支 A 给出，避免同一轮两份
+    // 骨架里这些键恒存在（值为 null），故判定「没有可用内容」而非键不存在
+    ok('分支 B 不给出 agentPrompt', !d2.agentPrompt, String(d2.agentPrompt).slice(0, 80))
+    ok('分支 B 不给出 nextAgent', !d2.nextAgent, String(d2.nextAgent))
+    ok('分支 B 指令要求回 Step 1', /回 Step 1/.test(d2.instruction || ''), d2.instruction)
+  } else {
+    ok('分支 A 输出 nextAgent', d2.nextAgent === 'frontend-developer', String(d2.nextAgent))
+    ok('分支 A 输出 agentPrompt', typeof d2.agentPrompt === 'string' && d2.agentPrompt.length > 0)
+  }
+
+  // prompt 内容三要素（dispatch 分支 A 用的就是这个函数与这组参数）
+  const pb2 = promptBuilder.buildAgentPrompt({ storyId: 'FG1-OK', targetPhase: 2, summaryPhase: 1 })
+  ok('agentPrompt 给出摘要文件路径', /phase-1-summary\.md/.test(pb2.agentPrompt),
+    (pb2.agentPrompt.match(/上一 Phase 摘要[\s\S]{0,120}/) || [''])[0])
+  ok('agentPrompt 展开契约文件清单', /task-dag\.json/.test(pb2.agentPrompt))
+  ok('agentPrompt 展开约束段', /## 约束/.test(pb2.agentPrompt))
 }
 
 // ════════════════════════════════════════════════════════════

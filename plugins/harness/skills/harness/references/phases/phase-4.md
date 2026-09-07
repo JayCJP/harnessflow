@@ -24,7 +24,8 @@ Agent 注册名 **`test-engineer`**（测试工程师）。逐条验证 `accepta
 |------|------|-------------|
 | 任一 AC `status=failed` | BLOCKER (2) | `ac_verification_failed` |
 | `testType=ui` + `passed` + `evidenceType=static` | BLOCKER (2) | `static_evidence_for_ui_ac` |
-| code-review 中 `open` 的问题自称影响某 AC，而该 AC 判 `passed` | BLOCKER (2) | `review_acceptance_conflict` |
+| code-review 中 `open` 的 **BLOCKER 级**问题自称影响某 AC，而该 AC 判 `passed` | BLOCKER (2) | `review_acceptance_conflict` |
+| code-review 中 `open` 的 WARNING/SUGGESTION 级问题自称影响某 AC，而该 AC 判 `passed` | WARNING（不阻塞） | — |
 | result 缺 `id` / 缺 `evidence` | BLOCKER (2) | `av_missing_id` `av_missing_evidence` |
 | 某条 AC 完全没有对应验收结果 | BLOCKER (4) | `ac_missing_verification` |
 | 缺 `results` 数组 | BLOCKER (4) | `ac_verification_failed` |
@@ -75,7 +76,10 @@ Agent 注册名 **`test-engineer`**（测试工程师）。逐条验证 `accepta
 
 - **`static_evidence_for_ui_ac`**：不要把 `evidenceType` 改成 `manual` 糊过去。
   要么真跑一遍拿运行时证据，要么改判 `unverifiable` 并在 `evidence` 里写明环境限制。
-- **`review_acceptance_conflict`**：二选一 —— 要么修那个 review 问题并把 `status` 改成 `fixed`，
-  要么把对应 AC 从 `passed` 改成实际结论。不要删 `impact` 字段来消除冲突。
+- **`review_acceptance_conflict`**（仅 BLOCKER 级阻塞）：二选一 —— 要么修那个 review 问题并把
+  `status` 改成 `fixed`，要么把对应 AC 从 `passed` 改成实际结论。不要删 `impact` 字段来消除冲突。
+  WARNING/SUGGESTION 级问题只输出提示、不阻塞：审查师提 AC 编号常只为定位上下文，
+  不等于声称该 AC 未达成（如 WARNING「焦点丢失」提到 AC-4，但勾选功能本身是对的）。
+  若确认该提示属误引用，无需处理。
 - **`ac_missing_verification`**：Phase 0 的 AC 与本 Phase 的 results 必须一一对应，
   新增 AC 后漏测最常触发。

@@ -53,14 +53,21 @@ HARNESS_RUN_BUILD=1 node $HARNESS/advance-phase.js <id> 3     # 启用本地编�
 > `autoFixable` 条目，而现有条目全为 `false`，该通道实际从不修复任何东西。
 > 门控失败请按输出里的 `structuredBlockers[].resolution` 逐项修复后重跑。
 
-**输出只看 `success` 一个字段**：
-- `true` → 回 Step 1 重新 dispatch
-- `false` → `recovery.command` 存在则原样执行后回 Step 1；为 null 则转人工
+**输出只看 `success` 一个字段**，两种结果**都回 Step 1 重新 dispatch**：
+- `true` → 推进成功，回 Step 1 取新 Phase 的指令
+- `false` → 门控被阻断，按 `structuredBlockers[].resolution` 修复后回 Step 1，
+  由 dispatch 按 `status` 给出 `recovery.command`（本脚本不输出任何命令）
 
 输出契约只有两类字段：**推进结果**（`success` / `fromPhase` / `toPhase` / `gateChecks` /
-`devPass` / `recovery`）与**下一步怎么 Spawn**（`nextAgent` / `nextAgentLabel` /
-`expectedOutputs` / `agentPrompt`，修复回路时另有 `fixLoopContext`）。
-主 Agent 拿 `nextAgent` + `agentPrompt` 就够 Spawn，不需要自己拼装任何东西。
+`devPass`）与**门控失败事实**（`gatePassed` / `structuredBlockers` / `warnings` /
+`recoverySuggestions` / `hint`）。
+
+**不再输出**（v4 职责分离，2026-09）：`nextAgent` / `nextAgentLabel` / `expectedOutputs` /
+`agentPrompt` / `fixLoopContext` / `batches` / `instruction` / `nextAction` / `fixLoopHint` /
+`fixLoopAvailable` / `blockers`（字符串数组）。
+——「下一步怎么 Spawn」是 `dispatch.js` 的独占职责。收敛前同一轮推进里 prompt 被生成三次
+（dispatch 分支 B 的残缺副本 → advance-phase → 回 Step 1 后分支 A 那份真正被用的），
+且 `--fix-loop` 命令有 policy 与 dispatch 两个信源；现在两者都只剩一个出口。
 
 独立校验的入参约束：targetPhase 范围 0~7、步长必须 +1。越界会写出 `phase: 99` 这类污染状态；
 跨阶会跳过中间门控与 summary 生成；倒退是 `--rollback` 的职责。

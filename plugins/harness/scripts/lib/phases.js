@@ -41,6 +41,14 @@ const PHASE_SLUGS = [
   'completed'                // 8 — 工作流终态
 ]
 
+/**
+ * 最大合法 Phase 编号（终态 = 8）
+ *
+ * 此前 dispatch.js 与 advance-phase.js 各自定义了一份 `PHASE_SLUGS.length - 1`，
+ * 两处硬编码同一事实。收敛到定义 PHASE_SLUGS 的模块里，数组增删时不会漏改。
+ */
+const MAX_PHASE = PHASE_SLUGS.length - 1
+
 /** Phase 中文名称 */
 const PHASE_NAMES = [
   '需求分析',       // 0
@@ -177,6 +185,7 @@ function getPhaseName (phaseNum) {
 
 module.exports = {
   PHASE_SLUGS,
+  MAX_PHASE,
   PHASE_NAMES,
   PHASE_ARTIFACTS,
   PHASE_AGENTS,

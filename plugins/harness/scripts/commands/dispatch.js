@@ -46,7 +46,10 @@
  *     对账补记 preGateBlocked 教训，否则「预检越好用，飞轮越饿」(D3)。
  *   - fix_loop 分支会一并给出回退后要 Spawn 的 Phase 2 Agent 与 prompt，否则主 Agent 执行完
  *     --fix-loop 只能自行判断该 Spawn 谁 —— 判断权回流即失控。
- *   - agentPrompt 统一由 services/prompt-builder.js 构造，与 advance-phase.js 共用同一信源。
+ *   - agentPrompt 由 services/prompt-builder.js 构造，而本脚本是它的**唯一出口**：
+ *     advance-phase.js 自 v4 起不再构造/输出 prompt，此前同一轮推进里 prompt 被生成三次
+ *     （分支 B 的残缺副本 → advance-phase → 回 Step 1 后分支 A 那份真正被用的）。
+ *     分支 B 刻意不构造 prompt —— 那时摘要尚未生成，构造出的必然是残缺副本。
  *   - 冷启动处理: 状态文件不存在时不再静默失败，而是返回 terminal + 创建工作流的 recovery 命令，
  *     避免 Phase 0 之前无法调度的死锁。
  *   - 三态互斥且穷尽（ready / blocked / fix_loop / terminal），主 Agent 按 status 分支，不做任何自行判断。
@@ -61,7 +64,6 @@ const path = require('path')
 
 const {
   PLANS_DIR,
-  PHASE_SLUGS,
   readStateFile,
   getPhaseName,
   getPhaseAgent,
@@ -73,29 +75,9 @@ const {
 const policy = require('../services/policy')
 const promptBuilder = require('../services/prompt-builder')
 const debugLog = require('../lib/debug-log')
-
-const MAX_PHASE = PHASE_SLUGS.length - 1
-
-/**
- * 插件根目录（P0-3: 运行时由脚本自身位置动态推导，不依赖 ${CLAUDE_PLUGIN_ROOT} 占位符展开，
- * 主 Agent 在任何 cwd 下拿到的命令都可直接执行，PowerShell 不再需要手工改写绝对路径）
- */
-const PLUGIN_ROOT = path.resolve(__dirname, '..', '..')
-
-/**
- * 生成插件内命令脚本的绝对调用形式
- * 动态解析插件根后拼接脚本路径；Windows 路径含空格时由双引号保护；
- * 用正斜杠形式输出 —— markdown 渲染层会把 `\.` 当转义吃掉导致显示缺分隔符（2026-09 实跑反馈），
- * 正斜杠在任何渲染层原样保留，且 PowerShell / node 均兼容
- * @param {string} scriptName - scripts/commands/ 下的脚本文件名
- * @returns {string} 形如 node "<绝对路径>" 的可执行命令
- */
-function pluginCmd (scriptName) {
-  return `node "${path.join(PLUGIN_ROOT, 'scripts', 'commands', scriptName).replace(/\\/g, '/')}"`
-}
-
-/** advance-phase.js 的绝对调用形式（动态解析，无未展开占位符） */
-const ADVANCE_CMD = pluginCmd('advance-phase.js')
+// 命令路径与 Phase 常量收敛到 lib 公共出口（此前 policy.js / advance-phase.js 各拼一份）
+const { ADVANCE_CMD, commandPath } = require('../lib/paths')
+const { MAX_PHASE } = require('../lib/phases')
 
 /**
  * 构造调度结果骨架
@@ -184,7 +166,7 @@ function dispatch (storyId) {
       warnings: [`工作流尚未创建: .codebuddy/plans/${storyId}/e2e-state.json 不存在`],
       recovery: {
         type: 'not_started',
-        command: pluginCmd('harness-workflow.js') + ' start ' + storyId + ' "<标题>"',
+        command: commandPath('harness-workflow.js') + ' start ' + storyId + ' "<标题>"',
         description: '先创建工作流，再重新执行 dispatch.js'
       }
     }
@@ -222,19 +204,19 @@ function dispatch (storyId) {
     )
     result.recovery = {
       type: 'archived',
-      command: pluginCmd('archive-story.js') + ' ' + storyId + ' restore',
+      command: commandPath('archive-story.js') + ' ' + storyId + ' restore',
       description: '如需继续该 Story，先执行复档'
     }
     return result
   }
 
   // ── 终态: 流程完成 ────────────────────────────────────────
-  if (phase > MAX_PHASE - 1 || state.status === 'completed') {
+  if (phase >= MAX_PHASE || state.status === 'completed') {
     result.status = 'terminal'
     result.warnings.push('工作流已完成全部 Phase。')
     result.recovery = {
       type: 'completed',
-      command: pluginCmd('archive-story.js') + ' ' + storyId + ' archive',
+      command: commandPath('archive-story.js') + ' ' + storyId + ' archive',
       description: '可执行归档收尾'
     }
     return result
@@ -267,7 +249,9 @@ function dispatch (storyId) {
       result.status = 'fix_loop'
       result.recovery = {
         type: 'fix_loop',
-        command: `${ADVANCE_CMD} ${storyId} 2 --fix-loop`,
+        // 命令信源唯一: 这条 --fix-loop 命令由 policy.js 的 _meta.fixLoopHint 生成，
+        // 此处原样转发，不二次拼装（此前两处各拼一遍，是本插件唯一的「同命令两信源」）
+        command: gate._meta.fixLoopHint,
         description: `Phase ${phase} 存在 BLOCKER，执行修复回路回退到 Phase 2 修复` +
           (fixLoop.active ? `（当前第 ${fixLoop.round}/${fixLoop.maxRounds} 轮）` : ''),
         blockers: gate.blockers.map(b => ({ type: errorToType(b), message: errorToString(b) }))
@@ -316,26 +300,12 @@ function dispatch (storyId) {
       // P1-1: Phase 2 且 task-dag 声明了多个 batch 时，逐 batch 输出 spawn 指令 ——
       // 主 Agent 无需再从整份 Phase 2 prompt 里自行裁剪批次范围、手写 batch prompt（D1）。
       // 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 白名单」。
+      // 序列构造收在 prompt-builder.buildBatchSequence（批次划分口径的唯一信源）。
       if (phase === 2) {
-        const { batches } = promptBuilder.readTaskBatches(storyId)
-        if (batches.length > 1) {
-          result.batches = batches.map(b => {
-            const bpb = promptBuilder.buildAgentPrompt({
-              storyId,
-              targetPhase: 2,
-              summaryPhase: phase - 1,
-              batchId: b.batchId
-            })
-            return {
-              batchId: b.batchId,
-              taskIds: b.taskIds,
-              agent: bpb.agent,
-              agentLabel: bpb.agentLabel,
-              agentPrompt: bpb.agentPrompt,
-              expectedOutputs: bpb.expectedOutputs
-            }
-          })
-          result.instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${result.nextAgent} 并注入该 batch 的 agentPrompt（files 白名单已注入各 batch prompt），全部 batch 完成后再执行 advanceCommand`
+        const seq = promptBuilder.buildBatchSequence({ storyId, summaryPhase: phase - 1 })
+        if (seq.batches.length > 0) {
+          result.batches = seq.batches
+          result.instruction = seq.instruction
         }
       }
 
@@ -373,30 +343,19 @@ function dispatch (storyId) {
 
   // ── 分支 B: 当前 Phase 已就绪 → 推进到下一 Phase ──────────
   // 门控已通过，说明本 Phase 的活干完了，下一步是执行推进命令。
-  // 推进后主 Agent 应再次执行 dispatch.js 获取新 Phase 的指令。
+  //
+  // 此处**不构造** agentPrompt: 摘要（phase-N-summary.md）要等 advance-phase.js 推进时才生成，
+  // 此刻构造出的 prompt 摘要段必然是「(无摘要)」的残缺副本 —— 主 Agent 若按本分支的
+  // instruction 直接 Spawn，注入的就是这份残缺 prompt。推进完成后回 Step 1 重新执行
+  // dispatch.js（走分支 A），那份才带新摘要、才是真正被 Spawn 用的。
   const nextPhase = phase + 1
-  const nextAgentInfo = getPhaseAgent(nextPhase)
 
   result.status = 'ready'
   result.advanceCommand = `${ADVANCE_CMD} ${storyId} ${nextPhase}`
   result.readyToAdvance = true
-
-  if (nextAgentInfo) {
-    const pb = promptBuilder.buildAgentPrompt({
-      storyId,
-      targetPhase: nextPhase,
-      summaryPhase: phase
-    })
-    result.nextAgent = pb.agent
-    result.agentLabel = pb.agentLabel
-    result.agentPrompt = pb.agentPrompt
-    result.expectedOutputs = pb.expectedOutputs
-    if (pb.fixLoopContext) result.fixLoopContext = pb.fixLoopContext
-    result.instruction = `先执行 advanceCommand 推进到 Phase ${nextPhase}，成功后 Spawn ${pb.agent} 并注入 agentPrompt`
-  } else {
-    // nextPhase 为终态 8
-    result.instruction = `执行 advanceCommand 完成工作流（Phase ${nextPhase} 为终态）`
-  }
+  result.instruction = nextPhase >= MAX_PHASE
+    ? `执行 advanceCommand 完成工作流（Phase ${nextPhase} 为终态）`
+    : `先执行 advanceCommand 推进到 Phase ${nextPhase}，完成后回 Step 1 重新执行 dispatch.js 取新 Phase 指令`
 
   return result
 }

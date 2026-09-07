@@ -20,15 +20,20 @@
 ## prompt-builder.js — Agent prompt 唯一信源
 
 ```js
-{ buildAgentPrompt, buildFixLoopContext, buildStoryInputSection,
+{ buildAgentPrompt, buildFixLoopContext, buildBatchSequence, buildStoryInputSection,
   readContractContents, readStoryContext, readFigmaDesignSpec,
   buildFigmaAlignInstruction, buildTaskPlannerFigmaInstruction, AGENT_CONSTRAINTS }
 ```
 
-`buildAgentPrompt({ storyId, targetPhase, summaryPhase })` 是唯一出口，被 `dispatch.js` 与
-`advance-phase.js` **共用同一信源**（避免出现两份自称权威的 prompt 来源）。
+`buildAgentPrompt({ storyId, targetPhase, summaryPhase })` 是唯一出口，**只被 `dispatch.js`
+调用** —— `advance-phase.js` 自 v4 起不再构造/输出 prompt（此前同一轮推进里 prompt 被生成
+三次：dispatch 分支 B 的残缺副本 → advance-phase → 回 Step 1 后分支 A 那份真正被用的）。
 产出已含 Story ID、当前 Phase、上一 Phase 摘要、契约文件内容、历史教训、约束条款、
 产出物清单、修复回路上下文 —— **无占位符**。
+
+`buildBatchSequence({ storyId, summaryPhase, targetPhase })` 是 Phase 2 逐 batch spawn 序列的
+唯一信源（批次划分口径只此一处），多 batch 时返回 `{ batches, instruction }`，
+单批/无 `batches` 字段返回空序列。
 
 按 `mode` 分支注入（`prompt-builder.js:237`）：`fixbugs` 时给 Phase 0 注 Bug 分析指引、
 给 Phase 2 注「修复方案自行设计」说明。

@@ -6,6 +6,9 @@
 它已包含 Story ID、当前 Phase、上一 Phase 摘要、契约文件内容、历史教训、约束条款、产出物清单，
 **无占位符，可直接原样注入**。
 
+> `advance-phase.js` **不输出** `agentPrompt`（v4 起）。推进完成后回 Step 1 重新执行
+> `dispatch.js`，由它给出新 Phase 的 prompt —— 推进与「下一步怎么走」是两件事。
+
 ```
 node ${HARNESS}/dispatch.js <storyId>
   └─ agentPrompt      ← 原样传给 Spawn 的 prompt 参数

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>待办清单</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", sans-serif;
+      background: #f5f6f8;
+      color: #333;
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 480px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      padding: 24px;
+    }
+
+    .app h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .input-row input {
+      flex: 1;
+      height: 40px;
+      padding: 0 12px;
+      font-size: 15px;
+      border: 1px solid #d9d9d9;
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-row input:focus {
+      border-color: #4a90d9;
+    }
+
+    .input-row button {
+      height: 40px;
+      padding: 0 20px;
+      font-size: 15px;
+      color: #fff;
+      background: #4a90d9;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .input-row button:hover {
+      background: #3a7bc0;
+    }
+
+    .todo-list {
+      list-style: none;
+    }
+
+    .todo-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 8px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .todo-item:last-child {
+      border-bottom: none;
+    }
+
+    .todo-item input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .todo-item .todo-text {
+      flex: 1;
+      font-size: 15px;
+      word-break: break-all;
+      transition: color 0.2s;
+    }
+
+    .todo-item.completed .todo-text {
+      text-decoration: line-through;
+      color: #bbb;
+    }
+
+    .todo-item .delete-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: #999;
+      font-size: 16px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .todo-item .delete-btn:hover {
+      background: #ffecec;
+      color: #e55353;
+    }
+
+    .empty-tip {
+      text-align: center;
+      color: #bbb;
+      font-size: 14px;
+      padding: 24px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>待办清单</h1>
+
+    <!-- 输入区：待办输入框 + 添加按钮 -->
+    <div class="input-row">
+      <input id="todo-input" type="text" placeholder="输入待办事项" aria-label="待办事项输入框" />
+      <button id="add-btn" type="button" aria-label="添加待办">添加</button>
+    </div>
+
+    <!-- 待办列表容器 -->
+    <ul id="todo-list" class="todo-list"></ul>
+  </div>
+
+  <script>
+    /**
+     * 待办数据模型：唯一数据源，纯内存数组。
+     * 每条待办项结构：{ id: number, text: string, completed: boolean }
+     * 不做 localStorage 持久化，刷新页面即清空。
+     * @type {Array<{id: number, text: string, completed: boolean}>}
+     */
+    let todos = [];
+
+    /** 自增 id，用于唯一标识每条待办 */
+    let nextId = 1;
+
+    /** 输入框 DOM 引用 */
+    const inputEl = document.getElementById('todo-input');
+    /** 添加按钮 DOM 引用 */
+    const addBtnEl = document.getElementById('add-btn');
+    /** 列表容器 DOM 引用 */
+    const listEl = document.getElementById('todo-list');
+
+    /**
+     * 渲染函数：依据 todos 数组重新渲染整个待办列表。
+     * 空列表时展示空态提示文案。
+     * @returns {void}
+     */
+    function render() {
+      listEl.innerHTML = '';
+
+      if (todos.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'empty-tip';
+        empty.textContent = '暂无待办事项';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      todos.forEach((todo) => {
+        const item = document.createElement('li');
+        item.className = 'todo-item' + (todo.completed ? ' completed' : '');
+
+        // 复选框：切换完成状态
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = todo.completed;
+        checkbox.setAttribute('aria-label', '标记完成「' + todo.text + '」');
+        checkbox.addEventListener('change', function () {
+          toggleTodo(todo.id);
+        });
+
+        // 待办文本
+        const text = document.createElement('span');
+        text.className = 'todo-text';
+        text.textContent = todo.text;
+
+        // 删除按钮
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'delete-btn';
+        delBtn.textContent = '×';
+        delBtn.setAttribute('aria-label', '删除待办「' + todo.text + '」');
+        delBtn.addEventListener('click', function () {
+          removeTodo(todo.id);
+        });
+
+        item.appendChild(checkbox);
+        item.appendChild(text);
+        item.appendChild(delBtn);
+        listEl.appendChild(item);
+      });
+    }
+
+    /**
+     * 添加待办：将输入框非空内容追加到 todos 并重新渲染，随后清空输入框。
+     * 输入为空白（空或仅空格）时直接拦截，不新增。
+     * @returns {void}
+     */
+    function addTodo() {
+      const text = inputEl.value.trim();
+      if (text === '') {
+        return;
+      }
+
+      todos.push({ id: nextId++, text: text, completed: false });
+      inputEl.value = '';
+      render();
+    }
+
+    /**
+     * 切换待办完成状态：根据 id 找到对应待办项并翻转 completed 字段。
+     * @param {number} id 待办项 id
+     * @returns {void}
+     */
+    function toggleTodo(id) {
+      const todo = todos.find(function (t) {
+        return t.id === id;
+      });
+      if (todo) {
+        todo.completed = !todo.completed;
+        render();
+      }
+    }
+
+    /**
+     * 删除待办：根据 id 从 todos 中移除对应待办项并重新渲染。
+     * @param {number} id 待办项 id
+     * @returns {void}
+     */
+    function removeTodo(id) {
+      todos = todos.filter(function (t) {
+        return t.id !== id;
+      });
+      render();
+    }
+
+    // 点击「添加」按钮触发添加
+    addBtnEl.addEventListener('click', addTodo);
+
+    // 输入框回车触发添加
+    inputEl.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        addTodo();
+      }
+    });
+
+    // 初始渲染（空列表）
+    render();
+  </script>
+</body>
+</html>

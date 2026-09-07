@@ -5,9 +5,11 @@
  *   - 归一化项目根路径（兼容 Windows Git Bash / MSYS 风格盘符），派生 PROJECT_ROOT / PLANS_DIR
  *   - Story 目录的解析、创建与枚举
  *   - e2e-state.json 的路径形态判定
+ *   - 插件内命令脚本的绝对调用形式（commandPath / ADVANCE_CMD）
  *
  * 用法:
  *   const { PLANS_DIR, getStoryDir } = require('./paths')
+ *   const { ADVANCE_CMD, commandPath } = require('./paths')
  *
  * 说明:
  *   - **本模块只依赖 node 内建 fs/path，不得 require 本仓库任何其他模块**。
@@ -103,6 +105,28 @@ function isStateFile (filePath) {
   return normalized.endsWith('/e2e-state.json') && normalized.includes('/plans/')
 }
 
+/**
+ * 生成插件内命令脚本的绝对调用形式
+ *
+ * 为什么收敛到此处: 此前 advance-phase.js / dispatch.js / policy.js 各自用
+ * `path.resolve(__dirname, ...)` 拼了一遍同一条 advance-phase 命令（三份同物实现）。
+ * 命令串是主 Agent 直接复制执行的产物，三处各自拼装意味着改一处参数（例如新增
+ * flag）只改了一个副本，另外两处仍输出旧命令 —— 属于「同命令多信源」。
+ *
+ * 路径由脚本自身位置动态推导，输出给主 Agent 的命令在任何 cwd、任何 shell 下
+ * 可直接执行，消除「文档统一用 ${CLAUDE_PLUGIN_ROOT} 但 PowerShell 下不可执行」的缺陷。
+ * 用正斜杠形式：markdown 渲染层会把 `\.` 当转义吃掉导致显示缺分隔符（2026-09 实跑反馈）。
+ *
+ * @param {string} scriptName - scripts/commands/ 下的脚本文件名，如 'advance-phase.js'
+ * @returns {string} 形如 node "<绝对路径>" 的可执行命令
+ */
+function commandPath (scriptName) {
+  return `node "${path.resolve(__dirname, '..', 'commands', scriptName).replace(/\\/g, '/')}"`
+}
+
+/** advance-phase.js 的绝对调用形式（命令信源唯一出口，policy/dispatch 共用） */
+const ADVANCE_CMD = commandPath('advance-phase.js')
+
 module.exports = {
   normalizeProjectRoot,
   PROJECT_ROOT,
@@ -110,5 +134,7 @@ module.exports = {
   getStoryDir,
   ensureStoryDir,
   listStoryDirs,
-  isStateFile
+  isStateFile,
+  commandPath,
+  ADVANCE_CMD
 }
