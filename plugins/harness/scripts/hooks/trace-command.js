@@ -10,7 +10,7 @@
  * 用法:
  *   由宿主自动触发，无需手动执行。
  *   注册事件: PostToolUse
- *   输入: stdin JSON（{ tool_name, tool_input: { command | skill } }，由 stdin 'end' 事件驱动）
+ *   输入: stdin JSON（{ tool_name, tool_input: { command | skill } }，由 lib/hook-runner 同步读取）
  *   输出: stdout JSON（恒为 { continue: true }，不做任何拦截）
  *   手动调试: echo '{"tool_name":"Bash","tool_input":{"command":"node advance-phase.js S-1 2"}}' | node trace-command.js
  *
@@ -23,43 +23,28 @@
  *
  * 说明:
  *   - 事件类型判定:
- *       harness 命令 — tool_input.command 命中 advance-phase / harness-workflow / archive-story
+ *       harness 命令 — tool_input.command 命中 dispatch / advance-phase / create-workflow /
+ *                      harness-workflow / archive-story
  *       Skill 调用   — tool_name 为 Skill 或 use_skill
  *       MCP 调用     — tool_name 形如 mcp__<server>__<tool>
- *     三类都不命中则直接返回，不写 trace。
+ *     三类都不命中则直接放行，不写 trace。
  *   - 只写入扫描到的第一个 status='running' 的 Story，写完即 break。
- *   - 项目根取自 CODEBUDDY_PROJECT_DIR / CLAUDE_PROJECT_DIR / process.cwd()；
- *     Windows 下归一化 Git Bash / MSYS 风格盘符路径（"/d/xxx" → "d:/xxx"）。
- *   - harness 命令沿用 tool_executed 语义（timestamp 字段）以兼容既有消费方；Skill / MCP 用 tool_call 语义（ts 字段）。
+ *   - 项目根与 Story 目录枚举统一走 lib/paths.js —— 此前本文件自带一份
+ *     normalizeProjectRoot + plansDir 拼接的副本，与 paths.js 逻辑重复。
+ *   - e2e-state.json 解析失败时跳过该 Story 继续扫描（原实现会中断整个扫描）。
+ *   - harness 命令沿用 tool_executed 语义（timestamp 字段）以兼容既有消费方；
+ *     Skill / MCP 用 tool_call 语义（ts 字段）。
  *   - @module trace-command-hook
  */
 const fs = require('fs')
-const path = require('path')
+const { runHook } = require('../lib/hook-runner')
+const { listStoryDirs } = require('../lib/paths')
+const { ARTIFACT, artifactPath, readJson } = require('../lib/artifacts')
 const debugLog = require('../lib/debug-log')
 
-// 读取 stdin 数据
-const chunks = []
-process.stdin.on('readable', () => {
-  let chunk
-  while ((chunk = process.stdin.read()) !== null) chunks.push(chunk)
-})
-
-process.stdin.on('end', () => {
-  const input = Buffer.concat(chunks).toString('utf8').trim()
-  if (!input) {
-    console.log(JSON.stringify({ continue: true }))
-    return
-  }
-
-  let event
-  try { event = JSON.parse(input) } catch {
-    console.log(JSON.stringify({ continue: true }))
-    return
-  }
-
-  // 判定事件类型：harness 命令 / Skill 调用 / MCP 调用
-  const toolName = event.tool_name || ''
-  const cmd = event.tool_input?.command || ''
+runHook('PostToolUse', ctx => {
+  const toolName = ctx.toolName
+  const cmd = ctx.toolInput.command || ''
 
   // 1. harness 命令（dispatch / advance-phase / create-workflow / harness-workflow / archive-story）
   //    2026-09 修复：此前漏了 dispatch 与 create-workflow——三步循环的 Step 1 与建流入口反而不被记录
@@ -70,92 +55,74 @@ process.stdin.on('end', () => {
   // 3. MCP 调用（tool_name 形如 mcp__<server>__<tool>）
   const isMcp = /^mcp__/.test(toolName)
 
-  if (!isHarnessCmd && !isSkill && !isMcp) {
-    console.log(JSON.stringify({ continue: true }))
-    return
-  }
+  if (!isHarnessCmd && !isSkill && !isMcp) return { decision: 'allow' }
 
-  // 记录 trace
   try {
-    // 归一化 Git Bash / MSYS 风格盘符路径（"/d/xxx" → "d:/xxx"），仅 Windows
-    const rawRoot = process.env.CODEBUDDY_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd()
-    const winDrive = process.platform === 'win32' ? /^\/([a-zA-Z])\/(.*)$/.exec(rawRoot) : null
-    const PROJECT_ROOT = winDrive ? `${winDrive[1]}:/${winDrive[2]}` : rawRoot
-    const plansDir = path.join(PROJECT_ROOT, '.codebuddy', 'plans')
-    const storyDirs = fs.existsSync(plansDir)
-      ? fs.readdirSync(plansDir).filter(d => fs.statSync(path.join(plansDir, d)).isDirectory())
-      : []
+    for (const storyId of listStoryDirs()) {
+      const state = readJson(storyId, ARTIFACT.E2E_STATE)
+      if (!state || state._parseError || state.status !== 'running') continue
 
-    for (const storyId of storyDirs) {
-      const e2ePath = path.join(plansDir, storyId, 'e2e-state.json')
-      if (!fs.existsSync(e2ePath)) continue
-      const state = JSON.parse(fs.readFileSync(e2ePath, 'utf-8'))
-      if (state.status === 'running') {
-        const tracePath = path.join(plansDir, storyId, 'trace.jsonl')
-        // 根据事件类型构造不同的事件记录
-        let entry
-        if (isSkill) {
-          // Skill 调用：提取 skill 名
-          const skillName = event.tool_input?.skill || event.tool_input?.command || ''
-          entry = JSON.stringify({
-            ts: new Date().toISOString(),
-            type: 'tool_call',
-            tool: toolName,
-            skill: skillName.substring(0, 100),
-            phase: state.phase != null ? String(state.phase) : null,
-            result: 'success',
-            storyId
-          })
-        } else if (isMcp) {
-          // MCP 调用：tool_name = mcp__<server>__<tool>，拆出 server 与 tool
-          const parts = toolName.split('__')
-          entry = JSON.stringify({
-            ts: new Date().toISOString(),
-            type: 'tool_call',
-            tool: toolName,
-            mcp: parts[1] || null,
-            mcpTool: parts.slice(2).join('__') || null,
-            phase: state.phase != null ? String(state.phase) : null,
-            result: 'success',
-            storyId
-          })
-        } else {
-          // harness 命令（保留原有 tool_executed 语义，兼容既有消费方）
-          entry = JSON.stringify({
-            timestamp: new Date().toISOString(),
-            type: 'tool_executed',
-            tool: toolName,
-            command: cmd.substring(0, 200),
-            storyId
-          })
+      const phase = state.phase != null ? state.phase : null
+      let entry
+      if (isSkill) {
+        // Skill 调用：提取 skill 名
+        const skillName = ctx.toolInput.skill || ctx.toolInput.command || ''
+        entry = {
+          ts: new Date().toISOString(),
+          type: 'tool_call',
+          tool: toolName,
+          skill: String(skillName).substring(0, 100),
+          phase: phase != null ? String(phase) : null,
+          result: 'success',
+          storyId
         }
-        fs.appendFileSync(tracePath, entry + '\n')
-
-        // debug 载荷层：Skill / MCP 调用的输入与返回（宿主 PostToolUse 提供 tool_response
-        // 时全量留痕，缺失时标注 responseAvailable=false）。
-        // harness 命令不在此记录 script_output —— 命令脚本自身的输出口已全量留痕，
-        // 此处再记即重复计费。
-        if (isSkill || isMcp) {
-          const resp = event.tool_response != null ? event.tool_response
-            : (event.tool_result != null ? event.tool_result
-              : (event.response != null ? event.response : null))
-          debugLog.record(storyId, 'agent_report', {
-            tool: toolName,
-            toolClass: isSkill ? 'skill' : 'mcp',
-            input: event.tool_input || {},
-            response: resp,
-            responseAvailable: resp != null
-          }, {
-            phase: state.phase != null ? state.phase : null,
-            source: 'trace-command.js'
-          })
+      } else if (isMcp) {
+        // MCP 调用：tool_name = mcp__<server>__<tool>，拆出 server 与 tool
+        const parts = toolName.split('__')
+        entry = {
+          ts: new Date().toISOString(),
+          type: 'tool_call',
+          tool: toolName,
+          mcp: parts[1] || null,
+          mcpTool: parts.slice(2).join('__') || null,
+          phase: phase != null ? String(phase) : null,
+          result: 'success',
+          storyId
         }
-        break
+      } else {
+        // harness 命令（保留原有 tool_executed 语义，兼容既有消费方）
+        entry = {
+          timestamp: new Date().toISOString(),
+          type: 'tool_executed',
+          tool: toolName,
+          command: cmd.substring(0, 200),
+          storyId
+        }
       }
+      fs.appendFileSync(artifactPath(storyId, ARTIFACT.TRACE), JSON.stringify(entry) + '\n')
+
+      // debug 载荷层：Skill / MCP 调用的输入与返回（宿主 PostToolUse 提供 tool_response
+      // 时全量留痕，缺失时标注 responseAvailable=false）。
+      // harness 命令不在此记录 script_output —— 命令脚本自身的输出口已全量留痕，
+      // 此处再记即重复计费。
+      if (isSkill || isMcp) {
+        const raw = ctx.raw
+        const resp = raw.tool_response != null ? raw.tool_response
+          : (raw.tool_result != null ? raw.tool_result
+              : (raw.response != null ? raw.response : null))
+        debugLog.record(storyId, 'agent_report', {
+          tool: toolName,
+          toolClass: isSkill ? 'skill' : 'mcp',
+          input: ctx.toolInput,
+          response: resp,
+          responseAvailable: resp != null
+        }, { phase, source: 'trace-command.js' })
+      }
+      break
     }
-  } catch {
+  } catch (e) {
     // 静默失败，不阻塞主流程
   }
 
-  console.log(JSON.stringify({ continue: true }))
+  return { decision: 'allow' }
 })

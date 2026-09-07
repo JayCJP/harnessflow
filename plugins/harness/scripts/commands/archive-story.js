@@ -86,7 +86,7 @@ const ARCHIVE_DIR = 'archive'
  * @param {string} storyDir - Story 目录绝对路径
  * @returns {number} 下一个轮次编号（无归档时返回 1）
  */
-function detectRound(storyDir) {
+function detectRound (storyDir) {
   const archiveDir = path.join(storyDir, ARCHIVE_DIR)
   if (!fs.existsSync(archiveDir)) return 1
   const entries = fs.readdirSync(archiveDir, { withFileTypes: true })
@@ -103,7 +103,7 @@ function detectRound(storyDir) {
  * 递归删除空目录（仅删除空目录，非空则保留）
  * @param {string} dirPath - 目录路径
  */
-function removeDirIfEmpty(dirPath) {
+function removeDirIfEmpty (dirPath) {
   if (!fs.existsSync(dirPath)) return
   try {
     fs.rmdirSync(dirPath)
@@ -118,7 +118,7 @@ function removeDirIfEmpty(dirPath) {
  * @param {string[]} excludeTop - 排除的顶层目录名称
  * @returns {Array<{name: string, src: string, relative: string}>}
  */
-function scanAllFiles(dir, excludeTop) {
+function scanAllFiles (dir, excludeTop) {
   const result = []
   const excludeSet = new Set(excludeTop || [])
   const entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -140,7 +140,7 @@ function scanAllFiles(dir, excludeTop) {
  * @param {string} prefix - 相对路径前缀
  * @param {Array} result - 结果数组
  */
-function walkDir(dir, prefix, result) {
+function walkDir (dir, prefix, result) {
   const entries = fs.readdirSync(dir, { withFileTypes: true })
   for (const e of entries) {
     const full = path.join(dir, e.name)
@@ -158,7 +158,7 @@ function walkDir(dir, prefix, result) {
  * @param {string} archiveDir - archive/ 目录路径
  * @returns {number|null}
  */
-function detectLatestRound(archiveDir) {
+function detectLatestRound (archiveDir) {
   if (!fs.existsSync(archiveDir)) return null
   const entries = fs.readdirSync(archiveDir, { withFileTypes: true })
   let max = 0
@@ -174,7 +174,7 @@ function detectLatestRound(archiveDir) {
  * 确保目录存在（递归创建）
  * @param {string} dirPath - 目录路径
  */
-function ensureDir(dirPath) {
+function ensureDir (dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true })
   }
@@ -187,7 +187,7 @@ function ensureDir(dirPath) {
  * @param {string} storyId - Story ID
  * @param {{ dryRun: boolean, round: number|null, force: boolean }} opts - 选项
  */
-function cmdArchive(storyId, opts) {
+function cmdArchive (storyId, opts) {
   // 1. 读取当前状态（归档前必须）
   const state = readStateFile(storyId)
   if (!state || state._parseError) {
@@ -196,7 +196,7 @@ function cmdArchive(storyId, opts) {
       storyId,
       detail: state ? state._parseError : null
     })
-    process.exit(1)
+    return 1
   }
 
   const storyDir = getStoryDir(storyId)
@@ -211,7 +211,7 @@ function cmdArchive(storyId, opts) {
       error: 'Story 已归档（root 目录无文件），禁止重复归档',
       hint: '如需重新归档，请先执行 restore 复档'
     })
-    process.exit(1)
+    return 1
   }
 
   // 3. 终态检查（phase < 8 需 --force）
@@ -220,7 +220,7 @@ function cmdArchive(storyId, opts) {
       error: `Story 未达终态 (当前 Phase ${state.phase})，建议达到 Phase 8 后再归档`,
       hint: '如需强制归档，添加 --force'
     })
-    process.exit(1)
+    return 1
   }
 
   const round = opts.round || detectRound(storyDir)
@@ -243,7 +243,7 @@ function cmdArchive(storyId, opts) {
         totalFiles: toArchive.length
       }
     })
-    process.exit(0)
+    return 0
   }
 
   // 6. 创建归档目录
@@ -315,6 +315,7 @@ function cmdArchive(storyId, opts) {
     deletedFiles,
     hint: 'root 目录已清空，所有文件（含 e2e-state.json / trace.jsonl / repos.json）均归档到 archive/round-' + round + '/'
   }, { round })
+  return 0
 }
 
 // ─── 命令: restore ────────────────────────────────────────────
@@ -325,7 +326,7 @@ function cmdArchive(storyId, opts) {
  * @param {string} storyId - Story ID
  * @param {{ round: number|null, force: boolean, keepArchive: boolean }} opts - 选项
  */
-function cmdRestore(storyId, opts) {
+function cmdRestore (storyId, opts) {
   const storyDir = getStoryDir(storyId)
   const archiveDir = path.join(storyDir, ARCHIVE_DIR)
 
@@ -338,7 +339,7 @@ function cmdRestore(storyId, opts) {
         error: '无可用归档，请先执行 archive 归档',
         storyId
       })
-      process.exit(1)
+      return 1
     }
   }
 
@@ -348,7 +349,7 @@ function cmdRestore(storyId, opts) {
       error: `归档目录不存在: archive/round-${round}/`,
       hint: '请检查归档轮次是否正确，或用 list 命令查看可用归档'
     })
-    process.exit(1)
+    return 1
   }
 
   // 2. 扫描归档目录所有文件
@@ -359,7 +360,7 @@ function cmdRestore(storyId, opts) {
       error: `归档目录为空: archive/round-${round}/`,
       storyId
     })
-    process.exit(1)
+    return 1
   }
 
   // 3. 检查目标文件冲突
@@ -376,7 +377,7 @@ function cmdRestore(storyId, opts) {
       conflicts,
       hint: '添加 --force 覆盖，或先手动处理冲突文件'
     })
-    process.exit(1)
+    return 1
   }
 
   // 4. 恢复文件到 root
@@ -396,7 +397,7 @@ function cmdRestore(storyId, opts) {
   let archiveCleaned = false
   if (!opts.keepArchive) {
     // 递归删除 round 目录下所有空目录
-    function cleanEmptyDirs(dir) {
+    function cleanEmptyDirs (dir) {
       const entries = fs.readdirSync(dir, { withFileTypes: true })
       for (const e of entries) {
         if (e.isDirectory()) {
@@ -449,6 +450,7 @@ function cmdRestore(storyId, opts) {
       ? '归档副本已保留，可再次 restore'
       : '归档目录已清理，root 目录已完全复原'
   })
+  return 0
 }
 
 // ─── 命令: list ───────────────────────────────────────────────
@@ -457,7 +459,7 @@ function cmdRestore(storyId, opts) {
  * 列出 story 的所有归档轮次
  * @param {string} storyId - Story ID
  */
-function cmdList(storyId) {
+function cmdList (storyId) {
   const storyDir = getStoryDir(storyId)
   const archiveDir = path.join(storyDir, ARCHIVE_DIR)
   if (!fs.existsSync(archiveDir)) {
@@ -535,6 +537,7 @@ function cmdList(storyId) {
     totalArchives: rounds.length,
     archives: rounds
   })
+  return 0
 }
 
 // ─── 命令: status ─────────────────────────────────────────────
@@ -543,7 +546,7 @@ function cmdList(storyId) {
  * 查看归档状态
  * @param {string} storyId - Story ID
  */
-function cmdStatus(storyId) {
+function cmdStatus (storyId) {
   const storyDir = getStoryDir(storyId)
 
   // 检查 root 是否有文件（含 e2e-state.json）
@@ -601,74 +604,87 @@ function cmdStatus(storyId) {
       ? '已归档（root 目录无文件）。执行 restore 复档可恢复操作能力'
       : '未归档。执行 archive 可归档全部文件'
   })
+  return 0
 }
 
 // ─── CLI 入口 ─────────────────────────────────────────────────
 
-const args = process.argv.slice(2)
-const storyId = args[0]
-const command = args[1]
+/**
+ * CLI 主流程 —— 解析参数并分发到 cmdArchive / cmdRestore / cmdList / cmdStatus
+ *
+ * 各 cmd 通过 emit() 输出 JSON（既有输出契约不变），一律**返回退出码而不 exit**，
+ * exit 收敛到下方 require.main 分支唯一一处；因此本文件可被 require 复用与单测。
+ *
+ * @param {string[]} argv - 去掉 node 与脚本名后的参数（process.argv.slice(2)）
+ * @returns {number} 退出码：0 正常，1 参数非法 / 未知命令 / 归档前置条件不满足
+ */
+function main (argv) {
+  const storyId = argv[0]
+  const command = argv[1]
 
-if (!storyId || !command) {
-  console.log([
-    'archive-story.js — Story 归档与复档',
-    '',
-    '用法:',
-    '  node archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]',
-    '    归档: 将 root 目录全部文件移入 archive/round-{N}/（含 e2e-state / trace / repos）',
-    '    --dry-run    预览归档清单，不实际移动',
-    '    --round <N>  指定轮次编号（缺省自动检测）',
-    '    --force      非终态 (phase<8) 强制归档',
-    '',
-    '  node archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]',
-    '    复档: 将 archive/round-{N}/ 全部文件恢复到 root（完全复原）',
-    '    --round <N>     指定轮次（缺省自动取最新 round）',
-    '    --force         覆盖根目录同名文件',
-    '    --keep-archive  保留归档副本（默认移动清空归档）',
-    '',
-    '  node archive-story.js <storyId> list',
-    '    列出所有归档轮次',
-    '',
-    '  node archive-story.js <storyId> status',
-    '    查看归档状态（root 目录是否已清空）',
-    ''
-  ].join('\n'))
-  process.exit(1)
-}
+  if (!storyId || !command) {
+    console.log([
+      'archive-story.js — Story 归档与复档',
+      '',
+      '用法:',
+      '  node archive-story.js <storyId> archive [--dry-run] [--round <N>] [--force]',
+      '    归档: 将 root 目录全部文件移入 archive/round-{N}/（含 e2e-state / trace / repos）',
+      '    --dry-run    预览归档清单，不实际移动',
+      '    --round <N>  指定轮次编号（缺省自动检测）',
+      '    --force      非终态 (phase<8) 强制归档',
+      '',
+      '  node archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]',
+      '    复档: 将 archive/round-{N}/ 全部文件恢复到 root（完全复原）',
+      '    --round <N>     指定轮次（缺省自动取最新 round）',
+      '    --force         覆盖根目录同名文件',
+      '    --keep-archive  保留归档副本（默认移动清空归档）',
+      '',
+      '  node archive-story.js <storyId> list',
+      '    列出所有归档轮次',
+      '',
+      '  node archive-story.js <storyId> status',
+      '    查看归档状态（root 目录是否已清空）',
+      ''
+    ].join('\n'))
+    return 1
+  }
 
-const flags = args.slice(2)
-const opts = {
-  dryRun: flags.includes('--dry-run'),
-  force: flags.includes('--force'),
-  keepArchive: flags.includes('--keep-archive'),
-  round: null
-}
-const roundIdx = flags.indexOf('--round')
-if (roundIdx !== -1 && flags[roundIdx + 1]) {
-  opts.round = parseInt(flags[roundIdx + 1], 10)
-  if (isNaN(opts.round) || opts.round < 1) {
-    emit(storyId, { error: '--round 必须为正整数' })
-    process.exit(1)
+  const flags = argv.slice(2)
+  const opts = {
+    dryRun: flags.includes('--dry-run'),
+    force: flags.includes('--force'),
+    keepArchive: flags.includes('--keep-archive'),
+    round: null
+  }
+  const roundIdx = flags.indexOf('--round')
+  if (roundIdx !== -1 && flags[roundIdx + 1]) {
+    opts.round = parseInt(flags[roundIdx + 1], 10)
+    if (isNaN(opts.round) || opts.round < 1) {
+      emit(storyId, { error: '--round 必须为正整数' })
+      return 1
+    }
+  }
+
+  switch (command) {
+    case 'archive':
+      return cmdArchive(storyId, opts)
+    case 'restore':
+      return cmdRestore(storyId, opts)
+    case 'list':
+      return cmdList(storyId)
+    case 'status':
+      return cmdStatus(storyId)
+    default:
+      emit(storyId, {
+        error: `未知命令: ${command}`,
+        validCommands: ['archive', 'restore', 'list', 'status']
+      })
+      return 1
   }
 }
 
-switch (command) {
-  case 'archive':
-    cmdArchive(storyId, opts)
-    break
-  case 'restore':
-    cmdRestore(storyId, opts)
-    break
-  case 'list':
-    cmdList(storyId)
-    break
-  case 'status':
-    cmdStatus(storyId)
-    break
-  default:
-    emit(storyId, {
-      error: `未知命令: ${command}`,
-      validCommands: ['archive', 'restore', 'list', 'status']
-    })
-    process.exit(1)
+if (require.main === module) {
+  process.exit(main(process.argv.slice(2)))
 }
+
+module.exports = { main, cmdArchive, cmdRestore, cmdList, cmdStatus }

@@ -29,6 +29,8 @@
  *
  * 说明:
  *   - 本 Hook 是 PreToolUse 门控链的第 1 道（#2 为 enforce-artifact.js）。
+ *   - stdin 读取、tool_input 归一化、apply_patch 路径解析、决策渲染与退出码统一由
+ *     lib/hook-runner.js 承担；本文件只表达「拦不拦」的判断。
  *   - v5 CCHF 限域逻辑（file-level scope via task-dag.json allowedPaths + 经验采集）：
  *       Normal  → unrestricted（.harness-active 未激活，直接放行）
  *       Harness → check dev-pass:
@@ -46,139 +48,26 @@
 const fs = require('fs')
 const path = require('path')
 const hookUtils = require('../lib/state')
-const { readStdin, isSrcFile, checkDevPass, PLANS_DIR, PROJECT_ROOT } = hookUtils
+const { isSrcFile, checkDevPass } = hookUtils
+const { runHook, WRITE_TOOLS } = require('../lib/hook-runner')
+const { ARTIFACT, HARNESS_ACTIVE_FLAG, readJson } = require('../lib/artifacts')
 const trace = require('../lib/trace')
 const debugLog = require('../lib/debug-log')
 
-const stdinData = readStdin()
-if (!stdinData.trim()) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
-
-let inputData = {}
-try { inputData = JSON.parse(stdinData) } catch { console.log(JSON.stringify({ continue: true })); process.exit(0) }
-
-const toolName = inputData.tool_name || ''
-const toolInput = inputData.tool_input || {}
-const patchPaths = toolName === 'apply_patch'
-  ? [...String(toolInput.command || '').matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map(m => m[1].trim())
-  : []
-const filePaths = patchPaths.length > 0
-  ? patchPaths
-  : [toolInput.filePath || toolInput.file_path || ''].filter(Boolean)
-const srcFilePaths = filePaths.filter(isSrcFile)
-const filePath = srcFilePaths[0] || ''
-
-const writeTools = ['write_to_file', 'replace_in_file', 'apply_patch', 'Write', 'Edit']
-if (!writeTools.includes(toolName)) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
-if (srcFilePaths.length === 0) { console.log(JSON.stringify({ continue: true })); process.exit(0) }
-
-const harnessFlag = path.join(PLANS_DIR, '.harness-active')
-let harnessActive = false
-/** 激活标记里的 storyId（dev-pass 缺失时用它给 debug 拒绝记录归属 story） */
-let flagStoryId = null
-if (fs.existsSync(harnessFlag)) {
-  try { const flag = JSON.parse(fs.readFileSync(harnessFlag, 'utf-8')); harnessActive = flag.active === true; flagStoryId = flag.storyId || null } catch {}
-}
-
-if (!harnessActive) {
-  console.log(JSON.stringify({ continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: 'Normal mode' } }))
-  process.exit(0)
-}
-
-const devPass = checkDevPass()
-
-if (!devPass.valid) {
-  // 写入 trace 记录 Hook 拒绝事件
-  trace.appendTrace(null, {
-    type: 'hook_rejection',
-    result: 'deny',
-    reason: 'dev_pass_missing',
-    phase: '-1',
-    recordFailure: {
-      failureType: 'dev_pass_missing',
-      rootCause: 'Agent 试图在无 dev-pass 时编辑 src/ 文件: ' + filePath,
-      resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）'
-    }
-  })
-
-  // debug 载荷层：拒绝详情留痕（storyId 取激活标记，无 dev-pass 可读）
-  debugLog.record(flagStoryId, 'hook_decision', {
-    hook: 'enforce-dev-pass.js',
-    decision: 'deny',
-    reason: 'dev_pass_missing',
-    tool: toolName,
-    filePath
-  })
-
-  console.log(JSON.stringify({
-    continue: false,
-    stopReason: 'HARNESS MODE - no valid dev-pass. Must advance to Phase 2. dev-pass revoked at Phase 2→3 (primary) and Phase 4→5 (safety net).',
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: 'No valid dev-pass',
-      recordFailure: {
-        failureType: 'dev_pass_missing',
-        rootCause: 'Agent 试图在无 dev-pass 时编辑 src/ 文件: ' + filePath,
-        resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/'
-      }
-    }
-  }, null, 0))
-  process.exit(2)
-}
-
-// 🔴 CCHF v5: 即使 dev-pass 文件有效，也需校验当前 phase 是否仍是 Phase 2
-// dev-pass 撤销双保险：Phase 2→3（主） + Phase 4→5（兜底）
-// Phase 3+ 时 dev-pass 应已失效，但防止过期 dev-pass.json 残留导致非法编辑
-var currentPhase = -1
-if (devPass.valid && devPass.storyId) {
-  try {
-    var statePath = path.join(PLANS_DIR, devPass.storyId, 'e2e-state.json')
-    if (fs.existsSync(statePath)) {
-      var state = JSON.parse(fs.readFileSync(statePath, 'utf-8'))
-      currentPhase = (state.phase !== undefined && state.phase !== null) ? state.phase : -1
-    }
-  } catch (e) { /* 无法读取 state，降级为仅检查 dev-pass 文件 */ }
-}
-
-if (currentPhase > 2) {
-  // 写入 trace 记录 Hook 拒绝事件
-  trace.appendTrace(devPass.storyId || null, {
-    type: 'hook_rejection',
-    result: 'deny',
-    reason: 'dev_pass_expired',
-    phase: String(currentPhase),
-    recordFailure: {
-      failureType: 'dev_pass_expired',
-      rootCause: `Agent 在 Phase ${currentPhase} 试图编辑 src/，dev-pass 仅在 Phase 2 有效`,
-      resolution: 'dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2'
-    }
-  })
-
-  // debug 载荷层：拒绝详情留痕
-  debugLog.record(devPass.storyId || flagStoryId, 'hook_decision', {
-    hook: 'enforce-dev-pass.js',
-    decision: 'deny',
-    reason: 'dev_pass_expired',
-    tool: toolName,
-    filePath,
-    currentPhase
-  })
-
-  console.log(JSON.stringify({
-    continue: false,
-    stopReason: `HARNESS MODE - dev-pass expired (current phase=${currentPhase}, dev-pass only valid in Phase 2). Revoked at Phase 2→3 (primary) + Phase 4→5 (safety net).`,
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: 'dev-pass expired - not in Phase 2',
-      recordFailure: {
-        failureType: 'dev_pass_expired',
-        rootCause: `Agent 在 Phase ${currentPhase} 试图编辑 src/，dev-pass 仅在 Phase 2 有效`,
-        resolution: 'dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2'
-      }
-    }
-  }, null, 0))
-  process.exit(2)
+/**
+ * 把 allowedPaths 渲染成可读文本
+ *
+ * 修复: 原实现直接 allowedPaths.join(', ')，而 allowedPaths 是 { repo, path } 对象数组，
+ * 拼出来是 "Allowed: [object Object]" —— Agent 拿不到允许清单就无法自我纠正，
+ * 而 dev_pass_scope_violation 恰是经验库里占比最高的失败模式。
+ *
+ * @param {Array<{repo:string,path:string}|string>} list - allowedPaths
+ * @returns {string} 形如 "main:src/views/Foo.vue, main:src/api/"
+ */
+function describeAllowed (list) {
+  return list
+    .map(p => (p && typeof p === 'object' && p.repo && p.path) ? `${p.repo}:${p.path}` : String(p))
+    .join(', ')
 }
 
 // --- CCHF v6: multi-repo file-level scope check ---
@@ -190,9 +79,9 @@ if (currentPhase > 2) {
  * @param {Object|string} [reposOrStoryId] - 已加载的 repos 配置 或 storyId（string）
  * @returns {boolean}
  */
-function isFileInAllowedPaths(targetFile, allowedPatterns, reposOrStoryId) {
+function isFileInAllowedPaths (targetFile, allowedPatterns, reposOrStoryId) {
   if (!allowedPatterns || allowedPatterns.length === 0) return false
-  var reposConfig
+  let reposConfig
   if (typeof reposOrStoryId === 'string') {
     reposConfig = hookUtils.loadRepos(reposOrStoryId)
   } else if (reposOrStoryId && typeof reposOrStoryId === 'object') {
@@ -200,11 +89,10 @@ function isFileInAllowedPaths(targetFile, allowedPatterns, reposOrStoryId) {
   } else {
     reposConfig = hookUtils.loadRepos()
   }
-  var absTarget = path.resolve(targetFile).replace(/\\/g, "/")
+  const absTarget = path.resolve(targetFile).replace(/\\/g, '/')
 
-  for (var i = 0; i < allowedPatterns.length; i++) {
-    var p = allowedPatterns[i]
-    var repoName, pattern
+  for (const p of allowedPatterns) {
+    let repoName, pattern
 
     // 统一格式：{ repo, path } 对象
     if (typeof p === 'object' && p !== null && p.repo && p.path) {
@@ -218,24 +106,24 @@ function isFileInAllowedPaths(targetFile, allowedPatterns, reposOrStoryId) {
       continue
     }
 
-    var repoRoot = reposConfig.repos[repoName]
+    const repoRoot = reposConfig.repos[repoName]
     if (!repoRoot) continue
 
     // src/** 通配：匹配该仓库 src/ 下任意文件
     if (pattern === 'src/**') {
-      var srcDir = path.resolve(repoRoot, 'src').replace(/\\/g, "/") + "/"
+      const srcDir = path.resolve(repoRoot, 'src').replace(/\\/g, '/') + '/'
       if (absTarget.indexOf(srcDir) === 0) return true
       continue
     }
 
     // 精确/glob 匹配：按仓库根解析为绝对路径后正则匹配
-    var absAllowed = path.resolve(repoRoot, pattern).replace(/\\/g, "/")
+    const absAllowed = path.resolve(repoRoot, pattern).replace(/\\/g, '/')
     // 目录级限域增强：允许 files 声明「模块目录」而非精确文件。
     //   仅当 pattern 是「无通配符的目录路径」（以 / 结尾，或在磁盘上实际是目录）时，
     //   才按目录前缀匹配该目录下任意层级文件 —— 这样开发在模块目录内新增/修改
     //   符合规范的文件（如新增枚举常量文件）不再被误拦截。
     //   含通配符（** / *）的模式仍走下方 glob 正则转换（如 src/**、src/views/*.vue）。
-    var isPlainDirPattern = /\/$/.test(pattern) || pattern === '.'
+    let isPlainDirPattern = /\/$/.test(pattern) || pattern === '.'
     if (!isPlainDirPattern && absAllowed !== '') {
       // TOCTOU 保护：existsSync+statSync 间目录可能被删，statSync 失败按非目录降级（走 glob 正则）
       try {
@@ -243,75 +131,158 @@ function isFileInAllowedPaths(targetFile, allowedPatterns, reposOrStoryId) {
       } catch (_) { /* 目录不存在或不可访问，非目录模式 */ }
     }
     if (isPlainDirPattern) {
-      var dirAbs = /\/$/.test(absAllowed) ? absAllowed : absAllowed + "/"
+      const dirAbs = /\/$/.test(absAllowed) ? absAllowed : absAllowed + '/'
       if (absTarget.indexOf(dirAbs) === 0) return true
       continue
     }
 
     // 精确文件或 glob 通配：转换为正则匹配
-    var escaped = absAllowed.replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    var r = "^" + escaped.replace(/\*\*/g, "__STARSTAR__").replace(/\*/g, "[^/]+").replace(/__STARSTAR__/g, ".*") + "$"
-    try { if (new RegExp(r).test(absTarget)) return true } catch {}
+    const escaped = absAllowed.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    const r = '^' + escaped.replace(/\*\*/g, '__STARSTAR__').replace(/\*/g, '[^/]+').replace(/__STARSTAR__/g, '.*') + '$'
+    try {
+      if (new RegExp(r).test(absTarget)) return true
+    } catch (e) { /* 正则构造失败按不匹配处理 */ }
   }
   return false
 }
 
-var passFile = null
-try {
-  var pp = path.join(PLANS_DIR, devPass.storyId, "dev-pass.json")
-  if (fs.existsSync(pp)) { passFile = JSON.parse(fs.readFileSync(pp, "utf-8")) }
-} catch {}
+runHook('PreToolUse', ctx => {
+  const toolName = ctx.toolName
+  if (!WRITE_TOOLS.includes(toolName)) return { decision: 'allow' }
 
-if (passFile && Array.isArray(passFile.allowedPaths) && passFile.allowedPaths.length > 0) {
-  const deniedFile = srcFilePaths.find(target => !isFileInAllowedPaths(target, passFile.allowedPaths, devPass.storyId))
-  if (deniedFile) {
-    // 写入 trace 记录 Hook 拒绝事件
+  const srcFilePaths = ctx.filePaths.filter(isSrcFile)
+  if (srcFilePaths.length === 0) return { decision: 'allow' }
+  const filePath = srcFilePaths[0]
+
+  /** 激活标记里的 storyId（dev-pass 缺失时用它给 debug 拒绝记录归属 story） */
+  let flagStoryId = null
+  let harnessActive = false
+  if (fs.existsSync(HARNESS_ACTIVE_FLAG)) {
+    try {
+      const flag = JSON.parse(fs.readFileSync(HARNESS_ACTIVE_FLAG, 'utf-8'))
+      harnessActive = flag.active === true
+      flagStoryId = flag.storyId || null
+    } catch (e) { /* 标记文件损坏按未激活处理 */ }
+  }
+
+  if (!harnessActive) return { decision: 'allow', additionalContext: 'Normal mode' }
+
+  const devPass = checkDevPass()
+
+  if (!devPass.valid) {
+    const failure = {
+      failureType: 'dev_pass_missing',
+      rootCause: 'Agent 试图在无 dev-pass 时编辑 src/ 文件: ' + filePath,
+      resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/'
+    }
+    trace.appendTrace(null, {
+      type: 'hook_rejection',
+      result: 'deny',
+      reason: 'dev_pass_missing',
+      phase: '-1',
+      recordFailure: {
+        ...failure,
+        resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）'
+      }
+    })
+    // debug 载荷层：拒绝详情留痕（storyId 取激活标记，无 dev-pass 可读）
+    debugLog.record(flagStoryId, 'hook_decision', {
+      hook: 'enforce-dev-pass.js',
+      decision: 'deny',
+      reason: 'dev_pass_missing',
+      tool: toolName,
+      filePath
+    })
+    return {
+      decision: 'deny',
+      stopReason: 'HARNESS MODE - no valid dev-pass. Must advance to Phase 2. dev-pass revoked at Phase 2→3 (primary) and Phase 4→5 (safety net).',
+      reason: 'No valid dev-pass',
+      failure
+    }
+  }
+
+  // 🔴 CCHF v5: 即使 dev-pass 文件有效，也需校验当前 phase 是否仍是 Phase 2
+  // dev-pass 撤销双保险：Phase 2→3（主） + Phase 4→5（兜底）
+  // Phase 3+ 时 dev-pass 应已失效，但防止过期 dev-pass.json 残留导致非法编辑
+  let currentPhase = -1
+  if (devPass.storyId) {
+    const state = readJson(devPass.storyId, ARTIFACT.E2E_STATE)
+    if (state && !state._parseError && state.phase !== undefined && state.phase !== null) {
+      currentPhase = state.phase
+    }
+  }
+
+  if (currentPhase > 2) {
+    const failure = {
+      failureType: 'dev_pass_expired',
+      rootCause: `Agent 在 Phase ${currentPhase} 试图编辑 src/，dev-pass 仅在 Phase 2 有效`,
+      resolution: 'dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2'
+    }
     trace.appendTrace(devPass.storyId || null, {
       type: 'hook_rejection',
       result: 'deny',
-      reason: 'dev_pass_scope_violation',
-      phase: '2',
-      recordFailure: {
+      reason: 'dev_pass_expired',
+      phase: String(currentPhase),
+      recordFailure: failure
+    })
+    debugLog.record(devPass.storyId || flagStoryId, 'hook_decision', {
+      hook: 'enforce-dev-pass.js',
+      decision: 'deny',
+      reason: 'dev_pass_expired',
+      tool: toolName,
+      filePath,
+      currentPhase
+    })
+    return {
+      decision: 'deny',
+      stopReason: `HARNESS MODE - dev-pass expired (current phase=${currentPhase}, dev-pass only valid in Phase 2). Revoked at Phase 2→3 (primary) + Phase 4→5 (safety net).`,
+      reason: 'dev-pass expired - not in Phase 2',
+      failure
+    }
+  }
+
+  const passFile = devPass.storyId ? readJson(devPass.storyId, ARTIFACT.DEV_PASS) : null
+  const allowedPaths = (passFile && !passFile._parseError && Array.isArray(passFile.allowedPaths))
+    ? passFile.allowedPaths
+    : []
+
+  if (allowedPaths.length > 0) {
+    const deniedFile = srcFilePaths.find(target => !isFileInAllowedPaths(target, allowedPaths, devPass.storyId))
+    if (deniedFile) {
+      const failure = {
         failureType: 'dev_pass_scope_violation',
         rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + deniedFile,
         resolution: '只允许编辑 task-dag.json 中声明的文件，请检查 files 列表'
       }
-    })
-
-    // debug 载荷层：拒绝详情留痕（含允许清单，供回顾对比）
-    debugLog.record(devPass.storyId || flagStoryId, 'hook_decision', {
-      hook: 'enforce-dev-pass.js',
-      decision: 'deny',
-      reason: 'dev_pass_scope_violation',
-      tool: toolName,
-      deniedFile,
-      allowedPaths: passFile.allowedPaths,
-      pathSource: passFile.pathSource
-    })
-
-    console.log(JSON.stringify({
-      continue: false,
-      stopReason: "File " + deniedFile + " not in dev-pass scope. Allowed: " + passFile.allowedPaths.join(", "),
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: 'File not in dev-pass scope',
-        recordFailure: {
-          failureType: 'dev_pass_scope_violation',
-          rootCause: 'Agent 试图编辑 dev-pass 限域外的文件: ' + deniedFile,
-          resolution: '只允许编辑 task-dag.json 中声明的文件，请检查 files 列表'
-        }
+      trace.appendTrace(devPass.storyId || null, {
+        type: 'hook_rejection',
+        result: 'deny',
+        reason: 'dev_pass_scope_violation',
+        phase: '2',
+        recordFailure: failure
+      })
+      // debug 载荷层：拒绝详情留痕（含允许清单，供回顾对比）
+      debugLog.record(devPass.storyId || flagStoryId, 'hook_decision', {
+        hook: 'enforce-dev-pass.js',
+        decision: 'deny',
+        reason: 'dev_pass_scope_violation',
+        tool: toolName,
+        deniedFile,
+        allowedPaths,
+        pathSource: passFile.pathSource
+      })
+      return {
+        decision: 'deny',
+        stopReason: 'File ' + deniedFile + ' not in dev-pass scope. Allowed: ' + describeAllowed(allowedPaths),
+        reason: 'File not in dev-pass scope',
+        failure
       }
-    }, null, 0))
-    process.exit(2)
+    }
   }
-}
 
-var scope = (passFile && passFile.pathSource === "task-dag.json")
-  ? " (scoped: " + passFile.allowedPaths.length + " files)"
-  : (passFile && passFile.pathSource === "fallback-src-glob") ? " (fallback src/**)" : ""
-console.log(JSON.stringify({
-  continue: true,
-  hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: "dev-pass valid" + scope + ": " + devPass.reason }
-}, null, 0))
-process.exit(0)
+  const scope = (passFile && passFile.pathSource === 'task-dag.json')
+    ? ' (scoped: ' + allowedPaths.length + ' files)'
+    : (passFile && passFile.pathSource === 'fallback-src-glob') ? ' (fallback src/**)' : ''
+
+  return { decision: 'allow', additionalContext: 'dev-pass valid' + scope + ': ' + devPass.reason }
+})

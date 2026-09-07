@@ -25,6 +25,8 @@
  *
  * 说明:
  *   - 本 Hook 是 PreToolUse 门控链的第 2 道（#1 为 enforce-dev-pass.js）。
+ *   - stdin 读取、tool_input 归一化、apply_patch 路径解析、决策渲染与退出码统一由
+ *     lib/hook-runner.js 承担；本文件只表达「拦不拦」的判断。
  *   - 拦截工具: write_to_file / replace_in_file / apply_patch / Write / Edit；其余工具直接放行。
  *   - apply_patch 场景从 command 文本中解析 `*** Add|Update|Delete File:` 路径，再定位状态文件。
  *   - CCHF v2: 单个 Phase 可能声明多个产出物，检查时遍历 checkPhaseArtifact 返回的 missing 数组逐项报告，而非只报第一个。
@@ -34,144 +36,99 @@
 
 const fs = require('fs')
 const path = require('path')
-const {
-  readStdin,
-  isStateFile,
-  PLANS_DIR,
-  PHASE_SLUGS,
-  getPhaseName,
-  checkPhaseArtifact
-} = require('../lib/state')
-
+const { isStateFile, getPhaseName, checkPhaseArtifact } = require('../lib/state')
+const { runHook, WRITE_TOOLS } = require('../lib/hook-runner')
 const trace = require('../lib/trace')
 const debugLog = require('../lib/debug-log')
 
-// ─── Hook 主逻辑 ─────────────────────────────────────────────────
+runHook('PreToolUse', ctx => {
+  // 只处理文件写入/编辑工具
+  if (!WRITE_TOOLS.includes(ctx.toolName)) return { decision: 'allow' }
 
-const stdinData = readStdin()
+  const patchText = ctx.toolName === 'apply_patch' ? String(ctx.toolInput.command || '') : ''
+  const filePath = ctx.patchPaths.find(isStateFile) || ctx.filePath
+  const fileContent = patchText || ctx.toolInput.content || ctx.toolInput.new_str || ''
 
-if (!stdinData.trim()) {
-  console.log(JSON.stringify({ continue: true }))
-  process.exit(0)
-}
+  // 检查文件路径是否为 e2e-state.json
+  if (!isStateFile(filePath)) return { decision: 'allow' }
 
-let inputData = {}
-try {
-  inputData = JSON.parse(stdinData)
-} catch (e) {
-  console.log(JSON.stringify({ continue: true }))
-  process.exit(0)
-}
+  // 从文件路径提取 storyId（新版: plans/<storyId>/e2e-state.json）
+  const storyId = path.basename(path.dirname(filePath))
 
-const toolName = inputData.tool_name || ''
-const toolInput = inputData.tool_input || {}
-const patchText = toolName === 'apply_patch' ? String(toolInput.command || '') : ''
-const patchPaths = patchText
-  ? [...patchText.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map(m => m[1].trim())
-  : []
-const filePath = patchPaths.find(isStateFile) || toolInput.filePath || toolInput.file_path || ''
-const fileContent = patchText || toolInput.content || toolInput.new_str || ''
+  // 尝试从写入内容中解析 phase 值
+  let targetPhase = null
 
-// 只处理文件写入/编辑工具
-const writeTools = ['write_to_file', 'replace_in_file', 'apply_patch', 'Write', 'Edit']
-if (!writeTools.includes(toolName)) {
-  console.log(JSON.stringify({ continue: true }))
-  process.exit(0)
-}
-
-// 检查文件路径是否为 e2e-state.json
-if (!isStateFile(filePath)) {
-  console.log(JSON.stringify({ continue: true }))
-  process.exit(0)
-}
-
-// 从文件路径提取 storyId（新版: plans/<storyId>/e2e-state.json）
-const storyId = path.basename(path.dirname(filePath))
-
-// 尝试从写入内容中解析 phase 值
-let targetPhase = null
-
-// 策略1: 直接解析 JSON content（write_to_file 场景）
-if (fileContent) {
-  try {
-    // 对于 replace_in_file，content 可能不是完整 JSON
-    // 尝试提取 phase 字段
-    const phaseMatch = fileContent.match(/"phase"\s*:\s*(\d+)/)
-    if (phaseMatch) {
-      targetPhase = parseInt(phaseMatch[1])
-    } else {
-      // 尝试完整 JSON 解析
-      const parsed = JSON.parse(fileContent)
-      if (typeof parsed.phase === 'number') {
-        targetPhase = parsed.phase
-      }
-    }
-  } catch (e) {
-    // 内容不是完整 JSON（可能是 replace_in_file 的 new_str），尝试从文件读取当前 phase
-  }
-}
-
-// 策略2: 如果无法从内容中解析，读取现有文件的 phase 值
-if (targetPhase === null) {
-  try {
-    const existingPath = filePath
-    if (fs.existsSync(existingPath)) {
-      const existing = JSON.parse(fs.readFileSync(existingPath, 'utf-8'))
-      // 如果内容中包含 "phase" 字样，说明在修改 phase
-      if (fileContent && fileContent.includes('"phase"')) {
-        // 无法确定新值，保守策略：读取现有 phase + 1 作为检查目标
-        targetPhase = existing.phase + 1
+  // 策略1: 直接解析 JSON content（write_to_file 场景）
+  if (fileContent) {
+    try {
+      // 对于 replace_in_file，content 可能不是完整 JSON，先尝试提取 phase 字段
+      const phaseMatch = fileContent.match(/"phase"\s*:\s*(\d+)/)
+      if (phaseMatch) {
+        targetPhase = parseInt(phaseMatch[1])
       } else {
-        // 没有修改 phase，放行
-        console.log(JSON.stringify({ continue: true }))
-        process.exit(0)
+        const parsed = JSON.parse(fileContent)
+        if (typeof parsed.phase === 'number') targetPhase = parsed.phase
       }
-    } else {
-      // 文件不存在，是新建，phase 应该是 0
-      targetPhase = 0
-    }
-  } catch (e) {
-    // 无法判断，放行（不阻断正常操作）
-    console.log(JSON.stringify({ continue: true }))
-    process.exit(0)
-  }
-}
-
-// ── Phase 0: 新建状态文件，无前置检查 ──
-if (targetPhase === 0) {
-  console.log(JSON.stringify({ continue: true }))
-  process.exit(0)
-}
-
-// ── 检查前置 Phase 的产出物 ──
-const blockers = []
-
-for (let p = 0; p < targetPhase; p++) {
-  const artifact = checkPhaseArtifact(storyId, p)
-
-  if (!artifact.exists) {
-    // CCHF v2: 每个 Phase 可能有多个产出物，逐个报告缺失项
-    for (const m of artifact.missing) {
-      blockers.push(
-        `Phase ${p} (${getPhaseName(p)}) 产出物缺失: ${m.description}` +
-        (m.fileName ? ` → ${m.fileName}` : '')
-      )
+    } catch (e) {
+      // 内容不是完整 JSON（可能是 replace_in_file 的 new_str），下面回读磁盘
     }
   }
-}
 
-if (blockers.length > 0) {
+  // 策略2: 无法从内容解析时，回读现有文件的 phase 值
+  if (targetPhase === null) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const existing = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+        if (fileContent && fileContent.includes('"phase"')) {
+          // 内容提到 phase 但解析不出新值，保守按 现有 phase + 1 检查
+          targetPhase = existing.phase + 1
+        } else {
+          // 没有修改 phase，放行
+          return { decision: 'allow' }
+        }
+      } else {
+        // 文件不存在，是新建，phase 应该是 0
+        targetPhase = 0
+      }
+    } catch (e) {
+      // 无法判断，放行（不阻断正常操作）
+      return { decision: 'allow' }
+    }
+  }
+
+  // Phase 0: 新建状态文件，无前置检查
+  if (targetPhase === 0) return { decision: 'allow' }
+
+  // 检查前置 Phase 的产出物
+  const blockers = []
+  for (let p = 0; p < targetPhase; p++) {
+    const artifact = checkPhaseArtifact(storyId, p)
+    if (!artifact.exists) {
+      // CCHF v2: 每个 Phase 可能有多个产出物，逐个报告缺失项
+      for (const m of artifact.missing) {
+        blockers.push(
+          `Phase ${p} (${getPhaseName(p)}) 产出物缺失: ${m.description}` +
+          (m.fileName ? ` → ${m.fileName}` : '')
+        )
+      }
+    }
+  }
+
+  if (blockers.length === 0) return { decision: 'allow' }
+
+  const failure = {
+    failureType: 'phase_skip_attempt',
+    rootCause: `Agent 试图跳 Phase 将状态推进到 Phase ${targetPhase}，但前置产出物缺失: ${blockers.join('; ')}`,
+    resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.js ${storyId} ${targetPhase} 统一推进`
+  }
+
   // 写入 trace 记录 Hook 拒绝事件
   trace.appendTrace(storyId, {
     type: 'hook_rejection',
     result: 'deny',
     reason: 'phase_skip_attempt',
     phase: String(targetPhase),
-    recordFailure: {
-      failureType: 'phase_skip_attempt',
-      rootCause: `Agent 试图跳 Phase 将状态推进到 Phase ${targetPhase}，但前置产出物缺失: ${blockers.join('; ')}`,
-      resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.js ${storyId} ${targetPhase} 统一推进`
-    }
+    recordFailure: failure
   })
 
   // debug 载荷层：拒绝详情留痕（含完整缺失清单）
@@ -183,8 +140,8 @@ if (blockers.length > 0) {
     blockers
   })
 
-  const output = {
-    continue: false,
+  return {
+    decision: 'deny',
     stopReason: [
       `⛔ 无法将状态推进到 Phase ${targetPhase} (${getPhaseName(targetPhase)})`,
       '',
@@ -194,22 +151,7 @@ if (blockers.length > 0) {
       '请先完成对应 Phase 的产出物，或使用 advance-phase.js 统一推进:',
       `  node .codebuddy/scripts/advance-phase.js ${storyId} ${targetPhase}`
     ].join('\n'),
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: `前置 Phase 产出物检查失败: ${blockers.length} 项缺失`,
-      recordFailure: {
-        failureType: 'phase_skip_attempt',
-        rootCause: `Agent 试图跳 Phase 将状态推进到 Phase ${targetPhase}，但前置产出物缺失: ${blockers.join('; ')}`,
-        resolution: `请先完成前置 Phase 的产出物，或使用 advance-phase.js ${storyId} ${targetPhase} 统一推进`
-      }
-    }
+    reason: `前置 Phase 产出物检查失败: ${blockers.length} 项缺失`,
+    failure
   }
-
-  console.log(JSON.stringify(output, null, 0))
-  process.exit(2)
-}
-
-// ✅ 所有前置产出物存在 → 放行
-console.log(JSON.stringify({ continue: true }))
-process.exit(0)
+})

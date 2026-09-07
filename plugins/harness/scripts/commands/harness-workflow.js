@@ -50,8 +50,8 @@
  */
 
 const fs = require('fs')
-const path = require('path')
-const { ensureReposJson, readStateFile, loadRepos, PROJECT_ROOT, PLANS_DIR } = require('../lib/state')
+const { ensureReposJson, readStateFile, loadRepos, PLANS_DIR } = require('../lib/state')
+const { HARNESS_ACTIVE_FLAG } = require('../lib/artifacts')
 const { createWorkflow, precheckStoryInput, takeFlagValue } = require('./create-workflow')
 const debugLog = require('../lib/debug-log')
 
@@ -59,14 +59,14 @@ const debugLog = require('../lib/debug-log')
 // PROJECT_ROOT / PLANS_DIR 单一信源: lib/state.js（含 CLAUDE_PROJECT_DIR 跨宿主回退）
 
 /** harness 激活标记文件 */
-const HARNESS_FLAG = path.join(PLANS_DIR, '.harness-active')
+const HARNESS_FLAG = HARNESS_ACTIVE_FLAG
 
 // ─── 工具函数 ──────────────────────────────────────────────────
 
 /**
  * 确保 plans 目录存在
  */
-function ensurePlansDir() {
+function ensurePlansDir () {
   if (!fs.existsSync(PLANS_DIR)) {
     fs.mkdirSync(PLANS_DIR, { recursive: true })
   }
@@ -76,7 +76,7 @@ function ensurePlansDir() {
  * 读取标记文件内容
  * @returns {Object|null} 标记内容，不存在时返回 null
  */
-function readFlag() {
+function readFlag () {
   if (!fs.existsSync(HARNESS_FLAG)) return null
   try {
     return JSON.parse(fs.readFileSync(HARNESS_FLAG, 'utf-8'))
@@ -89,7 +89,7 @@ function readFlag() {
  * 写入标记文件
  * @param {Object} data - 标记数据
  */
-function writeFlag(data) {
+function writeFlag (data) {
   ensurePlansDir()
   fs.writeFileSync(HARNESS_FLAG, JSON.stringify(data, null, 2), 'utf-8')
 }
@@ -97,7 +97,7 @@ function writeFlag(data) {
 /**
  * 删除标记文件
  */
-function deleteFlag() {
+function deleteFlag () {
   if (fs.existsSync(HARNESS_FLAG)) {
     fs.unlinkSync(HARNESS_FLAG)
   }
@@ -109,7 +109,7 @@ function deleteFlag() {
  * 自动生成 Story ID
  * @returns {string} 格式为 STORY-YYYYMMDD-NN
  */
-function generateStoryId() {
+function generateStoryId () {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const prefix = `STORY-${today}`
   // 扫描已有 story，找到今日最大序号 +1
@@ -135,7 +135,7 @@ function generateStoryId() {
  * @param {string} [opts.inputFile] - story-input.json 路径（--input），建流前摄入
  * @param {boolean} [opts.modeExplicit] - --mode 是否由用户显式给出
  */
-function cmdStart(storyId, title, mode, opts = {}) {
+function cmdStart (storyId, title, mode, opts = {}) {
   let workflowMode = mode === 'fixbugs' ? 'fixbugs' : 'run'
 
   // --input 先做无副作用校验，早于一切写操作。
@@ -145,7 +145,7 @@ function cmdStart(storyId, title, mode, opts = {}) {
     const pre = precheckStoryInput(opts.inputFile, workflowMode, opts.modeExplicit)
     if (!pre.ok) {
       console.error(JSON.stringify({ ok: false, errors: pre.errors }, null, 2))
-      process.exit(1)
+      return 1
     }
     workflowMode = pre.mode
   }
@@ -161,7 +161,7 @@ function cmdStart(storyId, title, mode, opts = {}) {
       message: `⚠️ Harness 模式已激活 (storyId: ${existing.storyId} "${existing.title}")，请先执行 /harness end 结束当前工作流`,
       current: existing
     }))
-    process.exit(0)
+    return 0
   }
 
   const id = storyId || generateStoryId()
@@ -218,12 +218,13 @@ function cmdStart(storyId, title, mode, opts = {}) {
       (workflowResult?.storyInputFile ? '\n   story-input.json: ✅ 已摄入，原型/Figma 判定已算准，无需 --refresh-input' : ''),
     data
   }))
+  return 0
 }
 
 /**
  * 关闭 harness 模式
  */
-function cmdEnd() {
+function cmdEnd () {
   const existing = readFlag()
 
   if (!existing || !existing.active) {
@@ -231,7 +232,7 @@ function cmdEnd() {
       ok: true,
       message: 'ℹ️ Harness 模式未激活，无需关闭'
     }))
-    process.exit(0)
+    return 0
   }
 
   const summary = {
@@ -252,12 +253,13 @@ function cmdEnd() {
     message: `✅ Harness 模式已关闭\n   Story: ${existing.storyId} "${existing.title}"\n   标记文件已删除，src/ 编辑恢复正常`,
     summary
   }))
+  return 0
 }
 
 /**
  * 查看当前 harness 状态
  */
-function cmdStatus() {
+function cmdStatus () {
   const existing = readFlag()
 
   if (!existing || !existing.active) {
@@ -280,54 +282,69 @@ function cmdStatus() {
       data: { ...existing, phase, repoCount: Object.keys(repos.repos).length }
     }))
   }
+  return 0
 }
 
 // ─── 入口 ──────────────────────────────────────────────────────
 
-// --input 支持 `--input=<p>` 与 `--input <p>`。空格形式的值 token 不以 -- 开头，
-// 必须先摘掉，否则下面的 positional 过滤会把路径当成标题的一部分。
-const { value: cliInput, rest: args } = takeFlagValue(process.argv.slice(2), '--input')
-const command = args[0]
+/**
+ * CLI 主流程 —— 解析参数并分发到 cmdStart / cmdEnd / cmdStatus
+ *
+ * 各 cmd 自行 console 输出（人类可读消息 + JSON 混排是既有输出契约，不在本次重构范围内），
+ * 但一律**返回退出码而不 exit**，exit 收敛到下方 require.main 分支唯一一处。
+ *
+ * @param {string[]} argv - 去掉 node 与脚本名后的参数（process.argv.slice(2)）
+ * @returns {number} 退出码：0 正常，1 参数非法 / 未知命令
+ */
+function main (argv) {
+  // --input 支持 `--input=<p>` 与 `--input <p>`。空格形式的值 token 不以 -- 开头，
+  // 必须先摘掉，否则下面的 positional 过滤会把路径当成标题的一部分。
+  const { value: cliInput, rest: args } = takeFlagValue(argv, '--input')
+  const command = args[0]
 
-// --mode=run|fixbugs 可出现在任意位置，先摘出来再解析位置参数
-const modeArg = args.find(a => a.startsWith('--mode='))
-const cliMode = modeArg ? modeArg.slice('--mode='.length) : 'run'
-const positional = args.filter(a => !a.startsWith('--'))
+  // --mode=run|fixbugs 可出现在任意位置，先摘出来再解析位置参数
+  const modeArg = args.find(a => a.startsWith('--mode='))
+  const cliMode = modeArg ? modeArg.slice('--mode='.length) : 'run'
+  const positional = args.filter(a => !a.startsWith('--'))
 
-switch (command) {
-  case 'start':
-    if (cliMode !== 'run' && cliMode !== 'fixbugs') {
-      console.error(`❌ 无效的 --mode 值: ${cliMode}（仅支持 run / fixbugs）`)
-      process.exit(1)
-    }
-    cmdStart(positional[1], positional.slice(2).join(' ').replace(/^["']|["']$/g, ''), cliMode, {
-      inputFile: cliInput,
-      modeExplicit: Boolean(modeArg)
-    })
-    break
+  switch (command) {
+    case 'start':
+      if (cliMode !== 'run' && cliMode !== 'fixbugs') {
+        console.error(`❌ 无效的 --mode 值: ${cliMode}（仅支持 run / fixbugs）`)
+        return 1
+      }
+      return cmdStart(positional[1], positional.slice(2).join(' ').replace(/^["']|["']$/g, ''), cliMode, {
+        inputFile: cliInput,
+        modeExplicit: Boolean(modeArg)
+      })
 
-  case 'end':
-    cmdEnd()
-    break
+    case 'end':
+      return cmdEnd()
 
-  case 'status':
-    cmdStatus()
-    break
+    case 'status':
+      return cmdStatus()
 
-  default:
-    console.log([
-      '/harness 工作流管理脚本',
-      '',
-      '用法:',
-      '  node harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs] [--input <file>]   激活 harness 模式',
-      '  node harness-workflow.js end                          关闭 harness 模式',
-      '  node harness-workflow.js status                       查看当前状态',
-      '',
-      '  --mode=fixbugs   Bug 修复模式：免除原型文档要求，Phase 0 需求分析师负责产出 Bug 分析报告',
-      '  --input <file>   建流前摄入 story-input.json，原型/Figma 判定一次算准（免去 --refresh-input）；',
-      '                   文件内的 mode 为准，与 --mode 冲突则拒绝启动',
-      '',
-      '详细文档见: CODEBUDDY.md § /harness 工作流'
-    ].join('\n'))
-    process.exit(1)
+    default:
+      console.log([
+        '/harness 工作流管理脚本',
+        '',
+        '用法:',
+        '  node harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs] [--input <file>]   激活 harness 模式',
+        '  node harness-workflow.js end                          关闭 harness 模式',
+        '  node harness-workflow.js status                       查看当前状态',
+        '',
+        '  --mode=fixbugs   Bug 修复模式：免除原型文档要求，Phase 0 需求分析师负责产出 Bug 分析报告',
+        '  --input <file>   建流前摄入 story-input.json，原型/Figma 判定一次算准（免去 --refresh-input）；',
+        '                   文件内的 mode 为准，与 --mode 冲突则拒绝启动',
+        '',
+        '详细文档见: CODEBUDDY.md § /harness 工作流'
+      ].join('\n'))
+      return 1
+  }
 }
+
+if (require.main === module) {
+  process.exit(main(process.argv.slice(2)))
+}
+
+module.exports = { main, cmdStart, cmdEnd, cmdStatus }
