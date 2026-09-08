@@ -68,6 +68,7 @@ const {
   getPhaseName,
   getPhaseAgent,
   checkOpenQuestions,
+  isWorkflowTerminal,
   errorToString,
   errorToType
 } = require('../lib/state')
@@ -211,7 +212,8 @@ function dispatch (storyId) {
   }
 
   // ── 终态: 流程完成 ────────────────────────────────────────
-  if (phase >= MAX_PHASE || state.status === 'completed') {
+  // 终态判定走 story-state 的 isWorkflowTerminal（唯一信源），此处不复写条件
+  if (isWorkflowTerminal(state)) {
     result.status = 'terminal'
     result.warnings.push('工作流已完成全部 Phase。')
     result.recovery = {
@@ -243,8 +245,8 @@ function dispatch (storyId) {
   if (!gate.passed) {
     const agentInfo = getPhaseAgent(phase)
 
-    // 修复回路已激活且卡在 Phase 3/4 → 回退开发修复
-    const isReviewOrTest = phase === 3 || phase === 4
+    // 修复回路已激活且卡在 Phase 3（代码审查）→ 回退开发修复
+    const isReviewOrTest = phase === 3
     if (isReviewOrTest && gate.blockers.length > 0 && gate._meta && gate._meta.fixLoopAvailable) {
       result.status = 'fix_loop'
       result.recovery = {

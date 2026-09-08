@@ -63,7 +63,7 @@ Figma frame-inventory **不在本门控校验** —— 由 Phase 1 任务规划�
 }
 ```
 
-`testType` 会在 Phase 4→5 决定证据强度门控的严格程度（`ui` 型最严）—— 见 [phase-4.md](./phase-4.md)。
+`testType` 在 Phase 3 审查时决定该 AC 需要什么强度的证据（`ui` 型最严：纯交互断言不能靠读代码证明）。
 
 `open-questions.json`（schema: `scripts/schemas/open-questions.schema.json`）：
 `resolved` 只能由用户确认后标记，**AI 不得自行置 true**。

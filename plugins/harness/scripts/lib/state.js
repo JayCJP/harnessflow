@@ -90,6 +90,7 @@ const {
   findActiveWorkflows,
   hasActiveWorkflow,
   isPhaseCompleted,
+  isWorkflowTerminal,
   cleanStoryDir
 } = require('./story-state')
 
@@ -113,7 +114,6 @@ const {
   ACCEPTANCE_CRITERIA_FILE,
   OPEN_QUESTIONS_FILE,
   TASK_DAG_JSON_FILE,
-  ACCEPTANCE_VERIFICATION_FILE,
   FIGMA_FRAME_INVENTORY_FILE,
   STORY_INPUT_FILE,
   readJsonArtifact,
@@ -121,7 +121,6 @@ const {
   checkOpenQuestions,
   checkTaskDagJson,
   validateContractReferences,
-  checkAcceptanceVerification
 } = require('./contracts')
 
 const {
@@ -132,7 +131,6 @@ const {
   checkDevPass,
   renewDevPass,
   DEFAULT_MAX_REVIEW_FIX_ROUNDS,
-  DEFAULT_MAX_TEST_FIX_ROUNDS,
   getMaxFixRounds
 } = require('./dev-pass')
 
@@ -142,7 +140,7 @@ const {
   errorToType
 } = require('./errors')
 
-// ─── 导出（符号集合与拆分前完全一致，共 64 个）──────────────────
+// ─── 导出（拆分前的 64 个 + isWorkflowTerminal，共 65 个）────────
 module.exports = {
   // 路径常量
   PROJECT_ROOT,
@@ -180,6 +178,7 @@ module.exports = {
   findActiveWorkflows,
   hasActiveWorkflow,
   isPhaseCompleted,
+  isWorkflowTerminal,
   getPhaseSlug,
   getPhaseName,
 
@@ -200,7 +199,6 @@ module.exports = {
   ACCEPTANCE_CRITERIA_FILE,
   OPEN_QUESTIONS_FILE,
   TASK_DAG_JSON_FILE,
-  ACCEPTANCE_VERIFICATION_FILE,
   FIGMA_FRAME_INVENTORY_FILE,
   STORY_INPUT_FILE,
   readStoryInput,
@@ -210,7 +208,6 @@ module.exports = {
   checkOpenQuestions,
   checkTaskDagJson,
   validateContractReferences,
-  checkAcceptanceVerification,
   getDevPassAllowedPaths,
 
   // dev-pass 管理
@@ -221,7 +218,6 @@ module.exports = {
 
   // 修复回路配置
   DEFAULT_MAX_REVIEW_FIX_ROUNDS,
-  DEFAULT_MAX_TEST_FIX_ROUNDS,
   getMaxFixRounds,
 
   // 结构化错误辅助

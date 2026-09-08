@@ -70,7 +70,6 @@ const {
   ensureReposJson,
   STORY_INPUT_FILE,
   DEFAULT_MAX_REVIEW_FIX_ROUNDS,
-  DEFAULT_MAX_TEST_FIX_ROUNDS
 } = require('../lib/state')
 const { validateFile } = require('../services/schema-validator')
 const debugLog = require('../lib/debug-log')
@@ -285,9 +284,8 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode, opts = {}) {
     bypass: bypass || false,
     hasFigmaDesign: figma.enabled, // 🌐 是否开启 Figma 硬门控（信源: story-input.json figmaUrls / --figma）
     hasFigmaDesignReason: figma.reason, // 判定依据，便于排查门控为何未触发
-    // 修复回路最大轮次 —— 按失败源（Phase 3 代码审查 / Phase 4 功能测试）独立预算，各 2 次，用尽转人工
+    // 修复回路最大轮次 —— （Phase 3 代码审查）独立预算，各 2 次，用尽转人工
     maxReviewFixRounds: DEFAULT_MAX_REVIEW_FIX_ROUNDS,
-    maxTestFixRounds: DEFAULT_MAX_TEST_FIX_ROUNDS,
     gateChecks: {
       // 本 Story 是否要求 prototype-analysis.md（false 时 Phase 0→1 门控跳过原型检查）
       prototypeRequired: protoRequired.required,
@@ -307,10 +305,9 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode, opts = {}) {
     '1_task_planning',
     '2_development',
     '3_code_review',
-    '4_e2e_verification',
-    '5_git_submit',
-    '6_knowledge_base_update',
-    '7_deployment'
+    '4_git_submit',
+    '5_knowledge_base_update',
+    '6_deployment'
   ]
 
   for (let i = 0; i < phaseKeys.length; i++) {

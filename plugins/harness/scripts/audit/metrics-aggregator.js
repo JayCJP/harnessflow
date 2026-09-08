@@ -150,7 +150,7 @@ function aggregateMetrics () {
     totalStories++
 
     // Story 完成状态
-    if (state.status === 'completed' || (state.phase >= 7 && state.phases && state.phases['7_deployment'] && state.phases['7_deployment'].status === 'completed')) {
+    if (state.status === 'completed' || (state.phase >= 6 && state.phases && state.phases['6_deployment'] && state.phases['6_deployment'].status === 'completed')) {
       completedStories++
     }
 

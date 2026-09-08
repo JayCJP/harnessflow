@@ -1,5 +1,295 @@
 {
-  "patterns": [],
+  "patterns": [
+    {
+      "phase": 0,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 7 个 blocker（类型: schema_validation_failed, blocking_unresolved，示例: Schema 校验失败: acceptance-criteria.json.featurePoints[0].deferredReason: should NOT be shorter than 1 characters），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "ai-as",
+      "blockers": [
+        "Schema 校验失败: acceptance-criteria.json.featurePoints[0].deferredReason: should NOT be shorter than 1 characters",
+        "Schema 校验失败: acceptance-criteria.json.featurePoints[1].deferredReason: should NOT be shorter than 1 characters",
+        "Schema 校验失败: acceptance-criteria.json.featurePoints[2].deferredReason: should NOT be shorter than 1 characters",
+        "Schema 校验失败: acceptance-criteria.json.featurePoints[3].deferredReason: should NOT be shorter than 1 characters",
+        "Schema 校验失败: acceptance-criteria.json.featurePoints[4].deferredReason: should NOT be shorter than 1 characters",
+        "Schema 校验失败: acceptance-criteria.json.featurePoints[6].deferredReason: should NOT be shorter than 1 characters",
+        "3 项阻塞级待确认问题未解决 (open-questions: 3)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T02:15:15.543Z",
+      "lastSeen": "2026-09-08T02:15:15.543Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "schema_validation_failed",
+      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: task-dag.json.tasks[0].estimate: should be integer)",
+      "resolution": "请检查 task-dag.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "storyId": "ai-as",
+      "blockers": [
+        "Schema 校验失败: task-dag.json.tasks[0].estimate: should be integer",
+        "Task[task-8]: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索"
+      ],
+      "occurrences": 3,
+      "firstSeen": "2026-09-08T02:20:09.538Z",
+      "lastSeen": "2026-09-08T13:24:51.844Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "task_missing_evidence",
+      "rootCause": "1 个 task_missing_evidence 问题 (示例: Task[task-8]: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索)",
+      "resolution": "跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索",
+      "storyId": "ai-as",
+      "blockers": [
+        "Schema 校验失败: task-dag.json.tasks[0].estimate: should be integer",
+        "Task[task-8]: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T02:20:09.550Z",
+      "lastSeen": "2026-09-08T02:20:09.550Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 28 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "ai-as",
+      "blockers": [
+        "28 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T02:23:00.662Z",
+      "lastSeen": "2026-09-08T02:23:00.662Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "lint_error",
+      "rootCause": "1 个 lint_error 问题 (示例: [CustomerServiceSystem] 本次变更文件存在 lint error:\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 303, col 5, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai)",
+      "resolution": "在 D:\\test-blanch\\ai-as\\CustomerServiceSystem 修复上述 lint error 后重新执行 node \"C:/Users/Intel/.codebuddy/harness-marketplace/plugins/harness/scripts/commands/advance-phase.js\" ai-as 3",
+      "storyId": "ai-as",
+      "blockers": [
+        "[CustomerServiceSystem] 本次变更文件存在 lint error:\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 303, col 5, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 303, col 14, Error - 'EventName' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 305, col 5, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 305, col 14, Error - 'EventName' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 313, col 3, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 313, col 12, Error - 'EventName' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\views\\pc\\settings\\ChatSetting.vue: line 179, col 7, Error - 'voiceList' is assigned a value but never used. (no-unused-vars)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\views\\pc\\settings\\ChatSetting.vue: line 333, col 7, Error - 'getVoiceRowClassName' is assigned a value but never used. (no-unused-vars)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T03:09:46.532Z",
+      "lastSeen": "2026-09-08T03:09:46.532Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: lint_error，示例: [CustomerServiceSystem] 本次变更文件存在 lint error:\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 303, col 5, Error - ），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "ai-as",
+      "blockers": [
+        "[CustomerServiceSystem] 本次变更文件存在 lint error:\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 303, col 5, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 303, col 14, Error - 'EventName' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 305, col 5, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 305, col 14, Error - 'EventName' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 313, col 3, Error - 'bus' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\components\\chat\\MessageItem.vue: line 313, col 12, Error - 'EventName' is not defined. (no-undef)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\views\\pc\\settings\\ChatSetting.vue: line 179, col 7, Error - 'voiceList' is assigned a value but never used. (no-unused-vars)\nD:\\test-blanch\\ai-as\\CustomerServiceSystem\\src\\views\\pc\\settings\\ChatSetting.vue: line 333, col 7, Error - 'getVoiceRowClassName' is assigned a value but never used. (no-unused-vars)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T03:14:36.895Z",
+      "lastSeen": "2026-09-08T03:14:36.895Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "blocking_unresolved",
+      "rootCause": "1 个 blocking_unresolved 问题 (示例: 1 项阻塞级待确认问题未解决 (open-questions: 1))",
+      "resolution": "请用户逐项确认 open-questions 中的 blocking 项",
+      "storyId": "msg-coupon-fixbugs",
+      "blockers": [
+        "1 项阻塞级待确认问题未解决 (open-questions: 1)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T03:42:02.452Z",
+      "lastSeen": "2026-09-08T03:42:02.452Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 0,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: blocking_unresolved，示例: 1 项阻塞级待确认问题未解决 (open-questions: 1)），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "msg-coupon-fixbugs",
+      "blockers": [
+        "1 项阻塞级待确认问题未解决 (open-questions: 1)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T03:46:47.067Z",
+      "lastSeen": "2026-09-08T03:46:47.067Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 13 条验收标准未被任何 Task 引用: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "msg-coupon-fixbugs",
+      "blockers": [
+        "13 条验收标准未被任何 Task 引用: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T03:51:29.785Z",
+      "lastSeen": "2026-09-08T03:51:29.785Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:\\workfile\\userlive\\src\\views\\topic-manage\\AiAssistant.vue",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "ai-assistant-extract",
+      "blockers": [],
+      "occurrences": 12,
+      "firstSeen": "2026-09-08T04:11:27.917Z",
+      "lastSeen": "2026-09-08T04:11:28.016Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:/workfile/userlive/src/views/AiApplication/components/ai-assistantHelp/HelperSettings/DataAnalysis/ListRecordView.vue",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "ai-assistant-extract",
+      "blockers": [],
+      "occurrences": 2,
+      "firstSeen": "2026-09-08T04:11:27.954Z",
+      "lastSeen": "2026-09-08T04:11:27.963Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 7,
+      "failureType": "dev_pass_expired",
+      "rootCause": "Agent 在 Phase 7 试图编辑 src/，dev-pass 仅在 Phase 2 有效",
+      "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
+      "storyId": "ai-assistant-extract",
+      "blockers": [],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T04:11:28.023Z",
+      "lastSeen": "2026-09-08T04:11:28.023Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 4,
+      "failureType": "schema_validation_failed",
+      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties)",
+      "resolution": "请检查 acceptance-verification.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "storyId": "msg-coupon-fixbugs",
+      "blockers": [
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T04:26:10.399Z",
+      "lastSeen": "2026-09-08T04:26:10.399Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 3,
+      "failureType": "schema_validation_failed",
+      "rootCause": "1 个 schema_validation_failed 问题 (示例: Schema 校验失败: code-review.json.summary: should NOT have additional properties)",
+      "resolution": "请检查 code-review.json 格式是否符合规范，参考 schemas/ 目录下的 schema 定义",
+      "storyId": "ai-as",
+      "blockers": [
+        "Schema 校验失败: code-review.json.summary: should NOT have additional properties"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T04:50:09.971Z",
+      "lastSeen": "2026-09-08T04:50:09.971Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 4,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 21 个 blocker（类型: schema_validation_failed, static_evidence_for_ui_ac，示例: Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "ai-as",
+      "blockers": [
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json(root): should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json.summary: should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json.summary: should NOT have additional properties",
+        "Schema 校验失败: acceptance-verification.json.summary: should NOT have additional properties",
+        "AC AC-02(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-07(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-09(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-11(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-12(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-14(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-15(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-17(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-20(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-21(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-22(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-24(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码",
+        "AC AC-25(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T07:25:36.814Z",
+      "lastSeen": "2026-09-08T07:25:36.814Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 4,
+      "failureType": "dev_pass_expired",
+      "rootCause": "Agent 在 Phase 4 试图编辑 src/，dev-pass 仅在 Phase 2 有效",
+      "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
+      "storyId": "ai-as",
+      "blockers": [],
+      "occurrences": 12,
+      "firstSeen": "2026-09-08T07:29:32.750Z",
+      "lastSeen": "2026-09-08T08:35:09.365Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:/test-blanch/ai-as/CustomerServiceSystem/src/views/pc/ChatComponents/AiAssistant/SmartQuery.vue",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "ai-as",
+      "blockers": [],
+      "occurrences": 12,
+      "firstSeen": "2026-09-08T07:29:32.764Z",
+      "lastSeen": "2026-09-08T08:35:09.375Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "empty_ac_ref",
+      "rootCause": "1 个 empty_ac_ref 问题 (示例: Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）)",
+      "resolution": "每个 task 的 acceptanceCriteria 至少引用 1 条 AC",
+      "storyId": "TMP-ADV-TEST",
+      "blockers": [
+        "Schema 校验失败: task-dag.json.tasks[0].id: should match pattern \"^task-\\d+$\"",
+        "Task[T1]: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-08T13:24:39.907Z",
+      "lastSeen": "2026-09-08T13:24:39.907Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    }
+  ],
   "version": "2.1",
-  "lastUpdated": "2026-09-07T01:31:34.167Z"
+  "lastUpdated": "2026-09-08T13:24:51.844Z"
 }

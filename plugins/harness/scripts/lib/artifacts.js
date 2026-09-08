@@ -37,7 +37,6 @@ const ARTIFACT = {
   TASK_DAG_JSON: 'task-dag.json',
   FIGMA_FRAME_INVENTORY: 'figma-frame-inventory.json',
   CODE_REVIEW: 'code-review.json',
-  ACCEPTANCE_VERIFICATION: 'acceptance-verification.json',
   FIX_REQUEST: 'fix-request.json',
   FIX_VERIFICATION: 'fix-verification.json',
 
@@ -45,7 +44,6 @@ const ARTIFACT = {
   REQUIREMENT_ANALYSIS: 'requirement-analysis.md',
   PROTOTYPE_ANALYSIS: 'prototype-analysis.md',
   TASK_DAG_DOC: 'task-dag.md',
-  TEST_REPORT: 'test-report.md',
   FIX_CONTEXT: 'fix-context.md',
 
   // ── 状态（仅授权脚本可写）──

@@ -41,7 +41,7 @@
  * 使用场景:
  *   - 某 Phase 的 Agent 汇报产出完成、且 dispatch.js 的 status=ready 给出 advanceCommand 后，
  *     主 Agent 执行本命令裁断门控并真正写入 phase
- *   - Phase 3 代码审查 / Phase 4 功能测试出现未修复 BLOCKER 时，主 Agent 执行 --fix-loop
+ *   - Phase 3 代码审查出现未修复 BLOCKER 时，主 Agent 执行 --fix-loop
  *     取回 spawnPrompt，交给前端开发工程师做限域修复
  *   - Phase 2 开发未完成但 dev-pass 已过期时，用 --renew-pass 续签，避免回退重来
  *   - 发现前一 Phase 方向错误（如任务拆解不合理）需要重做时，用 --rollback 归档中间产物并回退
@@ -393,16 +393,16 @@ if (rollbackFlag) {
 // ========================
 
 if (fixLoopFlag) {
-  // 修复回路只服务于 Phase 3/4（代码审查 / 功能测试失败 → 回退 Phase 2 重做）。
-  // 依据: dispatch.js 的 isReviewOrTest = phase === 3 || phase === 4；
-  //       policy.js 的 _meta.fixLoopAvailable 也只在这两个 Phase 设置。
-  // 越界的后果比一般边界严重: Phase 5 之后代码已 commit+push，此处放行会让
+  // 修复回路只服务于 Phase 3（代码审查失败 → 回退 Phase 2 重做）。
+  // 依据: dispatch.js 的 isReviewOrTest = phase === 3；
+  //       policy.js 的 _meta.fixLoopAvailable 也只在该 Phase 设置。
+  // 越界的后果比一般边界严重: Phase 4 之后代码已 commit+push，此处放行会让
   // fix-loop 把 3..currentPhase 标 rolled_back、回退到 Phase 2 并重新签发 dev-pass，
   // 等于给已发布代码重新发一张写权限通行证。
-  if (currentPhase < 3 || currentPhase > 4) {
+  if (currentPhase !== 3) {
     emit({
-      error: `修复回路仅支持 Phase 3/4（当前 Phase ${currentPhase}(${currentPhaseName})）。` +
-        'Phase 5 之后代码已提交/部署，回退重发 dev-pass 会覆盖已发布代码。' +
+      error: `修复回路仅支持 Phase 3 代码审查（当前 Phase ${currentPhase}(${currentPhaseName})）。` +
+        'Phase 4 起代码已提交/部署，回退重发 dev-pass 会覆盖已发布代码。' +
         '需要返工请新建 Story，或用 --rollback 显式回滚',
       storyId,
       currentPhase
@@ -820,8 +820,13 @@ if (devPass) {
 // Phase 2 的逐 batch spawn 序列同样只在 dispatch.js 输出（buildBatchSequence）。
 // 推进完成后主 Agent 回 Step 1 重新执行 dispatch.js 取新 Phase 指令。
 
-// Phase 7 完成时自动触发度量聚合 + 标记工作流为 completed（终态）
-if (currentPhase === 7 && targetPhase > 7) {
+// 推进到最后一个 Phase 时自动触发度量聚合 + 标记工作流为 completed（终态）
+//
+// 阈值取 MAX_PHASE 而非硬编码，且条件必须是「本次推进**到达**终态」：
+// 旧条件 `currentPhase === 7 && targetPhase > 7` 与上方 targetPhase 越界校验
+// （targetPhase <= MAX_PHASE）互斥，永远不成立 —— status='completed' 从未被写下，
+// 依赖它的自动 end 判定随之全部失效。
+if (targetPhase === MAX_PHASE && currentPhase < MAX_PHASE) {
   // 度量聚合
   try {
     const { execSync } = require('child_process')
@@ -829,15 +834,15 @@ if (currentPhase === 7 && targetPhase > 7) {
     if (fs.existsSync(aggregatorPath)) {
       execSync(`node "${aggregatorPath}"`, { timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'], cwd: PROJECT_ROOT })
       console.error('  ✓ 度量聚合已完成，洞察已合并到全局经验库')
-      trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: '7', result: 'success' })
+      trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: String(targetPhase), result: 'success' })
     } else {
       // 路径不存在时显式告警，避免 existsSync 静默跳过导致度量永不聚合
       console.error('  ⚠ 度量聚合脚本不存在（非阻塞）: ' + aggregatorPath)
-      trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: '7', result: 'skipped', reason: 'aggregator_not_found: ' + aggregatorPath })
+      trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: String(targetPhase), result: 'skipped', reason: 'aggregator_not_found: ' + aggregatorPath })
     }
   } catch (e) {
     console.error('  ⚠ 度量聚合失败（非阻塞）: ' + (e.message || '').slice(0, 100))
-    trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: '7', result: 'failed', reason: (e.message || '').slice(0, 200) })
+    trace.appendTrace(storyId, { type: 'metrics_aggregation', phase: String(targetPhase), result: 'failed', reason: (e.message || '').slice(0, 200) })
   }
 
   // 标记工作流为终态（completed）

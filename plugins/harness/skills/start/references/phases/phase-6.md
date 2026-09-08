@@ -1,29 +1,51 @@
-# Phase 6 — 知识库更新
+# Phase 6 — 云端部署（终 Phase）
 
 > 无 Phase 专属门控函数：`runGateCheck` 只跑通用三道检查（见 [README.md](./README.md)）。
-> `PHASE_ARTIFACTS[6].fileName` 为 `null`，产出物存在性检查亦被跳过。
+> `PHASE_ARTIFACTS[7].fileName` 为 `null`，产出物存在性检查亦被跳过。
 
 ## 职责
 
-Agent 注册名 **`release-assistant`**（发布助手）。调用 `use_skill("kb-update")` 增量更新
-项目知识库文档，产出体现为 `meta.yaml` 的 hash 变化。
+Agent 注册名 **`release-assistant`**（发布助手）。通过 devops MCP 触发云端构建和部署，
+回报部署 URL + 构建号。
 
 ## 产出物
 
-知识库文档更新（`meta.yaml` hash 变化），无独立文件型产出物。
+部署 URL + 构建号（无文件型产出物）。
 
-## 要点
+## 推进到 Phase 7 时脚本自动做的事
 
-| 要点 | 说明 |
-|------|------|
-| 增量而非重写 | `kb-update` 是增量更新；**必须保留手工批注** —— 知识库里人写的内容比机器生成的更贵 |
-| 调用成功才算完成 | `use_skill("kb-update")` 返回失败时不要把本 Phase 报成完成，门控看不出来，但 Phase 7 之后没人会回来补 |
-| 与 Phase 0 的呼应 | Phase 0 需求分析师用 `kb-query` 读知识库，本 Phase 写回去 —— 这条回路断了，下个 Story 的检索就查不到本次的经验 |
+`advance-phase.js <storyId> 8` 成功后：
 
-知识库相关 skill：`kb-init`（初始化）/ `kb-query`（检索）/ `kb-update`（增量更新）。
+1. 触发 `audit/metrics-aggregator.js` 聚合本 Story 的度量数据
+2. 把工作流标记为 `status: 'completed'` 终态
+3. 此后 `dispatch.js` 输出 `status: terminal`，`recovery.command` 为归档命令
+
+## 收尾
+
+```bash
+# 归档（清空 Story root，全部文件移入 archive/round-{N}/）
+node $HARNESS/archive-story.js <storyId> archive
+
+# 关闭 harness 模式（删 .harness-active，解除 src/ 编辑限制）
+node $HARNESS/harness-workflow.js end
+```
+
+归档前可用 `--dry-run` 核对将要移走的文件清单。归档细节见 `../工作流生命周期.md`
+与 `harness-archive` skill。
+
+## 本 Phase 才暴露的一类错误
+
+Phase 2→3 的编译校验默认关闭，因此 **SCSS / 模板编译错误会一路漂到这里**才被云端构建拦住。
+遇到这种情况：
+
+1. 不要在本 Phase 修代码 —— `src/` 此时无 dev-pass，hook 会拒绝
+2. 走 `node $HARNESS/advance-phase.js <storyId> 2 --rollback` 回退到开发
+3. 修完后建议本轮启用 `HARNESS_RUN_BUILD=1` 再推进，避免二次漂移
+
+见 [phase-2.md](./phase-2.md) 的「编译校验为什么默认关闭」。
 
 ## 常见失败与对策
 
-- **`kb-update` 报找不到知识库**：项目可能从未 `kb-init`。这是需要如实告知用户的前置缺失，
-  不要静默跳过本 Phase。
-- **手工批注被覆盖**：说明用的是重写而非增量路径。回滚该文件后改用 `kb-update`。
+- **构建成功但部署失败**：属于外部系统问题，如实回报构建号与错误，不要重试到超时。
+- **已归档后发现要改**：先 `archive-story.js <id> restore` 复档，
+  归档守卫会拦截归档状态下的 `--rollback` / `--fix-loop`。

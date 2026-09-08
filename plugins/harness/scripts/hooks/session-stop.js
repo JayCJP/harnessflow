@@ -20,7 +20,7 @@
  *     不清理会留下可被 enforce-dev-pass.js 误信的过期凭证，src/ 限域出现空窗。
  *   - 本轮触发过 Hook 拒绝（越界编辑、跳 Phase、写状态文件）：
  *     不沉淀到经验库，同样的失败模式会在下一轮、下一个 Story 反复重演，门控只能一直硬拦而无法自省。
- *   - Story 已走完 Phase 8 但 .harness-active 未关闭：
+ *   - Story 已走到最后一步但 .harness-active 未关闭：
  *     不自动结束会让 src/ 持续处于限域保护下，后续正常的非 Harness 编辑被无谓拦截。
  *
  * 说明:
@@ -30,24 +30,25 @@
  *       1. 单次扫描所有工作流（活跃 + 已完成），替代早期的两次扫描
  *       2. 清理过期的 dev-pass 文件
  *       3. 从 trace.jsonl 沉淀 Hook 拒绝事件到经验库
- *       4. 所有工作流完成后自动结束 Harness 模式
+ *       4. 当前激活 Story 走到最后一步时自动结束 Harness 模式（执行 end 子命令）
  *       5. 输出 session 变更摘要
  *   - 各环节独立 try/catch，单点失败不阻塞整体收尾。
- *   - autoEndHarness 演进说明：旧逻辑要求「所有活跃工作流都完成」才 end；新逻辑改为「当前激活 Story
- *     走到终态（status='completed' 且 phase >= 8）即 end」——因为 .harness-active 一次只激活一个 Story，
- *     它走到终态即代表本次 Harness 主流程结束。无激活 Story 时回退到旧逻辑。
+ *   - autoEndHarness：终态判定走 isWorkflowTerminal（唯一信源，阈值 = MAX_PHASE），
+ *     Phase 表增删自动适配，不硬编码 Phase 编号；命中对激活 Story 执行 `harness end` 本身。
+ *     无激活 Story 时回退到旧逻辑（无活跃工作流才关闭）。
  *   - additionalContext 超过 MAX_CONTEXT_CHARS(8000) 时逐级降级：完整 → 去掉 src 文件清单 → 只保留核心计数。
  *   - 诊断日志走 stderr，不污染 stdout 的 JSON 输出。
  */
 
 const fs = require('fs')
 const path = require('path')
-const { execSync } = require('child_process')
+const { execSync, execFileSync } = require('child_process')
 const {
   PROJECT_ROOT,
   PLANS_DIR,
   listStoryDirs,
   getPhaseName,
+  isWorkflowTerminal,
   readStdin
 } = require('../lib/state')
 const experience = require('../services/experience')
@@ -57,6 +58,10 @@ const { HARNESS_ACTIVE_FLAG } = require('../lib/artifacts')
 
 const HARNESS_ACTIVE_FILE = HARNESS_ACTIVE_FLAG
 const GIT_TIMEOUT = 5000
+
+/** end 子命令脚本路径 —— 自动结束复用 end 本身，保证「如何结束」只有一处定义 */
+const WORKFLOW_CMD = path.join(__dirname, '..', 'commands', 'harness-workflow.js')
+const END_TIMEOUT = 5000
 
 /** 非代码文件目录前缀，不计入 src 变更统计 */
 const NON_SRC_PREFIXES = ['node_modules/', 'dist/', '.codebuddy/', '.git/']
@@ -142,8 +147,8 @@ function checkKbUpdateTasks (activeWorkflows, changedFiles) {
     .map(wf => ({
       storyId: wf.storyId,
       title: wf.state.title || '',
-      reason: wf.state.phases?.['5_git_submit']?.commitHash
-        ? `可增量更新 (commit: ${wf.state.phases['5_git_submit'].commitHash})`
+      reason: wf.state.phases?.['4_git_submit']?.commitHash
+        ? `可增量更新 (commit: ${wf.state.phases['4_git_submit'].commitHash})`
         : '开发已完成，知识库未更新'
     }))
 }
@@ -205,16 +210,32 @@ function recordHookRejectionsFromTraces () {
 // ─── Harness 自动结束 ────────────────────────────────────────────
 
 /**
+ * 执行 harness end —— 复用 `harness-workflow.js end` 子命令
+ *
+ * 不本地 unlink 标记文件：end 的语义（删标记 + debug 记录 + 幂等提示）只在 cmdEnd 定义，
+ * 这里再写一份就是第二个信源，两边迟早分叉。
+ * stdio 中 stdout 必须 ignore —— cmdEnd 会把人类可读 JSON 打到 stdout，
+ * 混进来会破坏本 Hook 自己的 stdout JSON（宿主按 Stop 契约解析）。
+ *
+ * @returns {void} 失败抛异常，由调用方转成提示文案
+ */
+function runHarnessEnd () {
+  execFileSync(process.execPath, [WORKFLOW_CMD, 'end'], {
+    timeout: END_TIMEOUT,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    cwd: PROJECT_ROOT
+  })
+}
+
+/**
  * Stop Hook 自动结束 Harness 模式（harness end）
  *
- * 触发条件：当前激活的 Story（.harness-active 标记）流程已走到最后一步——
- * e2e-state.json 中 status='completed' 且 phase >= 8（终态）。满足即删除
- * .harness-active 标记文件，关闭 Harness 模式，src/ 编辑恢复正常。
+ * 触发条件：当前激活的 Story（.harness-active 标记）已走到最后一步。
+ * 「最后一步」由 isWorkflowTerminal 判定（唯一信源，阈值 = MAX_PHASE），
+ * Phase 表增删无需改这里 —— 旧实现硬编码 `phase >= 8` 而终态实为 7，
+ * 于是自动 end 从未真正触发过。
  *
- * 演进说明（相对旧逻辑）：
- * 旧逻辑要求「所有活跃工作流都完成」才 end；新逻辑改为「当前激活 Story 走到
- * 终态即 end」——因为 .harness-active 一次只激活一个 Story，它走到 Phase 8
- * 终态即代表本次 Harness 主流程结束。
+ * 无激活 Story 时回退到旧逻辑（无活跃工作流才关闭）。
  *
  * @param {Array} activeWorkflows - 活跃/暂停工作流列表（保留用于提示，不再作为 end 前提）
  * @param {Array} completedWorkflows - 已完成工作流列表
@@ -241,13 +262,13 @@ function autoEndHarness (activeWorkflows, completedWorkflows) {
       return { ended: false, message: '无工作流记录，保持 Harness 模式（手动 /end）' }
     }
     try {
-      fs.unlinkSync(HARNESS_ACTIVE_FILE)
+      runHarnessEnd()
       return {
         ended: true,
         message: `所有工作流已完成 (${completedWorkflows.map(w => w.storyId).join(', ')})，Harness 已自动关闭`
       }
     } catch (e) {
-      return { ended: false, message: `标记文件删除失败: ${e.message}` }
+      return { ended: false, message: `自动 end 执行失败: ${e.message}` }
     }
   }
 
@@ -264,19 +285,18 @@ function autoEndHarness (activeWorkflows, completedWorkflows) {
     return { ended: false, message: `激活 Story ${activeStoryId} 状态损坏，保持 Harness 模式` }
   }
 
-  const isTerminal = state.status === 'completed' && Number(state.phase) >= 8
-  if (!isTerminal) {
+  if (!isWorkflowTerminal(state)) {
     return { ended: false, message: `${activeStoryId} 流程未走完最后一步 (phase=${state.phase}, status=${state.status})，保持 Harness 模式` }
   }
 
   try {
-    fs.unlinkSync(HARNESS_ACTIVE_FILE)
+    runHarnessEnd()
     return {
       ended: true,
-      message: `${activeStoryId} 已走完最后一步 (Phase ${state.phase})，Harness 模式已自动关闭（harness end）`
+      message: `${activeStoryId} 已走完最后一步 (Phase ${state.phase} ${getPhaseName(state.phase)})，Harness 模式已自动关闭（harness end）`
     }
   } catch (e) {
-    return { ended: false, message: `标记文件删除失败: ${e.message}` }
+    return { ended: false, message: `自动 end 执行失败: ${e.message}` }
   }
 }
 

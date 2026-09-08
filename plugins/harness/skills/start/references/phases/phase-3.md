@@ -61,7 +61,7 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
     "title": "...",                    // MUST
     "description": "...",              // MUST
     "suggestion": "...",
-    "impact": "...",                   // 可选：影响到的 AC-N，供 Phase 4 交叉对账
+    "impact": "...",                   // 可选：影响到的 AC-N，供 AC 逐条核对时对照
     "reason": "...",                   // 可选：根因分析
     "project": "userlive",             // 可选：跨仓时声明问题所属仓库
     "repoPath": "D:/workfile/userlive" // 可选：跨仓时声明修复点仓库路径
@@ -72,12 +72,19 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
 
 顶层 `additionalProperties: false`（storyId/issues/summary 之外的顶层字段会被门控拒绝）；
 `issues[]` 内为 `additionalProperties: true`，可携带 `impact`/`reason`/`project`/`repoPath`
-供 Phase 4 交叉对账与 fix-loop 跨仓定位消费。
+供本 Phase 的 AC 核对与 fix-loop 跨仓定位消费。
+
+> **AC 逐条核对已并入本 Phase**（原 Phase 4 功能测试已移除）：审查时需逐条核对
+> `acceptance-criteria.json` 的每条 AC，未通过的 AC 以 `severity: "BLOCKER"` 记入 `issues[]`
+> 并在 `title` 注明 AC 编号，从而复用既有修复回路。
+> UI 交互型 AC（`testType: "ui"`）**不得仅凭代码审读判通过** —— 读代码读不出运行时行为，
+> 要么实跑取证，要么按未通过记 BLOCKER。
 
 ## 常见失败与对策
 
-- **WARNING 级问题带病过关**：本门控只看 BLOCKER。但如果问题的 `impact` 里写了「影响 AC-3」，
-  而 Phase 4 把 AC-3 判 passed，Phase 4→5 会检出矛盾 —— **BLOCKER 级才阻断推进，
-  WARNING/SUGGESTION 级只作提示**（提 AC 编号常为定位上下文，不等于声称该 AC 未达成）。
-  所以填 `impact` 不是可选的礼貌，它是下一道门控的输入。见 [phase-4.md](./phase-4.md)。
+- **UI 型 AC 被读代码判过**：`testType: "ui"` 的 AC（点击/禁用态/弹窗）无法靠静态阅读证明，
+  这是原 Phase 4 `checkEvidenceQuality` 拦截的缺陷，现由上面这条规则承接。
+- **WARNING 级问题带病过关**：本门控只看 BLOCKER，WARNING/SUGGESTION 级只作提示
+  （提 AC 编号常为定位上下文，不等于声称该 AC 未达成）。
+  所以填 `impact` 不是可选的礼貌，它是 AC 核对时的对照依据。
 - **顶层多写字段被拒**：如加了 `reviewedAt` 之类。放进 `issues[]` 内或删掉。

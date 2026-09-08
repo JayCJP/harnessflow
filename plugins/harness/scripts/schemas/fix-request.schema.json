@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["source", "sourcePhase", "round", "maxRounds", "issues", "affectedFiles"],
   "properties": {
-    "source": { "type": "string", "enum": ["code-review", "acceptance-test"] },
+    "source": { "type": "string", "enum": ["code-review"] },
     "sourcePhase": { "type": "integer", "minimum": 3, "maximum": 4 },
     "sourceFile": { "type": "string" },
     "round": { "type": "integer", "minimum": 1 },

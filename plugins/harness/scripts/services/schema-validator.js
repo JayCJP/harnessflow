@@ -4,7 +4,7 @@
  *
  * 职责:
  *   - 用 Ajv 校验 9 类 JSON 契约文件（e2e-state / acceptance-criteria / open-questions / task-dag /
- *     code-review / acceptance-verification / fix-request / fix-verification / story-input）
+ *     code-review / fix-request / fix-verification / story-input）
  *     是否符合 schemas/ 下的定义
  *   - 按 Phase 给出需校验的产出物清单（getPhaseArtifacts），供门控逐项校验
  *   - 把 Ajv 错误结构化成可读的 `文件 + 字段路径 + 原因` 错误列表
@@ -53,7 +53,6 @@ const SCHEMA_MAP = {
   'open-questions.schema.json': 'open-questions.json',
   'task-dag.schema.json': 'task-dag.json',
   'code-review.schema.json': 'code-review.json',
-  'acceptance-verification.schema.json': 'acceptance-verification.json',
   'fix-request.schema.json': 'fix-request.json',
   'fix-verification.schema.json': 'fix-verification.json',
   // story-input.json 不是 Phase 产出物，不进 getPhaseArtifacts，因此注册它不改变任何门控行为；
@@ -254,10 +253,9 @@ function getPhaseArtifacts (phaseNum) {
     1: ['task-dag.json'],
     2: [],
     3: ['code-review.json'],
-    4: ['acceptance-verification.json'],
+    4: [],
     5: [],
-    6: [],
-    7: []
+    6: []
   }
   return phaseArtifacts[phaseNum] || []
 }

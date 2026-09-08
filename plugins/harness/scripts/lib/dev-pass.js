@@ -196,33 +196,26 @@ function renewDevPass (storyId, ttl = DEV_PASS_TTL) {
 }
 
 /**
- * 默认最大修复轮次 —— 按失败源（Phase 3 代码审查 / Phase 4 功能测试）独立预算。
+ * 默认最大修复轮次。
  *
  * 历史缺陷: 旧实现单一 `maxFixRounds`，Phase 3 与 Phase 4 发起的 fix-loop
  * 共享同一轮次预算，code-review 耗尽的次数会吃掉 test 的额度，反之亦然。
- * 现拆分为各 2 次独立计数，用尽各自转人工。
+ * 后拆分为 review / test 各 2 次独立计数。
+ *
+ * Phase 4（功能测试）移除后修复回路只服务 Phase 3 代码审查，test 预算与
+ * `maxTestFixRounds` 一并删除 —— 保留一个永不生效的分支就是假门控。
  */
 const DEFAULT_MAX_REVIEW_FIX_ROUNDS = 2
-const DEFAULT_MAX_TEST_FIX_ROUNDS = 2
 
 /**
- * 获取指定失败源的最大修复轮次配置
- * 统一从 e2e-state.json 读取（在 create-workflow.js 创建 state 时写入）：
- *   - sourcePhase 3（代码审查）→ maxReviewFixRounds
- *   - sourcePhase 4（功能测试）→ maxTestFixRounds
- * 缺省用各自默认值。如需调整，直接修改 e2e-state.json 对应字段即可，单一信源无歧义。
+ * 获取最大修复轮次配置
+ * 统一从 e2e-state.json 读取（在 create-workflow.js 创建 state 时写入 maxReviewFixRounds）。
+ * 缺省用默认值。如需调整，直接修改 e2e-state.json 对应字段即可，单一信源无歧义。
  * @param {string} storyId - Story ID
- * @param {number} [sourcePhase] - 失败源 Phase（3=code-review / 4=test），缺省或非 3/4 回退到 review 预算
  * @returns {number} 最大修复轮次
  */
-function getMaxFixRounds (storyId, sourcePhase) {
+function getMaxFixRounds (storyId) {
   const state = readStateFile(storyId)
-  if (state && sourcePhase === 4) {
-    if (typeof state.maxTestFixRounds === 'number' && state.maxTestFixRounds > 0) {
-      return state.maxTestFixRounds
-    }
-    return DEFAULT_MAX_TEST_FIX_ROUNDS
-  }
   if (state && typeof state.maxReviewFixRounds === 'number' && state.maxReviewFixRounds > 0) {
     return state.maxReviewFixRounds
   }
@@ -237,6 +230,5 @@ module.exports = {
   checkDevPass,
   renewDevPass,
   DEFAULT_MAX_REVIEW_FIX_ROUNDS,
-  DEFAULT_MAX_TEST_FIX_ROUNDS,
   getMaxFixRounds
 }

@@ -6,7 +6,7 @@
   "required": ["round", "source", "fixes"],
   "properties": {
     "round": { "type": "integer", "minimum": 1, "description": "本次修复轮次" },
-    "source": { "type": "string", "enum": ["code-review", "acceptance-test"], "description": "修复请求来源（code-review=代码审查 BLOCKER，acceptance-test=功能测试失败）" },
+    "source": { "type": "string", "enum": ["code-review"], "description": "修复请求来源（code-review=代码审查 BLOCKER）" },
     "sourcePhase": { "type": "integer" },
     "totalIssues": { "type": "integer", "minimum": 0 },
     "fixedIssues": { "type": "integer", "minimum": 0 },

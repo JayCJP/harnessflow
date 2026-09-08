@@ -34,15 +34,14 @@ const PHASE_SLUGS = [
   'task_planning',           // 1
   'development',             // 2
   'code_review',             // 3
-  'e2e_verification',        // 4
-  'git_submit',              // 5
-  'knowledge_base_update',   // 6
-  'deployment',              // 7
-  'completed'                // 8 — 工作流终态
+  'git_submit',              // 4
+  'knowledge_base_update',   // 5
+  'deployment',              // 6
+  'completed'                // 7 — 工作流终态
 ]
 
 /**
- * 最大合法 Phase 编号（终态 = 8）
+ * 最大合法 Phase 编号（终态 = 7）
  *
  * 此前 dispatch.js 与 advance-phase.js 各自定义了一份 `PHASE_SLUGS.length - 1`，
  * 两处硬编码同一事实。收敛到定义 PHASE_SLUGS 的模块里，数组增删时不会漏改。
@@ -55,11 +54,10 @@ const PHASE_NAMES = [
   '任务规划',       // 1
   '代码开发',       // 2
   '代码审查',       // 3
-  '功能测试',       // 4
-  'Git提交',        // 5
-  '知识库更新',     // 6
-  '云端部署',       // 7
-  '工作流完成'      // 8 — 工作流终态
+  'Git提交',        // 4
+  '知识库更新',     // 5
+  '云端部署',       // 6
+  '工作流完成'      // 7 — 工作流终态
 ]
 
 /**
@@ -90,16 +88,12 @@ const PHASE_ARTIFACTS = {
     ]
   },
   2: { artifacts: [{ fileName: null, description: '代码变更（git diff）', contract: false }] },
-  3: { artifacts: [{ fileName: ARTIFACT.CODE_REVIEW, description: '代码审查结构化数据(JSON格式，唯一产出物)', contract: true }] },
-  4: {
-    artifacts: [
-      { fileName: ARTIFACT.TEST_REPORT, description: '测试报告', contract: false },
-      { fileName: ARTIFACT.ACCEPTANCE_VERIFICATION, description: '验收对账契约', contract: true }
-    ]
-  },
-  5: { artifacts: [{ fileName: null, description: 'Git commit + push', contract: false }] },
-  6: { artifacts: [{ fileName: null, description: '知识库文档更新（meta.yaml hash 变化）', contract: false }] },
-  7: { artifacts: [{ fileName: null, description: '部署 URL + 构建号', contract: false }] }
+  // Phase 4（功能测试）已移除：AC 逐条核对并入本 Phase 由 code-reviewer 顺带完成，
+  // 未通过的 AC 记入 issues[] 的 BLOCKER —— 因此 code-review.json 是本 Story 唯一的验收对账产物
+  3: { artifacts: [{ fileName: ARTIFACT.CODE_REVIEW, description: '代码审查结构化数据(JSON格式，唯一产出物；AC 逐条核对结论一并记入 issues[])', contract: true }] },
+  4: { artifacts: [{ fileName: null, description: 'Git commit + push', contract: false }] },
+  5: { artifacts: [{ fileName: null, description: '知识库文档更新（meta.yaml hash 变化）', contract: false }] },
+  6: { artifacts: [{ fileName: null, description: '部署 URL + 构建号', contract: false }] }
 }
 
 /**
@@ -111,7 +105,7 @@ const PHASE_ARTIFACTS = {
  *   - `label` 仅供人类阅读（日志/文档），禁止用于 Spawn。
  *   - Phase→Agent 是确定性查表，不需要 LLM 推理。
  *     此表取代了原 agents/dispatcher.md 中的映射表。
- *   - Phase 8 为终态，无 Agent。
+ *   - Phase 7 为终态，无 Agent。
  */
 const PHASE_AGENTS = {
   0: {
@@ -132,24 +126,21 @@ const PHASE_AGENTS = {
   3: {
     agent: 'code-reviewer',
     label: '代码审查师',
-    instruction: '审查本 Story 的代码变更（git diff），产出 code-review.json。若存在 fix-request.json 说明是修复回路复查，需做增量审查'
+    // 原 Phase 4 的 AC 验收并入此处：审查时逐条核对 acceptance-criteria.json，
+    // 未通过的按 BLOCKER 记入 issues[]（title 带 AC 编号），从而复用既有修复回路
+    instruction: '审查本 Story 的代码变更（git diff），并逐条核对 acceptance-criteria.json 的每条 AC，未通过的 AC 以 BLOCKER 记入 issues[]（title 注明 AC 编号）。若存在 fix-request.json 说明是修复回路复查，需做增量审查'
   },
   4: {
-    agent: 'test-engineer',
-    label: '测试工程师',
-    instruction: '逐条验证 acceptance-criteria.json 中的 AC 是否通过，产出 test-report.md + acceptance-verification.json'
-  },
-  5: {
     agent: 'release-assistant',
     label: '发布助手',
     instruction: '执行 git add + commit + push，并创建 MR。禁止使用 --no-verify'
   },
-  6: {
+  5: {
     agent: 'release-assistant',
     label: '发布助手',
     instruction: '调用 kb-update Skill 增量更新知识库文档'
   },
-  7: {
+  6: {
     agent: 'release-assistant',
     label: '发布助手',
     instruction: '通过 devops MCP 触发云端构建和部署，回报部署 URL + 构建号'
@@ -159,7 +150,7 @@ const PHASE_AGENTS = {
 /**
  * 获取指定 Phase 的 Agent 信息
  * @param {number} phase - Phase 编号
- * @returns {{ agent: string, label: string, instruction: string }|null} 终态(8)或越界返回 null
+ * @returns {{ agent: string, label: string, instruction: string }|null} 终态(7)或越界返回 null
  */
 function getPhaseAgent (phase) {
   return PHASE_AGENTS[phase] || null

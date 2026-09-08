@@ -5,6 +5,7 @@
  *   - e2e-state.json 的 CRUD（readStateFile / writeStateFile）
  *   - 活跃工作流查询（findActiveWorkflows / hasActiveWorkflow）
  *   - Phase 完成状态判定（isPhaseCompleted）
+ *   - 工作流终态判定（isWorkflowTerminal，唯一信源）
  *   - Story 目录清理（cleanStoryDir）
  *
  * 用法:
@@ -29,7 +30,7 @@ const fs = require('fs')
 const path = require('path')
 const { PLANS_DIR, getStoryDir, ensureStoryDir, listStoryDirs } = require('./paths')
 const { ARTIFACT } = require('./artifacts')
-const { PHASE_SLUGS } = require('./phases')
+const { PHASE_SLUGS, MAX_PHASE } = require('./phases')
 const debugLog = require('./debug-log')
 
 /**
@@ -127,6 +128,24 @@ function isPhaseCompleted (state, phaseNum) {
 }
 
 /**
+ * 判断工作流是否已走到最后一步（终态）
+ *
+ * 「最后一步」的唯一信源 = MAX_PHASE（由 PHASE_SLUGS 推导），Phase 表增删时自动适配，
+ * 调用方禁止自行硬编码 Phase 编号 —— session-stop.js 曾硬编码 `phase >= 8`，
+ * 而终态实为 7，导致自动 end 永不触发。
+ *
+ * status === 'completed' 一并视为终态：advance-phase 推进到 MAX_PHASE 时会写下它，
+ * 直接改状态文件的场景（复档 / 人工收尾）也靠这一支判定。
+ *
+ * @param {Object} state - e2e-state.json 状态对象
+ * @returns {boolean} 已到终态为 true
+ */
+function isWorkflowTerminal (state) {
+  if (!state) return false
+  return Number(state.phase) >= MAX_PHASE || state.status === 'completed'
+}
+
+/**
  * 清理 Story 目录（删除空目录或整个目录）
  * @param {string} storyId - Story ID
  * @param {boolean} force - 是否强制删除（即使目录非空）
@@ -154,5 +173,6 @@ module.exports = {
   findActiveWorkflows,
   hasActiveWorkflow,
   isPhaseCompleted,
+  isWorkflowTerminal,
   cleanStoryDir
 }

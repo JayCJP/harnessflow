@@ -65,6 +65,7 @@ const {
 
 const contextRefresh = require('./context-refresh')
 const experience = require('./experience')
+const schemaInjector = require('./schema-injector')
 
 /**
  * 把 Windows 反斜杠路径转为正斜杠形式（仅用于**注入 prompt / 输出给人与 LLM 看**的路径）
@@ -182,7 +183,7 @@ function readStoryContext (storyId, targetPhase) {
  * designSpec 仅作辅助参考，避免全量探索设计稿。
  *
  * 只在 Phase 2 注入 —— 与 buildFigmaAlignInstruction 的 Phase 过滤对齐。此前无该过滤，
- * 导致代码审查（看 git diff）、功能测试（跑 AC）、发布（commit / 部署）的 prompt
+ * 导致代码审查（看 git diff + 核对 AC）、发布（commit / 部署）的 prompt
  * 也都带着色值/间距/圆角这类设计规格，纯属噪音（v3 原则：这个 Phase 到底用不用得上）。
  *
  * @param {string} storyId - Story ID
@@ -362,8 +363,7 @@ function buildFixLoopContext (storyId, targetPhase) {
     const fixVerificationPath = path.join(PLANS_DIR, storyId, 'fix-verification.json')
     const hasFixVerification = fs.existsSync(fixVerificationPath)
     // 修复预算按失败源独立计数（code-review / test 各 2 次），maxRounds 取对应预算
-    const sourcePhase = fixRequest.sourcePhase === 4 ? 4 : 3
-    const maxRounds = getMaxFixRounds(storyId, sourcePhase)
+    const maxRounds = getMaxFixRounds(storyId)
     return {
       active: true,
       round: fixRequest.round,
@@ -491,16 +491,13 @@ function buildIncrementalFixSection (storyId) {
 }
 
 /**
- * 构造跨仓检索入口片段（P1-3: 修复跨仓检索三重失效，D2）
+ * 构造代码检索入口片段
  *
- * 实跑诊断: graphify-out/ 与 .docs/llm-knowledge/ 均按子 Agent cwd 解析，而 cwd 停在主仓，
- * 目标仓的图谱/知识库永远查不到；无知识库的仓还会被摸黑穷举关键词（48% 检索空转）。
- * 本片段把「正确的检索姿势」由脚本逐仓下发:
- *   - 绝对仓路径（不依赖子 Agent cwd）
- *   - 该仓 graphify-out/graph.json 与 .docs/llm-knowledge/ 的存在性（脚本侧预判，
- *     子 Agent 不必再探测 —— 主 Agent 本来就在跑的 Test-Path 固化到 prompt）
- *   - graphify 的标准用法（主仓给全量命令，跨仓给 `cd` + query 的最小样例）
- *   - 无知识库的仓明写「只走 graphify + 源码精读，不要尝试 kb-query」
+ * 精简原则（2026-09-08）: 只下发**脚本才知道、子 Agent 猜不到**的事实 ——
+ *   - 各仓绝对目录（来自 repos.json，子 Agent 无法凭空得知）
+ *   - graphify / 知识库按 cwd 解析（跨仓须先 cd，48% 检索空转的根因）
+ * 其余（graphify 具体用法、命令样例、图谱与知识库存在性）交给 `graphify` skill 自行披露，
+ * 不再逐仓展开 —— 多仓场景每仓 8~12 行会成倍膨胀，且属 skill 本就会说明的内容。
  *
  * 默认在所有检索相关阶段（Phase 0 需求分析 / 1 任务规划 / 2 开发）注入，**含单仓 Story** ——
  * 约束里写了「必须用 kb-query + graphify 双源交叉验证」，但只讲要求不给用法时，
@@ -527,57 +524,20 @@ function buildRepoSearchEntries (storyId, targetPhase) {
     .filter(n => repos.repos[n])
 
   const lines = [
-    '## 🔎 代码检索入口（按仓下发，图谱/知识库存在性已由脚本预判）',
+    '## 🔎 代码检索入口',
     '',
-    '> graphify 与知识库均按 **cwd** 解析：检索非主仓必须先 `cd` 到该仓的绝对路径，',
+    // 逐仓只给目录 —— 子 Agent 凭空猜不到绝对路径，这是脚本独有的事实
+    ...names.map(name => {
+      const isPrimary = name === primary
+      return `- ${name}${isPrimary ? '（主仓，即当前工作目录）' : ''} → \`${toPosix(repos.repos[name])}\``
+    }),
+    '',
+    '检索统一走 `graphify` skill（`/graphify`）: `graphify query "<模块/关键词>"`。',
+    '',
+    '> graphify 与知识库均按 **cwd** 解析 —— 检索非主仓必须先 `cd` 到该仓目录，',
     '> 在主仓直接跑永远查不到目标仓的图谱/知识库（实跑 48% 检索空转的根因）。',
     ''
   ]
-  for (const name of names) {
-    const absPath = repos.repos[name]
-    const isPrimary = name === primary
-    const repoPath = toPosix(absPath)
-    const graphOk = fs.existsSync(path.join(absPath, 'graphify-out', 'graph.json'))
-    const kbOk = fs.existsSync(path.join(absPath, '.docs', 'llm-knowledge'))
-
-    lines.push(`### ${name}${isPrimary ? '（主仓，即当前工作目录）' : ''} → \`${repoPath}\``)
-    lines.push(`- graphify 图谱: ${graphOk ? '✅ 存在 (graphify-out/graph.json)' : '❌ 不存在（先用下方命令建图；建不出来就退回源码精读并上报，不要硬 query）'}`)
-    if (kbOk) {
-      lines.push('- 知识库: ✅ 存在 (.docs/llm-knowledge/)，可用 kb-query 检索业务域文档')
-    } else {
-      lines.push('- 知识库: ❌ 不存在 —— **该仓只走 graphify + 源码精读，不要尝试 kb-query**')
-    }
-
-    // 命令分行给出，不写成 `cd ... && graphify ...`:
-    // `&&` 是 PowerShell 7+ 语法，Windows 默认的 PowerShell 5.1 会直接报
-    // "The token '&&' is not a valid statement separator" —— 而子 Agent 的 tools 里就有 PowerShell。
-    // 这段样例本就是为了修「检索失败率 ~35%」，样例自身不该再引入一次失败
-    if (!graphOk) {
-      // 图谱不存在时还教 `graphify query` 是自相矛盾 —— 没有 graph.json 必然失败。
-      // 先给建图命令；建不出来就按约束停下上报，而不是退回关键词穷举
-      lines.push('- 建图命令（Bash；图谱生成后才能 query）:')
-      lines.push('  ```bash')
-      if (!isPrimary) lines.push(`  cd "${repoPath}"`)
-      lines.push('  graphify .           # 首次: 全量抽取建图')
-      lines.push('  graphify update .    # 已有图谱: 增量更新')
-      lines.push('  ```')
-      lines.push('- 建图不可用（CLI 缺失 / 报错）→ **停下上报主 Agent**，不要退回纯文本搜索硬做')
-    } else if (isPrimary) {
-      // 主仓给全量命令：子 Agent 在这干活最多，一次说清能力边界比让它自己试更省调用
-      lines.push('- 标准用法（Bash）:')
-      lines.push('  ```bash')
-      lines.push('  graphify query "<模块/关键词>"')
-      lines.push('  ```')
-      lines.push('- 其他命令: `graphify path "<模块A>" "<模块B>"`（两者关联路径）、`graphify explain "<概念>"`（单节点详解）、`graphify query "..." --budget 1500`（限制返回 token）')
-    } else {
-      lines.push('- 标准执行样例（在**同一次** Bash 调用中依次执行）:')
-      lines.push('  ```bash')
-      lines.push(`  cd "${repoPath}"`)
-      lines.push('  graphify query "<模块/关键词>"')
-      lines.push('  ```')
-    }
-    lines.push('')
-  }
   return lines
 }
 
@@ -593,13 +553,13 @@ function buildRepoSearchEntries (storyId, targetPhase) {
  * @param {string} opts.storyId - Story ID
  * @param {number} opts.round - 当前修复轮次
  * @param {number} opts.maxRounds - 最大修复轮次
- * @param {number} opts.sourcePhase - 失败来源 Phase（3=代码审查 / 4=功能测试）
+ * @param {number} opts.sourcePhase - 失败来源 Phase（3=代码审查）
  * @param {Array<{id:string,severity:string,file?:string,line?:string,description:string,suggestion?:string}>} opts.issues - 待修复问题清单
  * @param {string[]} opts.affectedFiles - 受影响文件（dev-pass 限域范围）
  * @returns {string} 完整可注入的修复任务 prompt
  */
 function buildFixLoopSpawnPrompt (opts) {
-  const { storyId, round, maxRounds, sourcePhase, issues, affectedFiles } = opts
+  const { storyId, round, maxRounds, issues, affectedFiles } = opts
   const fixRequestPath = toPosix(path.join(PLANS_DIR, storyId, 'fix-request.json'))
 
   const issueList = issues.map(i =>
@@ -611,7 +571,7 @@ function buildFixLoopSpawnPrompt (opts) {
   return [
     `## 🔧 修复任务 (第 ${round}/${maxRounds} 轮)`,
     '',
-    `你正在接收来自 **${sourcePhase === 3 ? '代码审查 (Phase 3)' : '功能测试 (Phase 4)'}** 的修复请求。`,
+    '你正在接收来自 **代码审查 (Phase 3)** 的修复请求。',
     '',
     `### 待修复问题 (共 ${issues.length} 个)`,
     issueList,
@@ -633,7 +593,7 @@ function buildFixLoopSpawnPrompt (opts) {
     '',
     '### 修复完成后',
     '- 产出 `fix-verification.json`（逐项核对修复结果），格式:',
-    `  \`{"round": ${round}, "source": "${sourcePhase === 3 ? 'code-review' : 'acceptance-test'}", "fixes": [{"id":"FIX-01","status":"fixed|partially|skipped","actualChange":"改动说明","filesModified":["src/xxx"]}], "summary":{"total":N,"fixed":N,"partially":N,"skipped":N}}\``,
+    `  \`{"round": ${round}, "source": "code-review", "fixes": [{"id":"FIX-01","status":"fixed|partially|skipped","actualChange":"改动说明","filesModified":["src/xxx"]}], "summary":{"total":N,"fixed":N,"partially":N,"skipped":N}}\``,
     '- 通知主 Agent 修复完成；后续推进命令以 dispatch.js 输出的 advanceCommand 为准，不要手写',
     ''
   ].join('\n')
@@ -716,6 +676,10 @@ function buildAgentPrompt (opts) {
   // P1-2: 增量修复的窄上下文 —— 只列被点名的修复契约文件（fix-request / fix-context / fix-verification）
   const incrementalFixSection = incremental ? buildIncrementalFixSection(storyId) : ''
 
+  // ③ 方案 B: 契约产出物的 schema 骨架（门控按此校验，让子 Agent 生成前就对齐字段白名单与类型）
+  // 无契约产出物的 Phase（如 Phase 2 只产出 git diff）自动返回空串，无需在此判断
+  const schemaSection = schemaInjector.buildContractSchemaSection(targetPhase)
+
   // P1-3: 跨仓检索入口（repos.json 有非 primary 条目时逐仓下发，修复 D2 三重失效）
   const repoSearchEntries = buildRepoSearchEntries(storyId, targetPhase)
 
@@ -765,6 +729,9 @@ function buildAgentPrompt (opts) {
       // 用正斜杠形式注入 —— markdown 渲染层会把 `\.` 当转义吃掉，反斜杠路径显示会缺分隔符
       ? `## 产出要求\n${expectedDescriptions.map(d => `- ${d}`).join('\n')}\n产出目录: ${toPosix(path.join(PLANS_DIR, storyId))}`
       : '',
+    '',
+    // 紧随产出清单：先说产出什么，再说按什么格式产出（骨架由 schema-injector 生成）
+    schemaSection,
     '',
     (storyMode === 'fixbugs' && targetPhase === 2)
       ? '## Bug 修复说明\nBug 事实（问题复述 / 复现步骤 / 代码定位 / 根因）已在 Phase 0 分析完毕、并在 Phase 1 消化进 `task-dag.json` 与 `acceptance-criteria.json`。\n**以契约文件为准动手**: `task-dag.json` 的 `files[]` 就是改动范围，`acceptanceCriteria` 关联的 AC 描述里带 Bug 编号。\n修复怎么改由你设计: 先用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再给出实现。\n'

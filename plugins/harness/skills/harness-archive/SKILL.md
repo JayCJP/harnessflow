@@ -104,7 +104,6 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 ├── requirement-analysis.md           │   ├── round-1/
 ├── task-dag.json                     │   │   ├── e2e-state.json
 ├── code-review.json                   │   │   ├── trace.jsonl
-├── test-report.md                    │   │   ├── repos.json
 ├── ... (所有产物)                     │   │   ├── requirement-analysis.md
 └── archive/                          │   │   ├── task-dag.json
     └── (旧的 .archived 散落文件)       │   │   ├── code-review.json

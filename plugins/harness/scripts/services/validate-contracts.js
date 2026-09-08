@@ -37,7 +37,6 @@ const {
   checkOpenQuestions,
   checkTaskDagJson,
   validateContractReferences,
-  checkAcceptanceVerification,
   getPhaseName
 } = require('../lib/state')
 
@@ -80,11 +79,6 @@ function validateContracts (storyId, targetPhase) {
   if (targetPhase >= 2) {
     logPhaseCheck(1, 'task-dag-json', checkTaskDagJson(storyId))
     logPhaseCheck(1, 'contract-references', validateContractReferences(storyId))
-  }
-
-  // Phase 4->5: 验收对账
-  if (targetPhase >= 5) {
-    logPhaseCheck(4, 'acceptance-verification', checkAcceptanceVerification(storyId))
   }
 
   return {

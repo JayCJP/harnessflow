@@ -36,49 +36,19 @@ const { dispatch } = require(path.join(SCRIPTS_DIR, 'commands/dispatch'))
 const promptBuilder = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 
 // ════════════════════════════════════════════════════════════
-section('1. fixloop 独立预算（review/test 各 2 次）')
+section('1. fixloop 修复轮次预算')
 
 const c1 = createWorkflow('FL-1', 'fixloop 预算', false, false, 'run')
 ok('createWorkflow 成功', c1.success !== false)
 const st1 = state.readStateFile('FL-1')
 ok('state 含 maxReviewFixRounds=2', st1.maxReviewFixRounds === 2, String(st1.maxReviewFixRounds))
-ok('state 含 maxTestFixRounds=2', st1.maxTestFixRounds === 2, String(st1.maxTestFixRounds))
-ok('getMaxFixRounds(review)=2', state.getMaxFixRounds('FL-1', 3) === 2)
-ok('getMaxFixRounds(test)=2', state.getMaxFixRounds('FL-1', 4) === 2)
+ok('getMaxFixRounds=2', state.getMaxFixRounds('FL-1') === 2)
 ok('getMaxFixRounds(缺省 sourcePhase)=review 预算', state.getMaxFixRounds('FL-1') === 2)
 
 // ════════════════════════════════════════════════════════════
-section('2. unverifiable 不阻塞门控')
-
-const dir2 = storyDir('UV-1')
-fs.mkdirSync(dir2, { recursive: true })
-// 全部 unverifiable 的验收对账（需求4：不阻塞，跳过）
-fs.writeFileSync(path.join(dir2, 'acceptance-verification.json'), JSON.stringify({
-  results: [
-    { id: 'AC-1', status: 'unverifiable', evidenceType: 'static', evidence: ['代码逻辑已验证，需联调环境'] },
-    { id: 'AC-2', status: 'unverifiable', evidenceType: 'static', evidence: ['接口参数已适配，待联调'] }
-  ],
-  summary: { total: 2, passed: 0, failed: 0, unverifiable: 2 }
-}))
-fs.writeFileSync(path.join(dir2, 'e2e-state.json'), JSON.stringify({ storyId: 'UV-1', phase: 4, status: 'running' }))
-const av = state.checkAcceptanceVerification('UV-1')
-ok('100% unverifiable -> allPassed=true（不阻塞）', av.allPassed === true, JSON.stringify(av.errors))
-ok('unverifiable 被正确归入 unverifiable 列表', av.unverifiable.length === 2)
-ok('无 failed', av.failed.length === 0)
-
-// 有 failed 才应阻塞
-fs.writeFileSync(path.join(dir2, 'acceptance-verification.json'), JSON.stringify({
-  results: [
-    { id: 'AC-1', status: 'failed', evidenceType: 'api', evidence: ['接口返回异常'] },
-    { id: 'AC-2', status: 'passed', evidenceType: 'api', evidence: ['正常'] }
-  ],
-  summary: { total: 2, passed: 1, failed: 1, unverifiable: 0 }
-}))
-const av2 = state.checkAcceptanceVerification('UV-1')
-ok('有 failed -> allPassed=false（阻塞）', av2.allPassed === false)
 
 // ════════════════════════════════════════════════════════════
-section('3. 目录级 glob 判定（getTasksRequiringFigma）')
+section('2. 目录级 glob 判定（getTasksRequiringFigma）')
 
 const dir3 = storyDir('GL-1')
 fs.mkdirSync(dir3, { recursive: true })
@@ -97,7 +67,7 @@ ok('目录 glob 的 task-1 被识别为需 Figma', tasks.some(t => t.id === 'tas
 ok('纯逻辑 task-2 不被识别', !tasks.some(t => t.id === 'task-2'), JSON.stringify(tasks.map(t => t.id)))
 
 // ════════════════════════════════════════════════════════════
-section('4. Phase 1→2 门控：figma-frame-inventory 存在性 & 完整性')
+section('3. Phase 1→2 门控：figma-frame-inventory 存在性 & 完整性')
 
 // 场景 A：hasFigmaDesign=true 但 frame-inventory 缺失 → BLOCKER（存在性门控，依赖 requiredWhen:'hasFigmaDesign'）
 const dir4a = storyDir('FG1-MISS')
@@ -173,7 +143,7 @@ ok('frame-inventory 完整（含 link）-> 无 figma_frame_incomplete BLOCKER', 
   JSON.stringify(g3.blockers.map(b => b.type + ':' + b.message)))
 
 // ════════════════════════════════════════════════════════════
-section('5. advance-phase.js 输出契约（v4: 只含推进结果）')
+section('4. advance-phase.js 输出契约（v4: 只含推进结果）')
 
 // FG1-OK 的 Phase 1 产出物齐备且门控通过，直接推到 Phase 2 验真实输出。
 // 契约: 推进结果归 advance-phase，「下一步怎么 Spawn」归 dispatch.js。

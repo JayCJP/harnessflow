@@ -54,7 +54,7 @@
 ### 契约 JSON 读取与校验
 
 文件名常量：`ACCEPTANCE_CRITERIA_FILE` `OPEN_QUESTIONS_FILE` `TASK_DAG_JSON_FILE`
-`ACCEPTANCE_VERIFICATION_FILE` `FIGMA_FRAME_INVENTORY_FILE` `STORY_INPUT_FILE`
+`FIGMA_FRAME_INVENTORY_FILE` `STORY_INPUT_FILE`
 
 读取与校验：`readStoryInput` `getStoryMode` `readJsonArtifact` `checkAcceptanceCriteria`
 `checkOpenQuestions` `checkTaskDagJson` `validateContractReferences`

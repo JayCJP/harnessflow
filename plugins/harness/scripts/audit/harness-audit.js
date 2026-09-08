@@ -5,7 +5,7 @@
  * 职责:
  *   - 工作流状态审计: .harness-active 与 e2e-state.json 一致性、活跃工作流数、dev-pass 有效性与限域精度
  *   - 契约与产出物审计: 未完成 Story 的 acceptance-criteria / open-questions / task-dag /
- *     acceptance-verification 校验，以及已越过 Phase 的产出物缺失
+ *     已越过 Phase 的产出物缺失
  *   - 声明-消费一致性: story-input.json 声明了 Figma 链接但 Phase 1 未产出有效 frame 清单 → 告警
  *
  * 用法:
@@ -40,7 +40,7 @@
  */
 const fs = require('fs')
 const path = require('path')
-const { PLANS_DIR, listStoryDirs, readStateFile, findActiveWorkflows, checkPhaseArtifact, checkAcceptanceCriteria, checkOpenQuestions, checkTaskDagJson, validateContractReferences, checkAcceptanceVerification, checkDevPass, detectFigmaSource, checkFigmaFrameInventory } = require('../lib/state')
+const { PLANS_DIR, listStoryDirs, readStateFile, findActiveWorkflows, checkPhaseArtifact, checkAcceptanceCriteria, checkOpenQuestions, checkTaskDagJson, validateContractReferences, checkDevPass, detectFigmaSource, checkFigmaFrameInventory } = require('../lib/state')
 const { HARNESS_ACTIVE_FLAG } = require('../lib/artifacts')
 const args = process.argv.slice(2)
 const fixMode = args.includes('--fix')
@@ -96,10 +96,6 @@ function auditContracts () {
       if (!tdj.valid) warnings.push({ cat: 'contract', severity: 'WARNING', msg: '[' + sid + '] task-dag.json: ' + tdj.errors.join('; ') })
       const ref = validateContractReferences(sid)
       if (!ref.valid) warnings.push({ cat: 'contract', severity: 'WARNING', msg: '[' + sid + '] AC-Task 引用: ' + ref.errors.join('; ') })
-    }
-    if (ph >= 5 || (st.phases && st.phases['4_e2e_verification'] && st.phases['4_e2e_verification'].status === 'completed')) {
-      const av = checkAcceptanceVerification(sid)
-      if (!av.allPassed) warnings.push({ cat: 'contract', severity: 'WARNING', msg: '[' + sid + '] acceptance-verification.json: ' + av.errors.join('; ') })
     }
   }
 }

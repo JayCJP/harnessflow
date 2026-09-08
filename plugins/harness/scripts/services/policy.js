@@ -43,7 +43,6 @@ const {
   checkAcceptanceCriteria,
   checkOpenQuestions,
   checkTaskDagJson,
-  checkAcceptanceVerification,
   validateContractReferences,
   validateTaskFigmaReferences,
   checkFigmaFrameInventory,
@@ -243,31 +242,6 @@ const RECOVERY_SUGGESTIONS = {
     autoFixable: false,
     resolution: 'advance-phase.js <storyId> 2 --fix-loop'
   },
-  // Phase 4→5: AC 缺少验收结果
-  ac_missing_verification: {
-    level: 4,
-    action: '每条验收标准必须有对应的验收结果',
-    autoFixable: false
-  },
-  // Phase 4→5: AV 缺少 id 字段
-  av_missing_id: {
-    level: 2,
-    action: 'acceptance-verification.json 每条 result 必须有 id 字段',
-    autoFixable: false
-  },
-  // Phase 4→5: AV 缺少 evidence
-  av_missing_evidence: {
-    level: 2,
-    action: 'acceptance-verification.json 每条 result 必须有 evidence 数组',
-    autoFixable: false
-  },
-  // Phase 4→5: acceptance-verification.json 不存在（不可达：policy.js 有 exists 守卫，
-  // 仅 checkAcceptanceVerification 被独立调用时可能出现，登记以免落 unknown）
-  av_missing_file: {
-    level: 2,
-    action: '请先产出 acceptance-verification.json',
-    autoFixable: false
-  },
   // 产出物缺失
   artifact_missing: {
     level: 4,
@@ -377,8 +351,6 @@ function runGateCheck (storyId, phaseNum, state) {
     checkPhase2Gate(storyId, state, result)
   } else if (phaseNum === 3) {
     checkPhase3Gate(storyId, result)
-  } else if (phaseNum === 4) {
-    checkPhase4Gate(storyId, result)
   }
 
   // 2.5. 🆕 资源完整性检查（声明了外部依赖但未有效消费）
@@ -419,7 +391,7 @@ function runGateCheck (storyId, phaseNum, state) {
  * 判定依据（v2 证据链）：
  *   - kb-query / graphify 调用为 0 → WARNING（放行但记 debt，Evo Score 扣分）
  *
- * 检查时机：仅在 phaseNum === 3（即 Phase 3→4 门控，代码审查完成、准备进入功能测试前）时执行。
+ * 检查时机：仅在 phaseNum === 3（即 Phase 3→4 门控，代码审查完成、准备进入 Git 提试前）时执行。
  * 此时 Phase 2 开发阶段已全部结束，trace.jsonl 的开发 tool_call 记录最完整，判定最可靠。
  * 早期阶段（phaseNum < 3）开发尚未完成，trace 不完整；后期阶段（phaseNum > 3）已过功能测试，无需重复。
  *
@@ -864,209 +836,6 @@ function checkPhase3Gate (storyId, result) {
 }
 
 /**
- * Phase 4→5 门控: acceptance-verification + Spec-Anchored 契约回归检查 + fixLoop 提示
- * 注意：acceptance-verification.json 的文件存在性已由 runGateCheck 中的 checkPhaseArtifact 覆盖，
- *       此函数只负责内容检查（AC 通过率、evidence 等），避免重复采集。
- *       当检测到 failed 时，附加 fixLoopAvailable 标记供主 Agent 触发修复回路。
- */
-function checkPhase4Gate (storyId, result) {
-  const avCheck = checkAcceptanceVerification(storyId)
-  // 文件不存在时由 checkPhaseArtifact 统一记录 artifact_missing，此处跳过避免重复
-  if (!avCheck.exists) return
-
-  let hasFailure = false
-
-  // failed 状态 → BLOCKER (L2: 触发修复回路)
-  for (const f of avCheck.failed) {
-    result.blockers.push(structuredError(
-      'ac_verification_failed',
-      `AC ${f.id}: ${f.status}`,
-      2,
-      `验收标准 ${f.id} 未通过，执行修复回路: ${ADVANCE_CMD} ${storyId} 2 --fix-loop`
-    ))
-    result.passed = false
-    hasFailure = true
-  }
-
-  // unverifiable 状态 → WARNING（不阻塞，降级通过）
-  for (const u of avCheck.unverifiable) {
-    result.warnings.push(`AC ${u.id}: unverifiable（跨项目或环境限制，代码逻辑已验证）`)
-  }
-
-  // P2-4（2026-09）: unverifiable 占比 ≥50% → 强告警并写入推进结果 warnings。
-  // 实跑出现过 1 passed / 0 failed / 14 unverifiable 仍静默放行到部署（D12）——
-  // 环境限制（拿不到登录态）是真实的，但必须让主 Agent 与用户在 Phase 5 发布前知悉。
-  // 该 warning 会随 advance-phase.js 写入 state.gateChecks 与推进输出
-  const totalCount = Array.isArray(avCheck.results) ? avCheck.results.length : 0
-  if (totalCount > 0 && avCheck.unverifiable.length / totalCount >= 0.5) {
-    const pct = Math.round((avCheck.unverifiable.length / totalCount) * 100)
-    result.warnings.push(
-      `⚠️ [强告警] unverifiable AC 占比 ${avCheck.unverifiable.length}/${totalCount} (${pct}%) ≥ 50%: 仅 ${totalCount - avCheck.unverifiable.length} 条 AC 被实际验证。` +
-      '发布前请确认环境限制已知悉（无法登录的第三方系统等），Phase 5 发布时应向用户明示本 Story 的实际验证覆盖面'
-    )
-  }
-
-  // 交叉对账: code-review 里仍 open 的问题，若自称影响某条 AC，而该 AC 已判 passed → 矛盾
-  crossCheckReviewVsAcceptance(storyId, avCheck, result)
-
-  // 证据强度: UI 交互型 AC 不允许仅凭代码审读判 passed
-  checkEvidenceQuality(storyId, avCheck, result)
-
-  // AV 内部校验错误 → 结构化
-  for (const issue of avCheck.issues) {
-    result.blockers.push(structuredError(issue.type, issue.message, issue.level, issue.resolution))
-    result.passed = false
-  }
-
-  // Spec-Anchored: 契约回归检查
-  const contractCheck = checkContractRegression(storyId)
-  if (!contractCheck.valid) {
-    for (const e of contractCheck.errors) {
-      result.warnings.push(`Spec-Anchored: ${e}`)
-    }
-  }
-
-  // 附加 fixLoopAvailable 标记（供主 Agent 判断是否需要修复回路）
-  if (hasFailure) {
-    result._meta = result._meta || {}
-    result._meta.fixLoopAvailable = true
-    result._meta.fixLoopSource = 'phase4'
-    result._meta.fixLoopHint = `${ADVANCE_CMD} ${storyId} 2 --fix-loop`
-  }
-
-  // open-questions 检查: Phase 4→5 提交前提醒未 resolve 的问题
-  const oqCheck = checkOpenQuestions(storyId)
-  // 原先读 oqCheck.unresolvedCount —— checkOpenQuestions 从未返回该字段，
-  // undefined > 0 恒为 false，这条告警此前从未触发过
-  if (oqCheck.exists && oqCheck.unresolved.length > 0) {
-    const unresolvedList = oqCheck.unresolved.map(q => `${q.id}: ${q.question}`).join('; ')
-    result.warnings.push(
-      `open-questions.json 中有 ${oqCheck.unresolved.length} 个未 resolve 的问题: ${unresolvedList}。` +
-      '需后端配合的问题请标记 resolved:true + resolution:"前端已预留，待后端配合"；前端可确认的问题请在开发过程中确认并标记 resolved'
-    )
-  }
-}
-
-/**
- * Phase 4→5 交叉对账: code-review 未修复项 vs 验收结论
- *
- * 历史缺陷: checkPhase4Gate 从不读 code-review.json，checkPhase3Gate 只看
- *   `severity==='BLOCKER' && status==='open'`。结果 WARNING 级问题只要不改成 BLOCKER
- *   就能带病过关 —— 即使问题描述里明写"影响 AC-3 选品交互的正确性"，而 AC-3 同时被判 passed。
- *   两份产出物各自自洽，合起来自相矛盾，没有任何一道门控看得见这个矛盾。
- *
- * 判定（按 severity 分级，2026-09 修正）: open 状态的问题文本中出现 AC-N，而该 AC 在
- *   acceptance-verification.json 中为 passed → BLOCKER 级阻塞、其余级别仅提示。
- *
- * 为什么分级而不是「任意 severity 一律阻塞」:
- *   初版对任意 severity 一律阻塞，实跑直接制造死锁 —— 审查师在描述里提 AC 编号常常只是为了
- *   定位上下文，并不等于声称该 AC 未达成。典型案例: WARNING「render() 全量重建导致焦点丢失」
- *   提到 AC-4，但勾选功能本身完全正确，测试判 AC-4 passed 与之并不矛盾。此时无论补多少
- *   运行时证据都过不了这道门控，唯一的「出路」是把 AC 降级成 unverifiable，
- *   结果就是整条 Story 带「0 条 AC 被实际验证」的强告警 —— 门控反而逼出了更差的结果。
- *   反之若一律只看 BLOCKER，则本函数在 Phase 3 已拦截 open BLOCKER 的前提下永不触发，
- *   沦为死代码（那正是它当初被设计出来要补的缺口）。
- *   分级后: BLOCKER 级矛盾是真矛盾，阻塞；WARNING/SUGGESTION 级只提示，交由主 Agent 判断。
- */
-function crossCheckReviewVsAcceptance (storyId, avCheck, result) {
-  const crJsonPath = path.join(PLANS_DIR, storyId, ARTIFACT.CODE_REVIEW)
-  if (!fs.existsSync(crJsonPath)) return
-
-  let crData
-  try {
-    crData = JSON.parse(fs.readFileSync(crJsonPath, 'utf-8'))
-  } catch (e) {
-    result.warnings.push(`交叉对账: code-review.json 解析失败，已跳过（${e.message}）`)
-    return
-  }
-
-  const passedACIds = new Set(
-    (avCheck.results || []).filter(r => r.status === 'passed').map(r => r.id).filter(Boolean)
-  )
-  if (passedACIds.size === 0) return
-
-  const openIssues = (crData.issues || []).filter(i => i.status === 'open')
-  for (const issue of openIssues) {
-    // 在问题的全部文本字段里找 AC 引用（审查师通常写在 title/description/impact 里）
-    const text = [issue.title, issue.description, issue.impact, issue.suggestion, issue.reason]
-      .filter(v => typeof v === 'string').join(' ')
-    const refs = text.match(/AC-\d+/gi) || []
-    const conflicting = [...new Set(refs.map(r => r.toUpperCase()))].filter(id => passedACIds.has(id))
-    if (conflicting.length === 0) continue
-
-    const label = `审查问题 ${issue.id || ''}(${issue.severity || 'WARNING'}, status=open) 自称影响 ` +
-      `${conflicting.join('/')}，但该 AC 在 acceptance-verification.json 中为 passed` +
-      `${issue.title ? ': ' + issue.title : ''}`
-
-    if (issue.severity === 'BLOCKER') {
-      result.blockers.push(structuredError(
-        'review_acceptance_conflict',
-        label,
-        2,
-        `二选一: ① 修复该问题并把 status 改为 fixed；② 把 ${conflicting.join('/')} 的 status 从 passed 改为 failed 并走修复回路`
-      ))
-      result.passed = false
-    } else {
-      // 非 BLOCKER 级只提示：提 AC 编号常为定位上下文，不等于声称该 AC 未达成，
-      // 一律阻塞会把测试工程师逼向 unverifiable（见函数头注释）
-      result.warnings.push(label + ' —— 若为误引用请确认 AC 判定，否则考虑修复后复审')
-    }
-  }
-}
-
-/**
- * Phase 4→5 证据强度校验: UI 交互型 AC 不允许仅凭代码审读判 passed
- *
- * 历史缺陷: TrainWeChatStore 14 条 AC 的 evidence 全部是 `文件:行号 + 代码语义描述`，
- *   没有一条来自实际运行。AC-3「导入商品并关联课程」凭读到 `:selectable="selectable"`
- *   就判 passed，而审查师同时发现「选品弹窗取消勾选失效」—— 读代码读不出运行时行为，
- *   passed 于是变成了"我认为这段代码应该是对的"。
- *
- * 判定（按 acceptance-criteria.json 的 testType 分级，避免一刀切把门控变成墙）:
- *   - testType=ui   + passed + evidenceType=static → BLOCKER。纯交互断言（点击/禁用态/
- *     弹窗）不可能靠静态阅读证明，要么补 playwright/manual 证据，要么老实改成 unverifiable。
- *   - 其余 testType + passed + evidenceType=static → WARNING。集成/接口型 AC 的静态证据
- *     强度不足但仍有参考价值，且若一律阻塞会迫使大批 AC 降级成 unverifiable。
- *     （unverifiable 不阻塞门控 —— checkAcceptanceVerification 已移除比例阈值，
- *      unverifiable 由本函数与 checkPhase4Gate 降级为 WARNING 提示。）
- *
- * evidenceType 缺失按 static 处理（schema 已要求必填，缺失即未如实声明）。
- */
-function checkEvidenceQuality (storyId, avCheck, result) {
-  const ac = readJsonArtifact(storyId, ARTIFACT.ACCEPTANCE_CRITERIA)
-  if (!ac || ac._parseError) return
-
-  const testTypeById = new Map(
-    (ac.criteria || []).filter(c => c.id).map(c => [c.id, c.testType])
-  )
-  const weakNonUi = []
-
-  for (const r of avCheck.results || []) {
-    if (r.status !== 'passed') continue
-    const evidenceType = r.evidenceType || 'static'
-    if (evidenceType !== 'static') continue
-
-    if (testTypeById.get(r.id) === 'ui') {
-      result.blockers.push(structuredError(
-        'static_evidence_for_ui_ac',
-        `AC ${r.id}(testType=ui) 判为 passed 但 evidenceType=static —— 交互型验收不能只靠读代码`,
-        2,
-        `二选一: ① 用 Playwright 实跑或人工点验后把 evidenceType 改为 playwright/manual 并补运行时证据；② 把 ${r.id} 的 status 改为 unverifiable 并写明环境限制`
-      ))
-      result.passed = false
-    } else {
-      weakNonUi.push(r.id)
-    }
-  }
-
-  if (weakNonUi.length > 0) {
-    result.warnings.push(
-      `${weakNonUi.length} 条 AC 仅凭代码审读判 passed（证据强度偏弱，建议补运行时验证）: ${weakNonUi.join(', ')}`
-    )
-  }
-}
-
-/**
  * Spec-Anchored 契约回归检查
  * 验证 task-dag.json 声称的 files 是否都有对应的代码变更
  * @param {string} storyId
@@ -1251,7 +1020,6 @@ module.exports = {
   checkPhase0Gate,
   checkPhase1Gate,
   checkPhase3Gate,
-  checkPhase4Gate,
   checkContractRegression,
   matchRecoverySuggestion
 }

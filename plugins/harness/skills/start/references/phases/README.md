@@ -10,12 +10,11 @@
 | 0 | 需求分析 | `requirement-analyst` | `requirement-analysis.md` `acceptance-criteria.json` `open-questions.json` （+`prototype-analysis.md` 条件性） | `checkPhase0Gate` |
 | 1 | 任务规划 | `task-planner` | `task-dag.md` `task-dag.json` （+`figma-frame-inventory.json` 条件性） | `checkPhase1Gate` |
 | 2 | 代码开发 | `frontend-developer` | 代码变更（git diff） | `checkPhase2Gate` |
-| 3 | 代码审查 | `code-reviewer` | `code-review.json` | `checkPhase3Gate` |
-| 4 | 功能测试 | `test-engineer` | `test-report.md` `acceptance-verification.json` | `checkPhase4Gate` |
-| 5 | Git 提交 | `release-assistant` | commit + push + MR | **无门控**（见下方说明） |
-| 6 | 知识库更新 | `release-assistant` | meta.yaml 刷新 | **无门控**（见下方说明） |
-| 7 | 云端部署 | `release-assistant` | 部署 URL + 构建号 | **无门控**（见下方说明） |
-| 8 | —（终态） | — | 流程结束 | — |
+| 3 | 代码审查 | `code-reviewer` | `code-review.json`（AC 核对结论并入 issues[]） | `checkPhase3Gate` |
+| 4 | Git 提交 | `release-assistant` | commit + push + MR | **无门控**（见下方说明） |
+| 5 | 知识库更新 | `release-assistant` | meta.yaml 刷新 | **无门控**（见下方说明） |
+| 6 | 云端部署 | `release-assistant` | 部署 URL + 构建号 | **无门控**（见下方说明） |
+| 7 | —（终态） | — | 流程结束 | — |
 
 产出物清单唯一信源：`lib/state.js` 的 `PHASE_ARTIFACTS`。
 Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.js` 以 `nextAgent` 输出。

@@ -1,39 +1,29 @@
-# Phase 5 — Git 提交
+# Phase 5 — 知识库更新
 
 > 无 Phase 专属门控函数：`runGateCheck` 只跑通用三道检查（见 [README.md](./README.md)）。
-> `PHASE_ARTIFACTS[5].fileName` 为 `null`，产出物存在性检查亦被跳过 ——
-> 本 Phase 的质量靠 Agent 自律与 git hook，不靠 policy.js。
+> `PHASE_ARTIFACTS[6].fileName` 为 `null`，产出物存在性检查亦被跳过。
 
 ## 职责
 
-Agent 注册名 **`release-assistant`**（发布助手）。执行 `git add` + `commit` + `push`，并创建 MR。
+Agent 注册名 **`release-assistant`**（发布助手）。调用 `use_skill("kb-update")` 增量更新
+项目知识库文档，产出体现为 `meta.yaml` 的 hash 变化。
 
 ## 产出物
 
-commit + push + MR（无文件型产出物）。
+知识库文档更新（`meta.yaml` hash 变化），无独立文件型产出物。
 
-## 硬性约束
+## 要点
 
-| 约束 | 原因 |
+| 要点 | 说明 |
 |------|------|
-| 🚫 禁止 `--no-verify` | 跳过 pre-commit hook 等于绕过项目自己的质量门；本插件的 lint 门控只覆盖变更文件，项目 hook 可能还有别的检查 |
-| 🚫 不直接推 main / master | 除用户明确要求外，先建分支 |
-| ✅ 只 stage 本 Story 相关文件 | `git add .` 会带进无关改动；`task-dag.json` 的 `files[]` 是天然的范围参照 |
+| 增量而非重写 | `kb-update` 是增量更新；**必须保留手工批注** —— 知识库里人写的内容比机器生成的更贵 |
+| 调用成功才算完成 | `use_skill("kb-update")` 返回失败时不要把本 Phase 报成完成，门控看不出来，但 Phase 6 之后没人会回来补 |
+| 与 Phase 0 的呼应 | Phase 0 需求分析师用 `kb-query` 读知识库，本 Phase 写回去 —— 这条回路断了，下个 Story 的检索就查不到本次的经验 |
 
-推进 Phase 5→6 前，dev-pass 已在 Phase 4→5 被兜底撤销，此时 `src/` 处于不可编辑状态 ——
-若发现还需改代码，走 `--rollback` 回 Phase 2，不要设法绕过 hook。
-
-## 发布前确认（P2-4，2026-09）
-
-Phase 4→5 推进结果的 warnings 若含「⚠️ [强告警] unverifiable AC 占比 …% ≥ 50%」——
-说明过半验收标准因环境限制（无法登录的第三方系统等）未实际验证，仅代码逻辑审读通过
-（实跑曾出现 1 passed / 0 failed / 14 unverifiable 仍静默放行到部署）。
-发布与创建 MR 时必须向用户明示本 Story 的实际验证覆盖面，由用户决定是否接受后再发布。
+知识库相关 skill：`kb-init`（初始化）/ `kb-query`（检索）/ `kb-update`（增量更新）。
 
 ## 常见失败与对策
 
-- **pre-commit hook 报错**：修问题，不要 `--no-verify`。若 hook 本身坏了，
-  这是需要向用户报告的事实，不是可以静默跳过的障碍。
-- **push 被拒（非 fast-forward）**：先 `git pull --rebase`，不要 force push ——
-  force push 属于需用户确认的破坏性操作。
-- **Story 已归档却要补提交**：先 `archive-story.js <id> restore` 复档。
+- **`kb-update` 报找不到知识库**：项目可能从未 `kb-init`。这是需要如实告知用户的前置缺失，
+  不要静默跳过本 Phase。
+- **手工批注被覆盖**：说明用的是重写而非增量路径。回滚该文件后改用 `kb-update`。

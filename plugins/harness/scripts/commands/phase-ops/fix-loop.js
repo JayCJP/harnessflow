@@ -4,7 +4,7 @@
  *
  * 职责:
  *   1. 从失败 Phase 的产出物提取待修复问题（code-review.json 的 open BLOCKER 为唯一
- *      信源，其次 acceptance-verification.json 的 failed，最后 test-report.md 兜底）
+ *      唯一信源）
  *   2. 按失败源独立计数的修复预算做轮次校验（用尽 → 升级为人工介入）
  *   3. 写 fix-request.json + fix-context.md、归档本轮源产出物
  *   4. 回退到 Phase 2、按受影响文件签发限域 dev-pass、写回 e2e-state.json
@@ -74,28 +74,6 @@ function extractFixIssuesFromReview (storyDir) {
 }
 
 /**
- * 从 acceptance-verification.json 中提取 status=failed 的 AC
- *
- * @param {Object} verification - 解析后的 acceptance-verification.json 对象
- * @returns {Array<{id: string, severity: string, acId: string, description: string, suggestion: string, notes: string}>}
- *   无 results 或全通过时返回空数组
- */
-function extractFixIssuesFromVerification (verification) {
-  if (!verification || !Array.isArray(verification.results)) return []
-
-  return verification.results
-    .filter(r => r.status === 'failed')
-    .map((r, idx) => ({
-      id: `FIX-${String(idx + 1).padStart(2, '0')}`,
-      severity: 'BLOCKER',
-      acId: r.id,
-      description: `验收标准 ${r.id}: ${r.title || '未通过验收'}`,
-      suggestion: Array.isArray(r.evidence) ? r.evidence.join('; ') : (r.notes || '请根据验收标准修复相关功能'),
-      notes: r.notes || ''
-    }))
-}
-
-/**
  * 执行修复回路
  *
  * @param {Object} ctx - 上下文
@@ -133,55 +111,22 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
     sourceFile = 'code-review.json'
   }
 
-  // 如果审查报告没有 BLOCKER，尝试从 acceptance-verification.json 提取 failed
-  if (issues.length === 0) {
-    const verifyPath = path.join(storyDir, 'acceptance-verification.json')
-    if (fs.existsSync(verifyPath)) {
-      try {
-        const verification = JSON.parse(fs.readFileSync(verifyPath, 'utf-8'))
-        const failures = extractFixIssuesFromVerification(verification)
-        if (failures.length > 0) {
-          issues = failures
-          sourcePhase = 4
-          sourceFile = 'acceptance-verification.json'
-        }
-      } catch (e) { /* 解析失败，跳过 */ }
-    }
-  }
-
-  // 也尝试从 test-report.md 提取（兜底）
-  if (issues.length === 0) {
-    const testReportPath = path.join(storyDir, 'test-report.md')
-    if (fs.existsSync(testReportPath)) {
-      const testContent = fs.readFileSync(testReportPath, 'utf-8')
-      // 搜索 "需修改" 模式
-      const fixSection = testContent.match(/需修改[：:]\s*(.+)/g)
-      if (fixSection && fixSection.length > 0) {
-        issues = fixSection.map((s, idx) => ({
-          id: `FIX-${String(idx + 1).padStart(2, '0')}`,
-          severity: 'BLOCKER',
-          description: s.replace(/需修改[：:]\s*/, '').trim(),
-          suggestion: '请根据测试报告中的具体建议进行修复'
-        }))
-        sourcePhase = 4
-        sourceFile = 'test-report.md'
-      }
-    }
-  }
+  // Phase 4（功能测试）移除前，此处还有 acceptance-verification.json / test-report.md 两条兜底信源。
+  // 现修复回路只服务 Phase 3 代码审查，code-review.json 是**唯一**信源。
 
   if (issues.length === 0) {
     return {
       exitCode: 1,
       output: {
         status: 'no_issues_found',
-        message: '未在 code-review.json / acceptance-verification.json / test-report.md 中找到可修复问题',
+        message: '未在 code-review.json 中找到可修复问题',
         hint: '如果确实需要修复，请手动创建 fix-request.json'
       }
     }
   }
 
   // 2. 修复预算按失败源独立计数（code-review 与 test 各 2 次，不共享额度）
-  const MAX_FIX_ROUNDS = getMaxFixRounds(storyId, sourcePhase)
+  const MAX_FIX_ROUNDS = getMaxFixRounds(storyId)
 
   // 检查修复轮次
   const fixRequestPath = path.join(storyDir, 'fix-request.json')
@@ -195,7 +140,7 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   }
 
   if (currentRound >= MAX_FIX_ROUNDS) {
-    const sourceLabel = sourcePhase === 3 ? '代码审查 (Phase 3)' : '功能测试 (Phase 4)'
+    const sourceLabel = '代码审查 (Phase 3)'
     return {
       exitCode: 1,
       output: {
@@ -264,7 +209,7 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
 
   // 4. 生成 fix-request.json
   const fixRequest = {
-    source: sourcePhase === 3 ? 'code-review' : 'acceptance-test',
+    source: 'code-review',
     sourcePhase,
     sourceFile,
     round: nextRound,
@@ -360,7 +305,7 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   const fixContextContent = [
     `# 修复回路上下文 (第 ${nextRound}/${MAX_FIX_ROUNDS} 轮)`,
     '',
-    `> Story: ${storyId} | 来源: Phase ${sourcePhase} (${sourcePhase === 3 ? '代码审查' : '功能测试'}) | 生成时间: ${now.toISOString()}`,
+    `> Story: ${storyId} | 来源: Phase ${sourcePhase} (代码审查) | 生成时间: ${now.toISOString()}`,
     '> 本文件供下轮代码审查师/测试工程师加载，了解上轮发现的问题和本轮修复情况。',
     '',
     '## 上轮发现的问题',
@@ -423,4 +368,4 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   }
 }
 
-module.exports = { runFixLoop, extractFixIssuesFromReview, extractFixIssuesFromVerification }
+module.exports = { runFixLoop, extractFixIssuesFromReview }

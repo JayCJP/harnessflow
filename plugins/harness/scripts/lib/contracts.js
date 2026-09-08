@@ -6,7 +6,7 @@
  *     只为让既有 import 一行不动）
  *   - readJsonArtifact: Story 目录下任意 JSON 契约的统一读取
  *   - check*: acceptance-criteria / open-questions / task-dag /
- *     acceptance-verification 的结构校验，以及 AC↔Task 交叉引用校验
+ *     AC↔Task 交叉引用校验
  *
  * 用法:
  *   const { checkTaskDagJson, readJsonArtifact } = require('./contracts')
@@ -37,7 +37,6 @@ const { loadRepos } = require('./repos')
 const ACCEPTANCE_CRITERIA_FILE = ARTIFACT.ACCEPTANCE_CRITERIA
 const OPEN_QUESTIONS_FILE = ARTIFACT.OPEN_QUESTIONS
 const TASK_DAG_JSON_FILE = ARTIFACT.TASK_DAG_JSON
-const ACCEPTANCE_VERIFICATION_FILE = ARTIFACT.ACCEPTANCE_VERIFICATION
 
 /**
  * Story 原始输入契约文件名
@@ -343,86 +342,10 @@ function validateContractReferences (storyId) {
   return result
 }
 
-/**
- * 检查验收对账契约 (acceptance-verification.json) 是否全量通过
- * 所有 AC 都必须有 status=passed 且至少 1 条 evidence
- * @param {string} storyId - Story ID
- * @returns {{ exists: boolean, allPassed: boolean, results: Array, failed: Array, errors: string[] }}
- */
-function checkAcceptanceVerification (storyId) {
-  const result = { exists: false, allPassed: false, results: [], failed: [], unverifiable: [], issues: [], errors: [] }
-  const data = readJsonArtifact(storyId, ACCEPTANCE_VERIFICATION_FILE)
-
-  if (!data) {
-    // 不可达: policy.js:1023 有 exists 守卫前置，此处仅为函数被独立调用时保持语义完整
-    pushIssue(result, 'av_missing_file', `${ACCEPTANCE_VERIFICATION_FILE} 不存在`, 2, '请先产出 acceptance-verification.json')
-    return result
-  }
-  if (data._parseError) {
-    pushIssue(result, 'json_parse_error', `JSON 解析失败: ${data._parseError}`, 2, 'JSON 格式错误，请检查 acceptance-verification.json')
-    return result
-  }
-
-  result.exists = true
-
-  if (!Array.isArray(data.results)) {
-    pushIssue(result, 'ac_missing_verification', '缺少 results 数组', 4, 'acceptance-verification.json 必须有 results 数组')
-    return result
-  }
-
-  result.results = data.results
-
-  // 同时读取 AC 契约，确保覆盖率 100%
-  const acData = readJsonArtifact(storyId, ACCEPTANCE_CRITERIA_FILE)
-  const expectedACIds = (acData && !acData._parseError && Array.isArray(acData.criteria))
-    ? new Set(acData.criteria.map(c => c.id).filter(Boolean))
-    : null
-
-  const verifiedACIds = new Set()
-
-  for (let i = 0; i < data.results.length; i++) {
-    const r = data.results[i]
-    const prefix = `Result[${r.id || i}]`
-
-    if (!r.id) {
-      pushIssue(result, 'av_missing_id', `${prefix}: 缺少 id`, 2, '每条 result 必须有 id 字段（对应 AC ID）')
-      continue
-    }
-    verifiedACIds.add(r.id)
-
-    if (r.status === 'failed') {
-      result.failed.push({ id: r.id, status: r.status })
-    } else if (r.status === 'unverifiable') {
-      result.unverifiable.push({ id: r.id, status: r.status })
-    }
-
-    if (!Array.isArray(r.evidence) || r.evidence.length === 0) {
-      pushIssue(result, 'av_missing_evidence', `${prefix}: 缺少 evidence（需提供验收证据）`, 2, '每条 result 必须有 evidence 数组（至少 1 条）')
-    }
-  }
-
-  // 检查覆盖率：AC 契约中的所有条目是否都有验收结果
-  if (expectedACIds) {
-    for (const acId of expectedACIds) {
-      if (!verifiedACIds.has(acId)) {
-        pushIssue(result, 'ac_missing_verification', `AC ${acId}: 缺少验收结果`, 4, '每条验收标准必须有对应的验收结果')
-      }
-    }
-  }
-
-  // 门控通过条件：failed=0 且 errors=0（unverifiable 不阻塞，跳过即可，降级为 warning）
-  // 历史缺陷: 旧实现有 unverifiable 比例阈值（run 0.5 / fixbugs 1.0），超过即阻塞推进，
-  //   导致大量依赖授权态/联调环境的 UI 型 AC 无法验证时被卡死流程。
-  //   既然无法验证就跳过，不阻塞 —— unverifiable 结果由 policy 层降级为 warning 提示即可。
-  result.allPassed = result.failed.length === 0 && result.errors.length === 0
-  return result
-}
-
 module.exports = {
   ACCEPTANCE_CRITERIA_FILE,
   OPEN_QUESTIONS_FILE,
   TASK_DAG_JSON_FILE,
-  ACCEPTANCE_VERIFICATION_FILE,
   FIGMA_FRAME_INVENTORY_FILE,
   STORY_INPUT_FILE,
   readJsonArtifact,
@@ -430,5 +353,4 @@ module.exports = {
   checkOpenQuestions,
   checkTaskDagJson,
   validateContractReferences,
-  checkAcceptanceVerification
 }

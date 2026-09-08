@@ -4,7 +4,7 @@
  *   P0-2/P0-3  动态绝对路径（产出目录 / advanceCommand / recovery.command 无未展开占位符）
  *   P1-1       Phase 2 batch 级 prompt（多 batch 时逐 batch 下发，含 files 白名单且不内联 task 正文）
  *   P1-2       scope=incremental 窄上下文 + buildFixLoopSpawnPrompt 收编（修复请求为绝对路径）
- *   P1-3       代码检索入口按仓下发（默认注入含单仓; 存在性预判 + graphify 用法 + 无 KB 仓明示）
+ *   P1-3       代码检索入口（只下发仓目录 + /graphify skill 指引；不再逐仓预判存在性/给样例）
  *   P2-1       dispatch 预检落盘 .dispatch-precheck.json → advance 成功对账补记 preGateBlocked
  *   P2-2/P2-3  跨仓 task 校验 failureType 结构化（无 unknown）+ evidence 门控（只认含 graphify 的来源）
  *   P2-4       unverifiable ≥50% 强告警（不阻塞）
@@ -40,6 +40,7 @@ const policy = require(path.join(SCRIPTS_DIR, 'services/policy'))
 const promptBuilder = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 const { dispatch } = require(path.join(SCRIPTS_DIR, 'commands/dispatch'))
 const experience = require(path.join(SCRIPTS_DIR, 'services/experience'))
+const schemaInjector = require(path.join(SCRIPTS_DIR, 'services/schema-injector'))
 
 /**
  * 写 e2e-state.json（Phase N running）
@@ -206,18 +207,18 @@ ok('Phase 3 不注入 Figma 设计规格摘要', !incP3.agentPrompt.includes('Fi
 ok('Phase 2 仍注入 Figma 设计规格摘要（对照）', incFull.agentPrompt.includes('Figma 设计规格摘要'))
 
 // ════════════════════════════════════════════════════════════
-section('4. P1-3: 代码检索入口按仓下发（默认注入，含单仓）')
+section('4. 代码检索入口（只下发仓目录 + /graphify skill 指引）')
 
 const rsMain = path.join(SANDBOX, 'repo-main')
 const rsOther = path.join(SANDBOX, 'repo-other')
 const rsNoGraph = path.join(SANDBOX, 'repo-nograph')
-// rsMain / rsOther 有图谱（走 query 用法），rsNoGraph 无图谱（走建图引导）—— 两条分支都覆盖
+// 图谱/知识库仍造出来，是为了断言「**即使存在**也不再逐仓展开」——
+// 存在性预判与命令样例已移交给 /graphify skill，脚本只留脚本才知道的事实（目录 + cwd 规则）
 fs.mkdirSync(path.join(rsMain, 'graphify-out'), { recursive: true })
 fs.writeFileSync(path.join(rsMain, 'graphify-out', 'graph.json'), '{}')
 fs.mkdirSync(path.join(rsOther, 'graphify-out'), { recursive: true })
 fs.writeFileSync(path.join(rsOther, 'graphify-out', 'graph.json'), '{}')
 fs.mkdirSync(rsNoGraph, { recursive: true })
-// 刻意不为 rsOther 建 .docs/llm-knowledge（断言「只走 graphify + 源码精读」明示）
 
 fs.mkdirSync(storyDir('OPT-RS'), { recursive: true })
 writeState('OPT-RS', 0)
@@ -227,22 +228,28 @@ fs.writeFileSync(path.join(storyDir('OPT-RS'), 'repos.json'), JSON.stringify({
 }))
 
 const rs = promptBuilder.buildAgentPrompt({ storyId: 'OPT-RS', targetPhase: 0 })
+const rsPosix = p => p.replace(/\\/g, '/')
 ok('含「代码检索入口」段', rs.agentPrompt.includes('代码检索入口'))
-ok('主仓排在最前且标注为当前工作目录', /### main（主仓，即当前工作目录）/.test(rs.agentPrompt))
-ok('主仓给出 graphify 全量用法', /graphify path "<模块A>" "<模块B>"/.test(rs.agentPrompt) && /graphify explain/.test(rs.agentPrompt))
-ok('含 cd 绝对路径执行样例（正斜杠）', rs.agentPrompt.includes(`cd "${rsOther.replace(/\\/g, '/')}"`) && rs.agentPrompt.includes('graphify query'))
-ok('无知识库仓明示「只走 graphify + 源码精读」', /只走 graphify \+ 源码精读，不要尝试 kb-query/.test(rs.agentPrompt))
-ok('图谱存在性预判输出', /graphify-out\/graph\.json/.test(rs.agentPrompt))
-// 无图谱的仓若还教 `graphify query` 是自相矛盾（没有 graph.json 必然失败），应给建图命令
-ok('无图谱仓给建图命令而非 query', /graphify \. +# 首次/.test(rs.agentPrompt) && /graphify update \./.test(rs.agentPrompt))
-ok('无图谱仓提示建不出来就上报', /建图不可用（CLI 缺失 \/ 报错）/.test(rs.agentPrompt))
+ok('主仓排在最前',
+  rs.agentPrompt.indexOf('- main（主仓，即当前工作目录）') < rs.agentPrompt.indexOf('- other →'))
+ok('每个仓各占一行（正斜杠绝对路径）',
+  [`- main（主仓，即当前工作目录） → \`${rsPosix(rsMain)}\``,
+    `- other → \`${rsPosix(rsOther)}\``,
+    `- nograph → \`${rsPosix(rsNoGraph)}\``].every(s => rs.agentPrompt.includes(s)))
+ok('注明走 /graphify skill', rs.agentPrompt.includes('/graphify') && rs.agentPrompt.includes('graphify query'))
+ok('保留 cwd 解析提示（跨仓须先 cd，48% 空转根因）', /按 \*\*cwd\*\* 解析/.test(rs.agentPrompt))
+// 精简核心：逐仓的存在性预判 / 建图引导 / bash 样例全部移除
+ok('不再逐仓输出图谱存在性预判', !/graphify 图谱:/.test(rs.agentPrompt))
+ok('不再输出知识库存在性分支', !/只走 graphify \+ 源码精读/.test(rs.agentPrompt))
+ok('不再输出建图命令样例', !/graphify \. +# 首次/.test(rs.agentPrompt) && !/graphify update \./.test(rs.agentPrompt))
+ok('不再输出逐仓 cd 执行样例', !rs.agentPrompt.includes(`cd "${rsPosix(rsOther)}"`))
 
 const rs3 = promptBuilder.buildAgentPrompt({ storyId: 'OPT-RS', targetPhase: 3 })
 ok('Phase 3（非检索阶段）不注入检索入口', !rs3.agentPrompt.includes('代码检索入口'))
 
 // `&&` 是 PowerShell 7+ 语法，Win11 默认的 5.1 会报 "not a valid statement separator"，
-// 而子 Agent 的 tools 里有 PowerShell —— 样例自身不该再引入一次执行失败
-ok('跨仓检索样例不含 &&（PowerShell 5.1 不可用）', !rs.agentPrompt.includes('&&'))
+// 而子 Agent 的 tools 里有 PowerShell —— 任何注入的命令样例都不该引入一次执行失败
+ok('检索入口不含 &&（PowerShell 5.1 不可用）', !rs.agentPrompt.includes('&&'))
 
 // batch 段的主仓名取 repos.json 的真实 primary，不是「主仓(primary)」占位符 ——
 // 占位符在 repos.json 里查不到对应键，等于给了子 Agent 一个假名字
@@ -331,48 +338,15 @@ ok('evidence.source=graphify 通过该项门控', !gC.blockers.some(b => b.type 
   JSON.stringify(gC.blockers.map(b => b.type)))
 
 // ════════════════════════════════════════════════════════════
-section('6. P2-4: unverifiable ≥50% 强告警（不阻塞）')
-
-fs.mkdirSync(storyDir('OPT-P4'), { recursive: true })
-writeState('OPT-P4', 4)
-// Phase 4 产出物 test-report.md（避免 artifact_missing 干扰「强告警不阻塞」断言）
-fs.writeFileSync(path.join(storyDir('OPT-P4'), 'test-report.md'), '# 测试报告')
-fs.writeFileSync(path.join(storyDir('OPT-P4'), 'acceptance-verification.json'), JSON.stringify({
-  results: [
-    { id: 'AC-1', status: 'passed', evidenceType: 'api', evidence: ['正常'] },
-    { id: 'AC-2', status: 'unverifiable', evidenceType: 'static', evidence: ['环境限制'] },
-    { id: 'AC-3', status: 'unverifiable', evidenceType: 'static', evidence: ['环境限制'] },
-    { id: 'AC-4', status: 'unverifiable', evidenceType: 'static', evidence: ['环境限制'] }
-  ],
-  summary: { total: 4, passed: 1, failed: 0, unverifiable: 3 }
-}))
-const gHi = policy.runGateCheck('OPT-P4', 4, state.readStateFile('OPT-P4'))
-ok('75% unverifiable → 强告警 WARNING', gHi.warnings.some(w => /强告警.*unverifiable AC 占比 3\/4/.test(w)),
-  JSON.stringify(gHi.warnings))
-ok('unverifiable 强告警不阻塞门控', gHi.passed === true, JSON.stringify(gHi.blockers))
-
-fs.writeFileSync(path.join(storyDir('OPT-P4'), 'acceptance-verification.json'), JSON.stringify({
-  results: [
-    { id: 'AC-1', status: 'passed', evidenceType: 'api', evidence: ['正常'] },
-    { id: 'AC-2', status: 'passed', evidenceType: 'api', evidence: ['正常'] },
-    { id: 'AC-3', status: 'passed', evidenceType: 'api', evidence: ['正常'] },
-    { id: 'AC-4', status: 'passed', evidenceType: 'api', evidence: ['正常'] },
-    { id: 'AC-5', status: 'unverifiable', evidenceType: 'static', evidence: ['环境限制'] }
-  ],
-  summary: { total: 5, passed: 4, failed: 0, unverifiable: 1 }
-}))
-const gLo = policy.runGateCheck('OPT-P4', 4, state.readStateFile('OPT-P4'))
-ok('20% unverifiable → 无强告警', !gLo.warnings.some(w => /强告警/.test(w)), JSON.stringify(gLo.warnings))
-
 // ════════════════════════════════════════════════════════════
-section('7. P3-2: 检索失败上报约束注入')
+section('6. P3-2: 检索失败上报约束注入')
 
 ok('AGENT_CONSTRAINTS 含「检索失败必须上报」', promptBuilder.AGENT_CONSTRAINTS.some(c => /检索失败必须停下上报/.test(c)),
   JSON.stringify(promptBuilder.AGENT_CONSTRAINTS))
 ok('agentPrompt 约束段含检索失败上报', /检索失败必须停下上报主 Agent/.test(p0pb.agentPrompt))
 
 // ════════════════════════════════════════════════════════════
-section('8. P2-1: dispatch 预检落盘 → advance 对账补记 preGateBlocked（端到端）')
+section('7. P2-1: dispatch 预检落盘 → advance 对账补记 preGateBlocked（端到端）')
 
 // 备份全局经验库（EXPERIENCE_DIR 固定在插件目录，不随沙箱重定向）
 const fpFile = experience.FAILURE_PATTERNS_FILE
@@ -437,7 +411,7 @@ try {
 }
 
 // ════════════════════════════════════════════════════════════
-section('9. 结构化 issues: type 必须已登记在 RECOVERY_SUGGESTIONS')
+section('8. 结构化 issues: type 必须已登记在 RECOVERY_SUGGESTIONS')
 
 // 护栏: contracts.js 现在在产生处用 pushIssue 标记 failureType，policy.js 不再做
 // 字符串关键词反推。新增校验时若写了一个未登记的 type，blocker 会静默落 unknown，
@@ -475,6 +449,47 @@ ok('errors 仍是纯字符串（未破坏外部消费者）',
 ok('issues 带 type/level/resolution',
   isTd.issues.length > 0 && isTd.issues.every(i => i.type && typeof i.level === 'number' && i.resolution),
   JSON.stringify(isTd.issues))
+
+// ════════════════════════════════════════════════════════════
+section('9. ③ 方案 B: agentPrompt 注入契约 schema 骨架')
+
+const sk = schemaInjector.buildContractSchemaSection
+// 骨架必须覆盖本次 3 次违规的根因：字段类型、嵌套白名单、顶层封闭性
+const skTd = sk(1)
+ok('Phase 1 注入 task-dag.json 骨架', skTd.includes('`task-dag.json`'))
+ok('含顶层字段白名单 + 必填', /顶层 字段白名单/.test(skTd) && /顶层 必填: `tasks`/.test(skTd))
+ok('含 tasks[] 元素字段白名单', /`tasks\[\]` 元素 字段白名单/.test(skTd))
+ok('estimate 类型明示为 integer（本次 estimate: should be integer 违规）',
+  /`estimate`\(integer\)/.test(skTd), skTd.split('\n').find(l => l.includes('estimate')))
+ok('顶层与元素层都标注 additionalProperties: false',
+  (skTd.match(/additionalProperties: false/g) || []).length >= 2)
+
+const skCr = sk(3)
+ok('Phase 3 注入 code-review.json 骨架', skCr.includes('`code-review.json`'))
+ok('下探嵌套对象 summary（覆盖 summary.notes 白名单外违规）',
+  /`summary` 字段白名单/.test(skCr) && /`summary` `additionalProperties: false`/.test(skCr))
+ok('枚举取值一并给出（severity / status）',
+  /`severity`\(enum: BLOCKER\|WARNING\|SUGGESTION\)/.test(skCr) &&
+  /`status`\(enum: open\|fixed\|skipped\)/.test(skCr))
+
+ok('Phase 0 注入两个契约骨架（acceptance-criteria + open-questions）',
+  sk(0).includes('`acceptance-criteria.json`') && sk(0).includes('`open-questions.json`'))
+// Phase 2 只产出 git diff，无契约 → 不该注入，否则是噪音
+ok('Phase 2（无契约产出物）不注入骨架', sk(2) === '')
+// 无对应 schema 文件的契约（figma-frame-inventory.json）静默跳过，不占位数
+ok('无 schema 文件的契约静默跳过', !skTd.includes('figma-frame-inventory'))
+
+// 体积护栏：骨架定位是「比全文省、比只给路径有效」，单 Phase 不应失控
+ok('单 Phase 骨架不超过 2KB（成本护栏）',
+  [0, 1, 3].every(p => sk(p).length <= 2048), JSON.stringify([0, 1, 3].map(p => sk(p).length)))
+
+// 端到端：骨架确实进了 agentPrompt，且排在产出要求之后
+fs.mkdirSync(storyDir('OPT-SK'), { recursive: true })
+writeState('OPT-SK', 1)
+const skPb = promptBuilder.buildAgentPrompt({ storyId: 'OPT-SK', targetPhase: 1 })
+ok('agentPrompt 含 schema 骨架段', skPb.agentPrompt.includes('产出物 JSON Schema'))
+ok('骨架排在「产出要求」之后（先说产出什么，再说格式）',
+  skPb.agentPrompt.indexOf('## 产出要求') < skPb.agentPrompt.indexOf('产出物 JSON Schema'))
 
 // ════════════════════════════════════════════════════════════
 summarize(sandbox)

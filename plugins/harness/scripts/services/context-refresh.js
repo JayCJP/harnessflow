@@ -196,9 +196,6 @@ function getPhaseArtifacts (storyId, phase) {
           } else if (f === 'code-review.json' && Array.isArray(data.issues)) {
             const openBlockers = data.issues.filter(i => i.severity === 'BLOCKER' && i.status === 'open').length
             summary = `${data.issues.length} 个问题 (${openBlockers} 个未修复 BLOCKER)`
-          } else if (f === 'acceptance-verification.json' && data.results) {
-            const passed = data.results.filter(r => r.status === 'passed').length
-            summary = `${data.results.length} 条 (${passed} passed)`
           } else if (f === 'figma-frame-inventory.json' && data.frames) {
             summary = `${data.frames.length} 个 frame`
           }
@@ -445,10 +442,10 @@ function getContractFiles (storyId, phase) {
     1: ['.codebuddy/plans/' + storyId + '/acceptance-criteria.json', '.codebuddy/plans/' + storyId + '/task-dag.json'],
     2: ['.codebuddy/plans/' + storyId + '/task-dag.json', '.codebuddy/plans/' + storyId + '/acceptance-criteria.json'],
     3: ['.codebuddy/plans/' + storyId + '/acceptance-criteria.json'],
-    4: ['.codebuddy/plans/' + storyId + '/acceptance-criteria.json', '.codebuddy/plans/' + storyId + '/acceptance-verification.json'],
-    5: ['.codebuddy/plans/' + storyId + '/acceptance-verification.json'],
-    6: [],
-    7: []
+    // Phase 4（Git 提交）读 code-review.json —— AC 核对结论已并入该产物，提交前据此确认审查通过
+    4: ['.codebuddy/plans/' + storyId + '/code-review.json'],
+    5: [],
+    6: []
   }
   const contracts = [...(baseContracts[nextPhase] || [])]
 
