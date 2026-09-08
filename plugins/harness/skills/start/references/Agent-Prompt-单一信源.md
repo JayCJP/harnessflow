@@ -1,6 +1,6 @@
 # Agent Prompt 单一信源（理解 prompt 来源时按需读取）
 
-> 本文件从 `harness/SKILL.md` 外移（渐进式披露）。仅当需要理解「为什么 prompt 不能加工」时读取。
+> 本文件从 `start/SKILL.md` 外移（渐进式披露）。仅当需要理解「为什么 prompt 不能加工」时读取。
 
 `agentPrompt` 由 `prompt-builder.js` 统一生成，**只有一个出口**: `dispatch.js` 输出的 `agentPrompt` 字段。
 它已包含 Story ID、当前 Phase、上一 Phase 摘要、契约文件内容、历史教训、约束条款、产出物清单，

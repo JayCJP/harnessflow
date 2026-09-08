@@ -416,7 +416,7 @@ if (fixLoopFlag) {
 
 if (targetPhase === currentPhase) {
   // Phase 0 复用检测: 如果推进到 Phase 1 时 Phase 0 产出物已存在，输出提示
-  if (currentPhase === 0 && targetPhase === 0) {
+  if (currentPhase === 0) {
     const storyDir = path.join(PLANS_DIR, storyId)
     const raPath = path.join(storyDir, 'requirement-analysis.md')
     const acPath = path.join(storyDir, 'acceptance-criteria.json')
@@ -534,81 +534,79 @@ for (let p = currentPhase; p < targetPhase; p++) {
 
 if (!combinedResult.passed) {
   // 仍然失败: 记录经验 — 按 failureType 聚合，避免同根因产生大量重复记录
-  if (!combinedResult.passed) {
-    // 1. 按 failureType 聚合 blockers
-    /** @type {Map<string, {count:number, sampleRootCause:string, sampleResolution:string, levels:Set<number>}>} */
-    const aggregated = new Map()
-    for (const b of combinedResult.blockers) {
-      const failureType = errorToType(b)
-      const suggestion = policy.matchRecoverySuggestion(b)
-      const key = failureType !== 'unknown'
-        ? failureType
-        : (suggestion ? suggestion.action.split(' ')[0] || 'unknown' : 'unknown')
+  // 1. 按 failureType 聚合 blockers
+  /** @type {Map<string, {count:number, sampleRootCause:string, sampleResolution:string, levels:Set<number>}>} */
+  const aggregated = new Map()
+  for (const b of combinedResult.blockers) {
+    const failureType = errorToType(b)
+    const suggestion = policy.matchRecoverySuggestion(b)
+    const key = failureType !== 'unknown'
+      ? failureType
+      : (suggestion ? suggestion.action.split(' ')[0] || 'unknown' : 'unknown')
 
-      if (aggregated.has(key)) {
-        const entry = aggregated.get(key)
-        entry.count++
-        entry.levels.add(b.level || 2)
-      } else {
-        aggregated.set(key, {
-          count: 1,
-          sampleRootCause: errorToString(b),
-          sampleResolution: b.resolution || (suggestion ? suggestion.action : '需人工分析并补充到 RECOVERY_SUGGESTIONS'),
-          levels: new Set([b.level || 2])
-        })
-      }
-    }
-
-    // 2. 按聚合后的类型逐条记录
-    for (const [failureType, agg] of aggregated) {
-      experience.recordFailurePattern({
-        phase: currentPhase,
-        failureType,
-        rootCause: `${agg.count} 个 ${failureType} 问题 (示例: ${agg.sampleRootCause.slice(0, 200)})`,
-        resolution: agg.sampleResolution,
-        storyId,
-        blockers: combinedResult.blockers.map(b => errorToString(b))
-      })
-
-      trace.appendTrace(storyId, {
-        type: 'experience',
-        phase: String(currentPhase),
-        result: 'captured',
-        reason: failureType,
-        details: {
-          count: agg.count,
-          maxLevel: Math.max(...agg.levels),
-          sampleRootCause: agg.sampleRootCause.slice(0, 300),
-          resolution: agg.sampleResolution
-        }
+    if (aggregated.has(key)) {
+      const entry = aggregated.get(key)
+      entry.count++
+      entry.levels.add(b.level || 2)
+    } else {
+      aggregated.set(key, {
+        count: 1,
+        sampleRootCause: errorToString(b),
+        sampleResolution: b.resolution || (suggestion ? suggestion.action : '需人工分析并补充到 RECOVERY_SUGGESTIONS'),
+        levels: new Set([b.level || 2])
       })
     }
-
-    // 输出恢复建议
-    const recoveryHints = combinedResult.recoveries
-      .filter(r => r.suggestion)
-      .map(r => `  → ${r.suggestion.action} (Level ${r.suggestion.level})`)
-
-    // 职责分离: 本脚本只报「门控没过」这一事实，不输出任何下一步命令。
-    // 此前这里输出 nextAction.command / fixLoopHint（一条 --fix-loop 命令），
-    // 与 dispatch.js 的 recovery.command 是两个信源拼出的同一条命令 —— 主 Agent
-    // 面对两个都自称权威的命令串只能自行挑一个（判断权回流）。
-    // 现在一律回 Step 1: dispatch.js 会按 status 给出 recovery.command（唯一信源）。
-    emit({
-      success: false,
-      storyId,
-      targetPhase,
-      targetPhaseName: getPhaseName(targetPhase),
-      gatePassed: false,
-      // 只留结构化形态（含 type / message / level / resolution），
-      // 旧的 blockers 字符串数组是它的 map 派生，同一份数据两种形态无意义
-      structuredBlockers: combinedResult.blockers,
-      warnings: combinedResult.warnings,
-      recoverySuggestions: recoveryHints.length > 0 ? recoveryHints : undefined,
-      hint: '推进被门控阻断。修复 structuredBlockers 后重新执行 dispatch.js 取下一步指令（本脚本不输出任何命令）'
-    })
-    process.exit(1)
   }
+
+  // 2. 按聚合后的类型逐条记录
+  for (const [failureType, agg] of aggregated) {
+    experience.recordFailurePattern({
+      phase: currentPhase,
+      failureType,
+      rootCause: `${agg.count} 个 ${failureType} 问题 (示例: ${agg.sampleRootCause.slice(0, 200)})`,
+      resolution: agg.sampleResolution,
+      storyId,
+      blockers: combinedResult.blockers.map(b => errorToString(b))
+    })
+
+    trace.appendTrace(storyId, {
+      type: 'experience',
+      phase: String(currentPhase),
+      result: 'captured',
+      reason: failureType,
+      details: {
+        count: agg.count,
+        maxLevel: Math.max(...agg.levels),
+        sampleRootCause: agg.sampleRootCause.slice(0, 300),
+        resolution: agg.sampleResolution
+      }
+    })
+  }
+
+  // 输出恢复建议
+  const recoveryHints = combinedResult.recoveries
+    .filter(r => r.suggestion)
+    .map(r => `  → ${r.suggestion.action} (Level ${r.suggestion.level})`)
+
+  // 职责分离: 本脚本只报「门控没过」这一事实，不输出任何下一步命令。
+  // 此前这里输出 nextAction.command / fixLoopHint（一条 --fix-loop 命令），
+  // 与 dispatch.js 的 recovery.command 是两个信源拼出的同一条命令 —— 主 Agent
+  // 面对两个都自称权威的命令串只能自行挑一个（判断权回流）。
+  // 现在一律回 Step 1: dispatch.js 会按 status 给出 recovery.command（唯一信源）。
+  emit({
+    success: false,
+    storyId,
+    targetPhase,
+    targetPhaseName: getPhaseName(targetPhase),
+    gatePassed: false,
+    // 只留结构化形态（含 type / message / level / resolution），
+    // 旧的 blockers 字符串数组是它的 map 派生，同一份数据两种形态无意义
+    structuredBlockers: combinedResult.blockers,
+    warnings: combinedResult.warnings,
+    recoverySuggestions: recoveryHints.length > 0 ? recoveryHints : undefined,
+    hint: '推进被门控阻断。修复 structuredBlockers 后重新执行 dispatch.js 取下一步指令（本脚本不输出任何命令）'
+  })
+  process.exit(1)
 }
 
 // ========================

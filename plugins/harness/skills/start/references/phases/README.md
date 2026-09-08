@@ -1,6 +1,6 @@
 # 8 Phase 流水线索引（按需读取）
 
-> 本目录从 `harness/SKILL.md` 与已归档的旧 skill 附录 A/B/D 外移。
+> 本目录从 `start/SKILL.md` 与已归档的旧 skill 附录 A/B/D 外移。
 > **不要整目录通读**：`advance-phase.js` 在 Phase N→N+1 报门控失败时，只读 `phase-N.md`。
 
 ## 总表

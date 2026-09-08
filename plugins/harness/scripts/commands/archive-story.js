@@ -202,11 +202,11 @@ function cmdArchive (storyId, opts) {
   const storyDir = getStoryDir(storyId)
 
   // 2. 防重复归档：root 为空即已归档
+  // rootFiles 仅含文件（readdirSync + isFile 过滤），archive/ 是目录，天然不在其中，
+  // 无需再排除——真正排除 archive/ 目录的递归扫描在下文 scanAllFiles(storyDir, [ARCHIVE_DIR]) 完成。
   const rootFiles = fs.readdirSync(storyDir, { withFileTypes: true })
     .filter(e => e.isFile())
-  const hasArchiveDir = rootFiles.some(e => e.name === ARCHIVE_DIR)
-  const actualFiles = rootFiles.filter(e => e.name !== ARCHIVE_DIR || !hasArchiveDir)
-  if (actualFiles.length === 0) {
+  if (rootFiles.length === 0) {
     emit(storyId, {
       error: 'Story 已归档（root 目录无文件），禁止重复归档',
       hint: '如需重新归档，请先执行 restore 复档'

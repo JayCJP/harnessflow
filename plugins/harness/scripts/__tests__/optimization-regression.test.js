@@ -382,21 +382,31 @@ try {
   fs.mkdirSync(storyDir('OPT-PG'), { recursive: true })
   writeState('OPT-PG', 0)
 
-  // 1. Phase 0 无产出物 → dispatch 预检不通过 → pendingBlockers 落盘
+  // 产出物齐全，但 open-questions 含阻塞级待确认项 → dispatch 预检失败于 blocking_unresolved。
+  // 必须用真实 blocker（非 artifact_missing）：reconcile 有意排除 artifact_missing —— 首次派单产出物
+  // 未落盘是「还没做」而非「做了但没过门控」，不该沉淀 preGateBlocked；只有真实 blocker 修复后才补记。
+  fs.writeFileSync(path.join(storyDir('OPT-PG'), 'requirement-analysis.md'), '# 需求分析')
+  fs.writeFileSync(path.join(storyDir('OPT-PG'), 'open-questions.json'),
+    JSON.stringify({ questions: [{ id: 'Q-1', question: '阻塞级待确认项', resolved: false, blocking: true }] }))
+  writeAC('OPT-PG')
+
+  // 1. dispatch 预检：因阻塞级待确认项失败 → pendingBlockers 落盘 .dispatch-precheck.json
   const pgd = dispatch('OPT-PG')
-  ok('预检不通过时输出 pendingBlockers', Array.isArray(pgd.pendingBlockers) && pgd.pendingBlockers.length > 0,
+  ok('预检因真实 blocker 失败并输出 pendingBlockers',
+    Array.isArray(pgd.pendingBlockers) && pgd.pendingBlockers.length > 0,
     JSON.stringify(pgd.pendingBlockers))
   const precheckPath = path.join(storyDir('OPT-PG'), '.dispatch-precheck.json')
   ok('.dispatch-precheck.json 已落盘', fs.existsSync(precheckPath))
   if (fs.existsSync(precheckPath)) {
     const pc = JSON.parse(fs.readFileSync(precheckPath, 'utf-8'))
-    ok('落盘内容含 blockers 快照', Array.isArray(pc.blockers) && pc.blockers.length > 0 && pc.phase === 0)
+    ok('落盘 blockers 为非 artifact_missing 的真实类型',
+      Array.isArray(pc.blockers) && pc.blockers.length > 0 && pc.phase === 0 &&
+      pc.blockers.every(b => (b.type || 'unknown') !== 'artifact_missing'),
+      JSON.stringify((pc.blockers || []).map(b => b.type || 'unknown')))
   }
 
-  // 2. 补齐 Phase 0 产出物 → advance 推进成功 → 对账补记 preGateBlocked 并清除留痕
-  fs.writeFileSync(path.join(storyDir('OPT-PG'), 'requirement-analysis.md'), '# 需求分析')
+  // 2. 修复阻塞项（清空 open-questions）→ advance 推进成功 → 对账补记 preGateBlocked 并清除留痕
   fs.writeFileSync(path.join(storyDir('OPT-PG'), 'open-questions.json'), JSON.stringify({ questions: [] }))
-  writeAC('OPT-PG')
   const advPG = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'commands/advance-phase.js'), 'OPT-PG', '1'], {
     encoding: 'utf-8',
     env: { ...process.env, CODEBUDDY_PROJECT_DIR: SANDBOX, CLAUDE_PROJECT_DIR: SANDBOX }
@@ -409,8 +419,9 @@ try {
   if (outPG && outPG.success === true) {
     ok('.dispatch-precheck.json 已被对账清除', !fs.existsSync(precheckPath))
     const fp = JSON.parse(fs.readFileSync(fpFile, 'utf-8'))
-    const preGate = fp.patterns.find(p => p.failureType === 'preGateBlocked' && p.phase === 0 &&
-      String(p.rootCause || '').includes('OPT-PG') === false ? true : String(p.storyId) === 'OPT-PG' || String(p.rootCause || '').includes('dispatch 预检曾报'))
+    const preGate = fp.patterns.find(p =>
+      p.failureType === 'preGateBlocked' && p.phase === 0 &&
+      (String(p.storyId) === 'OPT-PG' || String(p.rootCause || '').includes('OPT-PG')))
     ok('failure-patterns.json 补记 preGateBlocked', !!preGate,
       JSON.stringify(fp.patterns.filter(p => p.failureType === 'preGateBlocked').map(p => p.phase)))
   }

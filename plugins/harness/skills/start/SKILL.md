@@ -1,14 +1,15 @@
 ---
-name: harness
+name: start
 description: >
-  Harness 工作流执行器 — 8 Phase 端到端流水线（Bug 分析 → 需求分析 → 任务规划 →
+  Start — Harness 工作流执行器（启动/推进 8 Phase 流水线：Bug 分析 → 需求分析 → 任务规划 →
   代码开发 → 审查 → 测试 → 部署）。两条入口：新建工作流（识别 run / fixbugs 意图、
   写 story-input.json、启动）与继续编排（已有工作流中途恢复）。
   用户说「做个需求 / 开发功能 / 实现某页面」「修 bug / 处理 TAPD 缺陷 / 某功能报错」
-  「继续 / 恢复某个 Story」，或直接调用 /harness 时使用本 skill。
+  「继续 / 恢复某个 Story」，或直接调用 /start 时使用本 skill。
+  如需结束/取消当前工作流的激活状态，使用 /end skill。
 ---
 
-# Harness — 工作流执行器
+# Start — Harness 工作流执行器
 
 > **渐进式披露**：本文档只保留两件必用内容 —— **入口判模**与**三步循环骨架**。
 > 条件性内容已外移到 `references/`：新建工作流与 story-input schema（`启动入口.md`）、

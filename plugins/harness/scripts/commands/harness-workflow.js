@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * harness-workflow.js — /harness 模式激活与关闭（dev-pass 门控总开关）
+ * harness-workflow.js — /start 模式激活与关闭（dev-pass 门控总开关）
  *
  * 职责:
  *   - 通过 .codebuddy/plans/.harness-active 标记文件控制 harness 模式的激活/关闭
@@ -22,17 +22,17 @@
  *                   与 --mode 冲突或 schema 不符时拒绝启动，不写标记文件
  *
  * 使用场景:
- *   - 用户输入 /harness 时主 Agent 执行 start：开启 dev-pass 强制校验（此后编辑 src/ 需持 pass），
+ *   - 用户输入 /start 时主 Agent 执行 start：开启 dev-pass 强制校验（此后编辑 src/ 需持 pass），
  *     同时建好工作流状态文件
  *   - harness skill 入口 A 的两步初始化：先写 story-input.json，再 start --input 一步建流
- *   - 工作流走到 Phase 7 完成、归档收尾后，用户执行 /harness end，主 Agent 调用 end 删除标记，
+ *   - 工作流走到 Phase 7 完成、归档收尾后，用户执行 /end，主 Agent 调用 end 删除标记，
  *     解除编辑限制
  *   - 主 Agent 或用户想确认「harness 是否还开着、当前 Story 停在哪一 Phase、涉及哪些仓库」时执行 status
- *   - 已有 Story 未走 /harness 激活流程时，可直接用 start 补一次激活；若已激活则拒绝并提示先 end
+ *   - 已有 Story 未走 /start 激活流程时，可直接用 start 补一次激活；若已激活则拒绝并提示先 end
  *
  * 说明:
  *   - 设计思路:
- *       - 用户输入 /harness 时，AI 调用 `start` 创建标记文件
+ *       - 用户输入 /start 时，AI 调用 `start` 创建标记文件
  *       - enforce-dev-pass.js 检查标记文件：有 → 需 dev-pass，无 → 直接放行
  *       - 工作流完成后，AI 调用 `end` 删除标记文件
  *       - 标记文件内容记录当前 activated story，方便 status 查询
@@ -158,7 +158,7 @@ function cmdStart (storyId, title, mode, opts = {}) {
     }, { source: 'harness-workflow.js start' })
     console.log(JSON.stringify({
       ok: false,
-      message: `⚠️ Harness 模式已激活 (storyId: ${existing.storyId} "${existing.title}")，请先执行 /harness end 结束当前工作流`,
+      message: `⚠️ Harness 模式已激活 (storyId: ${existing.storyId} "${existing.title}")，请先执行 /end 结束当前工作流`,
       current: existing
     }))
     return 0
@@ -326,7 +326,7 @@ function main (argv) {
 
     default:
       console.log([
-        '/harness 工作流管理脚本',
+        '/start 工作流管理脚本',
         '',
         '用法:',
         '  node harness-workflow.js start <storyId> "<标题>" [--mode=run|fixbugs] [--input <file>]   激活 harness 模式',
@@ -337,7 +337,7 @@ function main (argv) {
         '  --input <file>   建流前摄入 story-input.json，原型/Figma 判定一次算准（免去 --refresh-input）；',
         '                   文件内的 mode 为准，与 --mode 冲突则拒绝启动',
         '',
-        '详细文档见: CODEBUDDY.md § /harness 工作流'
+        '详细文档见: CODEBUDDY.md § /start 工作流'
       ].join('\n'))
       return 1
   }
