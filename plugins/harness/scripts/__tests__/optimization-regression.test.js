@@ -6,12 +6,12 @@
  *   P1-2       scope=incremental 窄上下文 + buildFixLoopSpawnPrompt 收编（修复请求为绝对路径）
  *   P1-3       代码检索入口（只下发仓目录 + /graphify skill 指引；不再逐仓预判存在性/给样例）
  *   P2-1       dispatch 预检落盘 .dispatch-precheck.json → advance 成功对账补记 preGateBlocked
- *   P2-2/P2-3  跨仓 task 校验 failureType 结构化（无 unknown）+ evidence 门控（只认含 graphify 的来源）
+ *   P2-2      跨仓 task 校验 failureType 结构化（无 unknown）+ 行号引用门控
  *   P2-4       unverifiable ≥50% 强告警（不阻塞）
  *   P3-2       「检索失败必须上报」约束注入 agentPrompt
  *
  * 用户裁定（v3）: P0-1（D7 分支校验）与 P3-4（探测预算）不做，故无对应用例；
- *   P2-3 门控只接受 source 含 graphify（graphify/both 通过，kb/grep 单独不满足）。
+ *   evidence 门控（原 P2-3 强制 source 含 graphify）已移除，graphify 仅作 prompt 提示。
  *
  * 无外部依赖，用临时沙箱（同时覆盖 CODEBUDDY/CLAUDE_PROJECT_DIR），跑完自动清理。
  * P2-1 的端到端用例会写全局 failure-patterns.json（EXPERIENCE_DIR 固定在插件目录、
@@ -278,9 +278,9 @@ ok('单仓检索入口含 graphify query 用法', /graphify query "<模块\/关�
 ok('单仓不出现 cd 样例（cwd 已在主仓）', !single.agentPrompt.includes('cd "'))
 
 // ════════════════════════════════════════════════════════════
-section('5. P2-2/P2-3: failureType 结构化 + evidence 门控（v3 只认 graphify）')
+section('5. P2-2: failureType 结构化 + 跨仓行号引用门控')
 
-// 场景 A: 跨仓 task 缺 repoPath / 缺 description / 缺 evidence → 结构化 type，无 unknown
+// 场景 A: 跨仓 task 缺 repoPath / 缺 description → 结构化 type，无 unknown
 fs.mkdirSync(storyDir('OPT-TD'), { recursive: true })
 writeState('OPT-TD', 1)
 writeAC('OPT-TD')
@@ -294,48 +294,8 @@ const gA = policy.runGateCheck('OPT-TD', 1, state.readStateFile('OPT-TD'))
 const typesA = gA.blockers.map(b => b.type)
 ok('缺 repoPath → task_missing_repo_path', typesA.includes('task_missing_repo_path'), JSON.stringify(typesA))
 ok('缺 description → task_missing_description', typesA.includes('task_missing_description'), JSON.stringify(typesA))
-ok('缺 evidence → task_missing_evidence', typesA.includes('task_missing_evidence'), JSON.stringify(typesA))
+ok('缺 evidence 不再卡门控（graphify 仅作 prompt 提示）', !typesA.includes('task_missing_evidence'), JSON.stringify(typesA))
 ok('blockers 无 unknown 类型（P2-2）', !typesA.includes('unknown'), JSON.stringify(typesA))
-
-// 场景 B: v3 收紧 —— evidence.source='kb' 单独不满足门控
-fs.writeFileSync(path.join(storyDir('OPT-TD'), 'task-dag.json'), JSON.stringify({
-  tasks: [
-    {
-      id: 'task-1',
-      title: '跨仓改动',
-      description: '改 L10-L20',
-      files: ['src/x.js'],
-      acceptanceCriteria: ['AC-1'],
-      parallelizable: false,
-      project: 'other',
-      repoPath: rsOther,
-      evidence: { source: 'kb', ref: 'kb 文档' }
-    }
-  ]
-}))
-const gB = policy.runGateCheck('OPT-TD', 1, state.readStateFile('OPT-TD'))
-ok('evidence.source=kb 单独不通过（v3 只认 graphify）', gB.blockers.some(b => b.type === 'task_missing_evidence'),
-  JSON.stringify(gB.blockers.map(b => b.type)))
-
-// 场景 C: source='graphify' + ref → evidence 项通过
-fs.writeFileSync(path.join(storyDir('OPT-TD'), 'task-dag.json'), JSON.stringify({
-  tasks: [
-    {
-      id: 'task-1',
-      title: '跨仓改动',
-      description: '改 L10-L20',
-      files: ['src/x.js'],
-      acceptanceCriteria: ['AC-1'],
-      parallelizable: false,
-      project: 'other',
-      repoPath: rsOther,
-      evidence: { source: 'graphify', ref: 'graphify query "登录模块"' }
-    }
-  ]
-}))
-const gC = policy.runGateCheck('OPT-TD', 1, state.readStateFile('OPT-TD'))
-ok('evidence.source=graphify 通过该项门控', !gC.blockers.some(b => b.type === 'task_missing_evidence'),
-  JSON.stringify(gC.blockers.map(b => b.type)))
 
 // ════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════

@@ -156,12 +156,6 @@ const RECOVERY_SUGGESTIONS = {
     action: '跨项目 task 必须有 description 字段（含行号引用），便于开发 Agent 定位改动点',
     autoFixable: false
   },
-  // Phase 1→2: 跨项目 task 缺少 graphify 检索证据（P2-3: evidence 门控，只认含 graphify 的来源）
-  task_missing_evidence: {
-    level: 2,
-    action: '跨项目 task 必须提供 evidence 字段（{ source, ref }），且 source 必须含 graphify（graphify 或 both；kb/grep 单独不满足）——证明已在目标仓真实执行过 graphify 检索。ref 填实际执行的 query 或命中的文档路径',
-    autoFixable: false
-  },
   // Phase 1→2: acceptanceCriteria 空数组
   empty_ac_ref: {
     level: 2,
@@ -275,7 +269,6 @@ function matchRecoverySuggestion (blocker) {
   if (lower.includes('阻塞级待确认') || lower.includes('blocking')) return RECOVERY_SUGGESTIONS.blocking_unresolved
   if (lower.includes('acceptance-criteria') && lower.includes('缺少')) return RECOVERY_SUGGESTIONS.ac_format_error
   if (lower.includes('缺少 title') || lower.includes('"name"')) return RECOVERY_SUGGESTIONS.task_missing_title
-  if (lower.includes('evidence')) return RECOVERY_SUGGESTIONS.task_missing_evidence
   if (lower.includes('blocker')) return RECOVERY_SUGGESTIONS.code_review_blocker
   if (lower.includes('acceptancecriteria') && lower.includes('空')) return RECOVERY_SUGGESTIONS.empty_ac_ref
   if (lower.includes('行号引用') || lower.includes('line 45') || lower.includes('l123')) return RECOVERY_SUGGESTIONS.task_missing_line_ref
@@ -419,8 +412,9 @@ function checkResourceIntegrity (storyId, phaseNum, state, result) {
   // 前提: 仅跨仓场景提示。单仓时检索需求随 Story 而异（在空目录新建一个静态页这类 Story
   // 本就没有既有代码可查），对每条单仓 Story 都提示「未做知识库检索」属于无差别噪音 ——
   // 脚本只检测「有没有调用」，判断不了「该不该调用」（2026-09 修正）。
-  // 跨仓场景不需要这条告警兜底: contracts.js 对跨仓 task 有 evidence 硬门控
-  // （source 必须含 graphify），缺检索会直接卡门控，而不是只扣 Evo Score。
+  // 跨仓场景的检索要求已下沉到 agent prompt（kb-query ∥ graphify 双源交叉验证），
+  // 由主 Agent 引导执行；脚本只检测「有没有调用」，判断不了「该不该调用」
+  // （2026-09 修正），故仅作软性 WARNING 放行并记 debt。
   const kbCalls = toolCalls.filter(e => e.skill === 'kb-query' || e.skill === 'graphify')
   const isMultiRepo = Object.keys(loadRepos(storyId).repos || {}).length > 1
   if (kbCalls.length === 0 && isMultiRepo) {

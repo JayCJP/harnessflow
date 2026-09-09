@@ -20,7 +20,7 @@
  *   - 所有 check* 都返回结构化结果（不抛异常），由调用方决定是阻塞还是告警：
  *     这是「门控只裁定、不写状态」的前提。
  *   - 读不到文件返回 null、解析失败返回 `{ _parseError }`，调用方按此区分。
- *   - checkTaskDagJson 里的跨项目 task 校验（repoPath / 行号引用 / graphify evidence）
+ *   - checkTaskDagJson 里的跨项目 task 校验（repoPath / 行号引用）
  *     是 2026-09 陆续补上的门控，起因是跨仓改动多次落到错误的仓库。
  */
 
@@ -234,19 +234,6 @@ function checkTaskDagJson (storyId) {
         pushIssue(result, 'task_missing_description', `${prefix}: 跨项目 task 必须有 description 字段`, 2, '跨项目 task 必须有 description 字段（含行号引用）')
       } else if (!/L\d+/i.test(desc) && !/\bline\s*\d+/i.test(desc)) {
         pushIssue(result, 'task_missing_line_ref', `${prefix}: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）`, 2, '跨项目 task 的 description 必须包含行号引用（如 L123 或 line 45）')
-      }
-    }
-
-    // P2-3（2026-09）: 跨项目 task 强制检索证据 —— evidence.source 必须含 graphify。
-    // 门控「查产出物、不查过程」：只有真实在目标仓执行过 graphify 检索才拿得到 evidence，
-    // 对标行号引用门控；kb/grep 单独不满足（v3 裁定：只用 graphify 倒逼真执行）
-    if (task.project && task.project !== repos.primary) {
-      const ev = task.evidence
-      const sourceOk = ev && typeof ev.source === 'string' && ev.source.includes('graphify')
-      if (!sourceOk) {
-        pushIssue(result, 'task_missing_evidence', `${prefix}: 跨项目 task 必须提供 evidence 字段（{ source: 'graphify'|'both', ref: '<实际 query 或文档路径>' }），source 必须含 graphify（kb/grep 单独不满足）—— 证明已在目标仓执行过 graphify 检索`, 2, '跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索')
-      } else if (!ev.ref || typeof ev.ref !== 'string') {
-        pushIssue(result, 'task_missing_evidence', `${prefix}: 跨项目 task 的 evidence.ref 不能为空（填实际执行的 graphify query 或命中的文档路径）`, 2, '跨项目 task 必须提供 evidence（{ source, ref }，source 必须含 graphify），证明已在目标仓执行过 graphify 检索')
       }
     }
   }

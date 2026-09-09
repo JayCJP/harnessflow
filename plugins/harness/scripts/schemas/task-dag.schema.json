@@ -64,7 +64,7 @@
               "source": {
                 "type": "string",
                 "enum": ["graphify", "kb", "both", "grep"],
-                "description": "检索证据来源。枚举保留 4 值用于记录真实检索途径；跨仓 task 的门控要求 source 必须含 graphify（graphify/both 通过，kb/grep 单独不满足，v3 裁定）"
+                "description": "检索证据来源，记录真实检索途径（可选；不再强制特定来源，graphify 仅作 prompt 提示）"
               },
               "ref": {
                 "type": "string",
@@ -73,7 +73,7 @@
               }
             },
             "additionalProperties": false,
-            "description": "检索证据（跨仓 task 门控必填）——对标行号引用门控：查产出物、不查过程，倒逼在目标仓真实执行过 graphify 检索"
+            "description": "检索证据——记录该 task 的检索途径与依据，便于追溯改动定位（可选，不强制）"
           }
         },
         "additionalProperties": false
