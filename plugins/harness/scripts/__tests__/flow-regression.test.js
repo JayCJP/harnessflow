@@ -85,7 +85,7 @@ fs.writeFileSync(path.join(dir4a, 'task-dag.json'), JSON.stringify({
 }))
 fs.writeFileSync(path.join(dir4a, 'acceptance-criteria.json'), JSON.stringify({
   featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
-  criteria: [{ id: 'AC-1', description: '验收', testType: 'ui' }]
+  criteria: [{ id: 'AC-1', description: '验收' }]
 }))
 // 刻意不写 figma-frame-inventory.json
 const g1 = policy.runGateCheck('FG1-MISS', 1, state.readStateFile('FG1-MISS'))
@@ -109,7 +109,7 @@ fs.writeFileSync(path.join(dir4b, 'task-dag.json'), JSON.stringify({
 }))
 fs.writeFileSync(path.join(dir4b, 'acceptance-criteria.json'), JSON.stringify({
   featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
-  criteria: [{ id: 'AC-1', description: '验收', testType: 'ui' }]
+  criteria: [{ id: 'AC-1', description: '验收' }]
 }))
 // frame 缺 link（不完整）
 fs.writeFileSync(path.join(dir4b, 'figma-frame-inventory.json'), JSON.stringify({ frames: [{ id: '3020:1', name: 'A', type: 'dialog' }] }))
@@ -134,7 +134,7 @@ fs.writeFileSync(path.join(dir4c, 'task-dag.json'), JSON.stringify({
 }))
 fs.writeFileSync(path.join(dir4c, 'acceptance-criteria.json'), JSON.stringify({
   featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
-  criteria: [{ id: 'AC-1', description: '验收', testType: 'ui' }]
+  criteria: [{ id: 'AC-1', description: '验收' }]
 }))
 fs.writeFileSync(path.join(dir4c, 'figma-frame-inventory.json'), JSON.stringify({ frames: [{ id: '3020:1', name: 'A', type: 'dialog', link: 'https://figma.com/node/3020:1' }] }))
 const g3 = policy.runGateCheck('FG1-OK', 1, state.readStateFile('FG1-OK'))

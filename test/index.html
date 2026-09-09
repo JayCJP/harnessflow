@@ -133,6 +133,45 @@
       font-size: 14px;
       padding: 24px 0;
     }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .tabs .tab {
+      flex: 1;
+      height: 36px;
+      font-size: 14px;
+      color: #666;
+      background: #f5f6f8;
+      border: 1px solid #ececec;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+    }
+
+    .tabs .tab:hover {
+      background: #eef4fb;
+    }
+
+    .tabs .tab.active {
+      color: #4a90d9;
+      background: #eaf3fc;
+      border-color: #4a90d9;
+      font-weight: 600;
+    }
+
+    .tabs .tab .count {
+      margin-left: 4px;
+      font-size: 12px;
+      color: #aaa;
+    }
+
+    .tabs .tab.active .count {
+      color: #4a90d9;
+    }
   </style>
 </head>
 <body>
@@ -143,6 +182,14 @@
     <div class="input-row">
       <input id="todo-input" type="text" placeholder="输入待办事项" aria-label="待办事项输入框" />
       <button id="add-btn" type="button" aria-label="添加待办">添加</button>
+    </div>
+
+    <!-- 状态切换 Tab：全部 / 未完成 / 已完成 -->
+    <!-- 无障碍语义：容器 role=tablist，每个 tab 按钮 role=tab + aria-controls 指向列表容器，aria-selected 由 render 维护 -->
+    <div class="tabs" id="tabs" role="tablist" aria-label="待办状态筛选">
+      <button class="tab active" data-filter="all" type="button" role="tab" aria-controls="todo-list" aria-selected="true" aria-label="查看全部待办">全部<span class="count" id="count-all">0</span></button>
+      <button class="tab" data-filter="active" type="button" role="tab" aria-controls="todo-list" aria-selected="false" aria-label="查看未完成待办">未完成<span class="count" id="count-active">0</span></button>
+      <button class="tab" data-filter="completed" type="button" role="tab" aria-controls="todo-list" aria-selected="false" aria-label="查看已完成待办">已完成<span class="count" id="count-completed">0</span></button>
     </div>
 
     <!-- 待办列表容器 -->
@@ -161,30 +208,74 @@
     /** 自增 id，用于唯一标识每条待办 */
     let nextId = 1;
 
+    /** 当前 Tab 筛选状态：'all' 全部 / 'active' 未完成 / 'completed' 已完成 */
+    let currentFilter = 'all';
+
     /** 输入框 DOM 引用 */
     const inputEl = document.getElementById('todo-input');
     /** 添加按钮 DOM 引用 */
     const addBtnEl = document.getElementById('add-btn');
     /** 列表容器 DOM 引用 */
     const listEl = document.getElementById('todo-list');
+    /** Tab 容器 DOM 引用 */
+    const tabsEl = document.getElementById('tabs');
 
     /**
-     * 渲染函数：依据 todos 数组重新渲染整个待办列表。
-     * 空列表时展示空态提示文案。
+     * 根据当前 Tab 筛选条件返回需要展示的待办子集。
+     * @returns {Array<{id: number, text: string, completed: boolean}>} 筛选后的待办列表
+     */
+    function getVisibleTodos() {
+      if (currentFilter === 'active') {
+        return todos.filter(function (t) {
+          return !t.completed;
+        });
+      }
+      if (currentFilter === 'completed') {
+        return todos.filter(function (t) {
+          return t.completed;
+        });
+      }
+      return todos;
+    }
+
+    /**
+     * 渲染函数：依据当前筛选状态渲染待办列表，并刷新各 Tab 计数与高亮。
+     * 当前筛选下无待办时展示对应的空态提示文案。
      * @returns {void}
      */
     function render() {
       listEl.innerHTML = '';
 
-      if (todos.length === 0) {
+      // 刷新各 Tab 数量徽标
+      document.getElementById('count-all').textContent = todos.length;
+      document.getElementById('count-active').textContent = todos.filter(function (t) {
+        return !t.completed;
+      }).length;
+      document.getElementById('count-completed').textContent = todos.filter(function (t) {
+        return t.completed;
+      }).length;
+
+      // 高亮当前激活 Tab，并同步无障碍 aria-selected 状态
+      const tabBtns = tabsEl.querySelectorAll('.tab');
+      tabBtns.forEach(function (btn) {
+        const isActive = btn.dataset.filter === currentFilter;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+
+      const visible = getVisibleTodos();
+
+      if (visible.length === 0) {
         const empty = document.createElement('li');
         empty.className = 'empty-tip';
-        empty.textContent = '暂无待办事项';
+        empty.textContent =
+          currentFilter === 'active' ? '没有未完成的待办' :
+          currentFilter === 'completed' ? '还没有已完成的待办' : '暂无待办事项';
         listEl.appendChild(empty);
         return;
       }
 
-      todos.forEach((todo) => {
+      visible.forEach((todo) => {
         const item = document.createElement('li');
         item.className = 'todo-item' + (todo.completed ? ' completed' : '');
 
@@ -217,6 +308,22 @@
         item.appendChild(delBtn);
         listEl.appendChild(item);
       });
+    }
+
+    /**
+     * 切换 Tab 筛选状态：更新 currentFilter 并重新渲染。
+     * 对非法筛选值（非 'all'/'active'/'completed'）做防御性兜底，回退为 'all'，
+     * 避免 currentFilter 进入非法态导致 getVisibleTodos 语义错乱。
+     * @param {string} filter 目标筛选值：'all' / 'active' / 'completed'
+     * @returns {void}
+     */
+    function switchFilter(filter) {
+      var VALID_FILTERS = ['all', 'active', 'completed'];
+      if (VALID_FILTERS.indexOf(filter) === -1) {
+        filter = 'all';
+      }
+      currentFilter = filter;
+      render();
     }
 
     /**
@@ -261,6 +368,53 @@
       });
       render();
     }
+
+    // Tab 点击切换筛选状态
+    tabsEl.addEventListener('click', function (event) {
+      const btn = event.target.closest('.tab');
+      if (btn) {
+        switchFilter(btn.dataset.filter);
+      }
+    });
+
+    /**
+     * 键盘切换 Tab：焦点位于 tab 按钮上时，ArrowRight/ArrowLeft 在 tab 间循环移动，
+     * Home 跳到首个、End 跳到末个；切换后调用统一的 switchFilter() 并手动 focus 目标按钮。
+     * 注意：键盘路径直接调 switchFilter() 而非派发 click，避免与 click 委托重复触发。
+     * @returns {void}
+     */
+    tabsEl.addEventListener('keydown', function (event) {
+      const tabBtns = Array.prototype.slice.call(tabsEl.querySelectorAll('.tab'));
+      const currentIndex = tabBtns.findIndex(function (btn) {
+        return btn.dataset.filter === currentFilter;
+      });
+      if (currentIndex === -1) {
+        return;
+      }
+
+      let targetIndex = -1;
+      switch (event.key) {
+        case 'ArrowRight':
+          targetIndex = (currentIndex + 1) % tabBtns.length;
+          break;
+        case 'ArrowLeft':
+          targetIndex = (currentIndex - 1 + tabBtns.length) % tabBtns.length;
+          break;
+        case 'Home':
+          targetIndex = 0;
+          break;
+        case 'End':
+          targetIndex = tabBtns.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      const targetBtn = tabBtns[targetIndex];
+      switchFilter(targetBtn.dataset.filter);
+      targetBtn.focus();
+    });
 
     // 点击「添加」按钮触发添加
     addBtnEl.addEventListener('click', addTodo);

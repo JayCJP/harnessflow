@@ -28,7 +28,7 @@ commit + push + MR（无文件型产出物）。
 原「unverifiable AC 占比 ≥50% 强告警」随 Phase 4 功能测试一并移除 —— 该告警读的是
 `acceptance-verification.json`，AC 核对现已并入 Phase 3、结论记入 `code-review.json`。
 发布与创建 MR 前，以 `code-review.json` 为准向用户说明本 Story 的实际验证覆盖面
-（`issues[]` 中 BLOCKER 是否清零、UI 型 AC 是否取得运行时证据），由用户决定是否接受后再发布。
+（`issues[]` 中 BLOCKER 是否清零），由用户决定是否接受后再发布。
 
 ## 常见失败与对策
 

@@ -204,12 +204,6 @@ const RECOVERY_SUGGESTIONS = {
     action: 'Task 的 figmaNodeId 必须存在于 figma-frame-inventory.json 的 frames 中',
     autoFixable: false
   },
-  // Phase 4→5: UI 交互型 AC 仅凭代码审读判 passed
-  static_evidence_for_ui_ac: {
-    level: 2,
-    action: '交互型 AC 必须有运行时证据（Playwright 实跑或人工点验），给不出就把 status 改为 unverifiable，不允许用代码审读冒充通过',
-    autoFixable: false
-  },
   // Phase 4→5: code-review 未修复项与验收结论自相矛盾
   review_acceptance_conflict: {
     level: 2,

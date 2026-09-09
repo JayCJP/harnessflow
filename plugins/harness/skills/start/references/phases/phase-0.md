@@ -55,15 +55,13 @@ Figma frame-inventory **不在本门控校验** —— 由 Phase 1 任务规划�
 `acceptance-criteria.json`（schema: `scripts/schemas/acceptance-criteria.schema.json`）
 ```json
 {
-  "criteria": [{ "id": "AC-1", "description": "...", "testType": "ui|api|integration" }],
+  "criteria": [{ "id": "AC-1", "description": "..." }],
   "featurePoints": [
     { "id": "FP-1", "source": "PRD 3.2 节", "coverage": "covered", "acIds": ["AC-1"] },
     { "id": "FP-2", "source": "原型 P4", "coverage": "deferred", "deferredReason": "本期不做，依赖后端排期" }
   ]
 }
 ```
-
-`testType` 在 Phase 3 审查时决定该 AC 需要什么强度的证据（`ui` 型最严：纯交互断言不能靠读代码证明）。
 
 `open-questions.json`（schema: `scripts/schemas/open-questions.schema.json`）：
 `resolved` 只能由用户确认后标记，**AI 不得自行置 true**。

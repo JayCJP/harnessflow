@@ -77,13 +77,9 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
 > **AC 逐条核对已并入本 Phase**（原 Phase 4 功能测试已移除）：审查时需逐条核对
 > `acceptance-criteria.json` 的每条 AC，未通过的 AC 以 `severity: "BLOCKER"` 记入 `issues[]`
 > 并在 `title` 注明 AC 编号，从而复用既有修复回路。
-> UI 交互型 AC（`testType: "ui"`）**不得仅凭代码审读判通过** —— 读代码读不出运行时行为，
-> 要么实跑取证，要么按未通过记 BLOCKER。
 
 ## 常见失败与对策
 
-- **UI 型 AC 被读代码判过**：`testType: "ui"` 的 AC（点击/禁用态/弹窗）无法靠静态阅读证明，
-  这是原 Phase 4 `checkEvidenceQuality` 拦截的缺陷，现由上面这条规则承接。
 - **WARNING 级问题带病过关**：本门控只看 BLOCKER，WARNING/SUGGESTION 级只作提示
   （提 AC 编号常为定位上下文，不等于声称该 AC 未达成）。
   所以填 `impact` 不是可选的礼貌，它是 AC 核对时的对照依据。

@@ -59,7 +59,7 @@ function writeState (id, phase) {
 function writeAC (id) {
   fs.writeFileSync(path.join(storyDir(id), 'acceptance-criteria.json'), JSON.stringify({
     featurePoints: [{ id: 'FP-1', source: '需求', coverage: 'covered', acIds: ['AC-1'] }],
-    criteria: [{ id: 'AC-1', description: '验收', testType: 'api' }]
+    criteria: [{ id: 'AC-1', description: '验收' }]
   }))
 }
 
