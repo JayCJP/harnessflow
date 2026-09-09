@@ -534,8 +534,7 @@ function buildRepoSearchEntries (storyId, targetPhase) {
     '',
     '检索统一走 `graphify` skill（`/graphify`）: `graphify query "<模块/关键词>"`。',
     '',
-    '> graphify 与知识库均按 **cwd** 解析 —— 检索非主仓必须先 `cd` 到该仓目录，',
-    '> 在主仓直接跑永远查不到目标仓的图谱/知识库（实跑 48% 检索空转的根因）。',
+    '> 先根据上述仓库目录，按需求 `cd` 到对应项目目录，再执行 graphify 操作（graphify 按 **cwd** 解析图谱并自行判定 `graphify-out/graph.json` 是否存在，无需在此重复说明）。',
     ''
   ]
   return lines
