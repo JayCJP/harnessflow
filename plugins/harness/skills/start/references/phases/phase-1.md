@@ -6,8 +6,11 @@
 ## 职责
 
 Agent 注册名 **`task-planner`**（任务规划师）。基于 Phase 0 产出物把需求拆成可并行的任务 DAG，
-并在 `task-dag.json` 的 `files[]` 中**列全所有待修改文件** —— 该字段决定 Phase 2 的 dev-pass
-写入范围，漏写的文件在 Phase 2 会被 hook 直接拒绝编辑。
+并在 `task-dag.json` 的 `files[]` 中**尽量列全待修改文件** —— 该字段是 Phase 2→3 范围审计的
+比对基准（`scope-amendments.json`），列得越准，Phase 3 需要核对的范围外文件越少。
+
+漏写不会挡住开发（2026-09 起 hook 不再按 files 拦截），但每个实际改动范围外的文件都要在
+Phase 3 审查里被逐条追问必要性。
 
 有 Figma 链接时，本 Phase 才处理设计稿（需求分析师只标 UI 改动点、不拉稿）：
 `use_skill("figma-to-component-map")` 针对要拆的组件精确拉取，产出 frame 清单并给 task 绑
@@ -24,7 +27,7 @@ Agent 注册名 **`task-planner`**（任务规划师）。基于 Phase 0 产出�
 | `task-dag.json` | ✅ | 必需 |
 | `figma-frame-inventory.json` | ✅ | `requiredWhen: hasFigmaDesign` —— 状态位为 true 时转必需 |
 
-推进 Phase 1→2 成功时，`advance-phase.js` **自动签发 dev-pass**，限域到 `task-dag.json` 的 `files[]`。
+推进 Phase 1→2 成功时，`advance-phase.js` **自动签发 dev-pass**；`task-dag.json` 的 `files[]` 则作为 Phase 2→3 范围审计的比对基准。
 
 ## 出门门控（Phase 1→2）
 
@@ -64,7 +67,7 @@ Agent 注册名 **`task-planner`**（任务规划师）。基于 Phase 0 产出�
   "tasks": [{
     "id": "task-1",
     "title": "...",                              // MUST: title 而非 name
-    "files": ["src/store/config.js"],            // 决定 dev-pass 写入范围，必须列全
+    "files": ["src/store/config.js"],            // Phase 2→3 范围审计的比对基准，尽量列全
     "acceptanceCriteria": ["AC-1"],              // MUST: 非空
     "figmaLink": ["https://www.figma.com/..."],  // UI 任务必填，非 UI 任务为 null
     "figmaRefs": [{ "nodeId": "3020:83533", "link": "https://www.figma.com/..." }],
@@ -80,8 +83,9 @@ Agent 注册名 **`task-planner`**（任务规划师）。基于 Phase 0 产出�
 
 ## 常见失败与对策
 
-- **Phase 2 编辑被 hook 拒绝**：`files[]` 漏了文件。dev-pass 已按旧清单签发，
-  需回到本 Phase 补全后重签，或用 `advance-phase.js <id> 2 --renew-pass`。
+- **Phase 2 产生大量范围外文件**：`files[]` 拆得太窄（常见：只列了入口文件，没列它依赖的
+  类型定义/枚举/公共层）。不会挡住开发，但 Phase 3 审查要逐条交代 —— 建议回到本 Phase
+  把稳定的改动面补全，而不是等审查被打回。
 - **孤儿 AC**：Phase 0 写了 AC 但拆 task 时漏掉。补 task 或补引用，不要删 AC。
 - **`figma_frame_incomplete`**：多因 Figma 桌面端未打开导致拉取残缺。确认桌面端状态后重拉，
   不要手工补字段糊过门控。

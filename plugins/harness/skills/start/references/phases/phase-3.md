@@ -36,7 +36,7 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
 主 Agent 只执行 `dispatch.js` 给的 `recovery.command`，全程由 `advance-phase.js --fix-loop` 编排：
 
 ```
-提取 BLOCKER → 回退 Phase 2 → 重签限域 dev-pass（仅 affectedFiles）
+提取 BLOCKER → 回退 Phase 2 → 重签 dev-pass
 → 生成 fix-request.json + fix-context.md
 ```
 

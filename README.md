@@ -36,7 +36,7 @@
 |-------|------|-----------|-----------|
 | 0 | 需求分析 | 需求分析师 | requirement-analysis.md、acceptance-criteria.json |
 | 1 | 任务规划 | 任务规划师 | task-dag.md / task-dag.json（可并行任务 DAG） |
-| 2 | 代码开发 | 前端开发工程师 | 代码变更（dev-pass 限域保护） |
+| 2 | 代码开发 | 前端开发工程师 | 代码变更（dev-pass 限时写保护） |
 | 3 | 代码审查 | 代码审查师 | code-review.json |
 | 4 | 功能测试 | 测试工程师 | test-report.md、acceptance-verification.json |
 | 5 | Git 提交 + MR | 发布助手 | 提交开发分支 + 创建 MR（→ dev）+ 确认已合并 |
@@ -96,7 +96,12 @@ flowchart TD
 
 ### 3. 权限控制（dev-pass）
 
-AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚本自动签发、限域到任务清单，阶段结束自动撤销 —— 杜绝 AI 越权改动未授权文件。
+AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚本自动签发、阶段结束自动撤销 ——
+杜绝规划未定稿就动手。
+
+文件明细不做事前拦截：Phase 1 无法穷尽依赖（新增文件 / 公共层 / 跨仓适配），开发的必要改动
+不该被卡住。改在 Phase 2→3 结算 —— 脚本拿 git 实际变更比对 `task-dag.json` 的 `files[]`，
+范围外改动落 `scope-amendments.json`，由 Phase 3 审查逐条核对必要性。
 
 ### 4. 知识库（KB）管理
 
@@ -256,7 +261,7 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 ### 5. 修复回路（fix-loop）
 
-- 审查/测试发现 BLOCKER 或验收失败时，工作流自动回退到 Phase 2 修复，重新签发限域 dev-pass。
+- 审查/测试发现 BLOCKER 或验收失败时，工作流自动回退到 Phase 2 修复，重新签发 dev-pass。
 - **默认最多 2 轮**，超出后转人工介入。不要让 AI 无限重试空转。
 
 ### 6. 知识库（KB）

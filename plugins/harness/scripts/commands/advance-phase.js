@@ -23,7 +23,7 @@
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> <phase> --rollback
  *     回退到更早 Phase：归档中间产出物；targetPhase <= 2 时重置修复预算
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 2 --fix-loop
- *     修复回路：提取 BLOCKER → 回退 Phase 2 → 签发限域 dev-pass → 输出 spawnPrompt
+ *     修复回路：提取 BLOCKER → 回退 Phase 2 → 重签 dev-pass → 输出 spawnPrompt
  *   参数解析：第一个纯数字视为 storyId，最后一个纯数字视为 targetPhase；
  *   非数字参数（可带 plans/ 或 .codebuddy/plans/ 前缀）优先作为 storyId。
  *
@@ -42,7 +42,7 @@
  *   - 某 Phase 的 Agent 汇报产出完成、且 dispatch.js 的 status=ready 给出 advanceCommand 后，
  *     主 Agent 执行本命令裁断门控并真正写入 phase
  *   - Phase 3 代码审查出现未修复 BLOCKER 时，主 Agent 执行 --fix-loop
- *     取回 spawnPrompt，交给前端开发工程师做限域修复
+ *     取回 spawnPrompt，交给前端开发工程师做修复
  *   - Phase 2 开发未完成但 dev-pass 已过期时，用 --renew-pass 续签，避免回退重来
  *   - 发现前一 Phase 方向错误（如任务拆解不合理）需要重做时，用 --rollback 归档中间产物并回退
  *   - 门控失败时无自动恢复通道：RECOVERY_SUGGESTIONS 里没有 autoFixable 条目，
@@ -87,7 +87,6 @@ const {
   PLANS_DIR,
   readStateFile,
   writeStateFile,
-  getDevPassAllowedPaths,
   issueDevPass,
   revokeDevPass,
   readJsonArtifact,
@@ -388,7 +387,7 @@ if (rollbackFlag) {
 }
 
 // ========================
-// --fix-loop: 修复回路（Phase 3/4 失败 → 提取 BLOCKER → 回退 Phase 2 → 签发限域 dev-pass）
+// --fix-loop: 修复回路（Phase 3/4 失败 → 提取 BLOCKER → 回退 Phase 2 → 重签 dev-pass）
 // 实现见 phase-ops/fix-loop.js
 // ========================
 
@@ -678,19 +677,14 @@ if (completedPhaseArtifacts && Array.isArray(completedPhaseArtifacts.artifacts))
 
 let devPass = null
 if (targetPhase === 2) {
-  const allowedInfo = getDevPassAllowedPaths(storyId)
-  devPass = issueDevPass(storyId, DEV_PASS_TTL, allowedInfo.paths)
+  devPass = issueDevPass(storyId, DEV_PASS_TTL)
   state.devPass = devPass.storyId + '-' + now.toISOString().slice(0, 10).replace(/-/g, '')
   trace.appendTrace(storyId, {
     type: 'dev_pass',
     phase: '2',
     result: 'issued',
     reason: 'phase_1_to_2',
-    details: {
-      expiresAt: devPass.expiresAt,
-      allowedPathsCount: devPass.allowedPaths.length,
-      source: devPass.pathSource
-    }
+    details: { expiresAt: devPass.expiresAt }
   })
 }
 
@@ -825,7 +819,7 @@ const result = {
 }
 
 if (devPass) {
-  result.devPass = { expiresAt: devPass.expiresAt, allowedFiles: devPass.allowedPaths.length, source: devPass.pathSource }
+  result.devPass = { expiresAt: devPass.expiresAt }
 }
 
 // 输出契约（v4，2026-09 收敛）: 只回「本次推进的结果」，不含任何 Spawn 信息。

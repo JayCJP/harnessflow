@@ -1,5 +1,36 @@
 {
-  "patterns": [],
+  "patterns": [
+    {
+      "phase": 0,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: blocking_unresolved，示例: 4 项阻塞级待确认问题未解决 (open-questions: 4)），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "msg-coupon-fixbugs",
+      "blockers": [
+        "4 项阻塞级待确认问题未解决 (open-questions: 4)"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T09:03:00.583Z",
+      "lastSeen": "2026-09-10T09:03:00.583Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 12 条验收标准未被任何 Task 引用: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "msg-coupon-fixbugs",
+      "blockers": [
+        "12 条验收标准未被任何 Task 引用: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T09:10:58.398Z",
+      "lastSeen": "2026-09-10T09:10:58.398Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    }
+  ],
   "version": "2.1",
-  "lastUpdated": "2026-09-08T13:24:51.844Z"
+  "lastUpdated": "2026-09-10T09:10:58.398Z"
 }

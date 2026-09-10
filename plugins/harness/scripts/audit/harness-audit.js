@@ -3,7 +3,7 @@
  * harness-audit.js — Harness 工作流健康体检与自修复
  *
  * 职责:
- *   - 工作流状态审计: .harness-active 与 e2e-state.json 一致性、活跃工作流数、dev-pass 有效性与限域精度
+ *   - 工作流状态审计: .harness-active 与 e2e-state.json 一致性、活跃工作流数、dev-pass 有效性
  *   - 契约与产出物审计: 未完成 Story 的 acceptance-criteria / open-questions / task-dag /
  *     已越过 Phase 的产出物缺失
  *   - 声明-消费一致性: story-input.json 声明了 Figma 链接但 Phase 1 未产出有效 frame 清单 → 告警
@@ -71,8 +71,7 @@ function auditDevPass () {
     try {
       const pp = path.join(PLANS_DIR, dp.storyId, 'dev-pass.json')
       const pass = JSON.parse(fs.readFileSync(pp, 'utf-8'))
-      if (pass.pathSource === 'fallback-src-glob') warnings.push({ cat: 'dev-pass', severity: 'WARNING', msg: 'dev-pass 降级为 src/** 全局 (storyId=' + dp.storyId + ')，建议完善 task-dag.json files' })
-      else summary.devPassScope = 'precise (' + (pass.allowedPaths ? pass.allowedPaths.length : 0) + ' files)'
+      summary.devPassReason = pass.reason || '(无)'
     } catch {}
   } else if (dp.storyId && fixMode) {
     try { fs.unlinkSync(path.join(PLANS_DIR, dp.storyId, 'dev-pass.json')); fixed.push('已清理过期 dev-pass: ' + dp.storyId) } catch {}
@@ -162,7 +161,7 @@ function run () {
   console.log('  时间: ' + summary.auditedAt)
   console.log('  Harness: ' + (summary.harnessActive ? ('已激活 (' + (summary.harnessStoryId || '?') + ')') : '未激活'))
   console.log('  活跃工作流: ' + (summary.activeWorkflows || 0) + ' 个')
-  console.log('  dev-pass: ' + (summary.devPassValid ? ('有效' + (summary.devPassScope ? (' (' + summary.devPassScope + ')') : '')) : '无效'))
+  console.log('  dev-pass: ' + (summary.devPassValid ? ('有效' + (summary.devPassReason ? (' (' + summary.devPassReason + ')') : '')) : '无效'))
   console.log('═══════════════════════════════════════════════════════')
   if (issues.length > 0) { console.log(''); console.log('BLOCKERS (' + issues.length + '):'); for (const i of issues) console.log('  [' + i.cat + '] ' + i.msg) }
   if (warnings.length > 0) { console.log(''); console.log('WARNINGS (' + warnings.length + '):'); for (const w of warnings) console.log('  [' + w.cat + '] ' + w.msg) }

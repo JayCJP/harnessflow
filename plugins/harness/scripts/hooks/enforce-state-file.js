@@ -21,7 +21,7 @@
  *   - Agent 用 shell 写入状态文件（node -e fs.writeFileSync / echo > / sed -i / tee / PowerShell Set-Content）：
  *     只拦文件工具的话，「状态文件单写者」仅在一条通道上成立，等于形同虚设——shell 是绕过的默认选择。
  *   - 多个 Agent/多轮会话并发改写状态文件：
- *     不拦截会产生互相覆盖的状态漂移，dev-pass 限域与 phase 进度失去可信度。
+ *     不拦截会产生互相覆盖的状态漂移，dev-pass 凭证与 phase 进度失去可信度。
  *
  * 说明:
  *   - 参考: 阿里 Harness 工程化实践 — 状态文件单写者模式 + hook 拦截。

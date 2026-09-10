@@ -34,7 +34,6 @@ const {
   PHASE_SLUGS,
   PHASE_ARTIFACTS,
   getPhaseName,
-  getDevPassAllowedPaths,
   issueDevPass,
   revokeDevPass,
   writeStateFile,
@@ -114,8 +113,7 @@ function runRollback ({ storyId, state, currentPhase, currentPhaseName, targetPh
 
   // Phase 2 特殊处理：回退到 Phase 2 → 重新签发 dev-pass
   if (targetPhase === 2) {
-    const allowedInfo = getDevPassAllowedPaths(storyId)
-    issueDevPass(storyId, DEV_PASS_TTL, allowedInfo.paths)
+    issueDevPass(storyId, DEV_PASS_TTL)
     console.error('  ✓ dev-pass 已重新签发')
   } else {
     // 回退到非 Phase 2 → 撤销 dev-pass

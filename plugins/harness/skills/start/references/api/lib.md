@@ -58,7 +58,7 @@
 
 读取与校验：`readStoryInput` `getStoryMode` `readJsonArtifact` `checkAcceptanceCriteria`
 `checkOpenQuestions` `checkTaskDagJson` `validateContractReferences`
-`checkAcceptanceVerification` `getDevPassAllowedPaths`
+`checkAcceptanceVerification` `getDeclaredScope`
 
 `getStoryMode(storyId)`：优先 `story-input.json` 的 `mode`，回退 `e2e-state.json` 的 `mode`，
 都没有则 `'run'`。解析失败（`_parseError`）时也走回退。
@@ -67,6 +67,12 @@
 
 `issueDevPass` `revokeDevPass` `checkDevPass` `renewDevPass` —— 全部由
 `advance-phase.js` 自动调用，AI 无需关心时机。
+
+### 范围提取与匹配（越界审计基准）
+
+`getDeclaredScope(storyId)` / `isFileInDeclaredScope(file, declaredPaths, repos)` —— 从
+`task-dag.json` 的 `files[]` 提取声明范围并做匹配。`policy.js` 在 Phase 2→3 用它比对 git 实际
+变更，产出 `scope-amendments.json`。详见 `../phases/phase-2.md`。
 
 ### 修复回路配置与结构化错误
 

@@ -36,6 +36,8 @@
  *          知识库更新 / 云端部署根本用不上。报告在 Phase 0-1 已消化进契约文件。
  *       2. AGENT_CONSTRAINTS 从 5 条减到 2 条，删掉的 3 条已在 6/6 个 agent .md 里写明
  *          （agent .md 是子 Agent 的 system prompt，重复一遍不会更被遵守，只是重复计费）。
+ *          后又补回 2 条（P3-2 检索失败上报、Bash 失败交代），因这两条是运行时失效兜底、
+ *          agent .md 里没有对应表述 —— 现 4 条，见 AGENT_CONSTRAINTS 定义处注释。
  *       3. 契约文件路径只打一次（原来相对 + 绝对各打一遍）。
  *     实测口径: agentPrompt 本身只占单次 spawn payload 的 7~17%（agent .md 是它的 6~13 倍），
  *     所以真正的收益来自「少一次大文件读」，不是「prompt 少几个字」。
@@ -62,6 +64,7 @@ const {
   TASK_DAG_JSON_FILE,
   loadRepos
 } = require('../lib/state')
+const { ARTIFACT } = require('../lib/artifacts')
 
 const contextRefresh = require('./context-refresh')
 const experience = require('./experience')
@@ -102,7 +105,8 @@ const AGENT_CONSTRAINTS = [
   // P3-2（2026-09）: 对齐 buildFigmaAlignInstruction 对 Figma MCP 的「停下上报」语义 ——
   // 实跑中 Bash/graphify 失败率约 35%，子 Agent 静默降级到文本搜索摸黑穷举（48% 零命中），
   // 失败被掩盖而非暴露。必须上报主 Agent，由主 Agent 决定替代路径
-  'graphify / Bash 检索失败必须停下上报主 Agent，禁止静默降级到纯文本搜索硬做'
+  'graphify / Bash 检索失败必须停下上报主 Agent，禁止静默降级到纯文本搜索硬做',
+  '出现 Bash execution failed 需要给出原因，执行了什么，为什么失败'
 ]
 
 /**
@@ -408,7 +412,7 @@ function readTaskBatches (storyId) {
 /**
  * 构造 Phase 2 batch 级任务范围片段（P1-1: 消除主 Agent 手写 batch prompt 的动机）
  *
- * 输出「本批次目标仓 + task id 清单 + files[] 白名单」。契约文件仍只给路径 ——
+ * 输出「本批次目标仓 + task id 清单 + files[] 目标范围」。契约文件仍只给路径 ——
  * task 的 description / acceptanceCriteria 等正文以 task-dag.json 为唯一信源，
  * 本片段不内联（遵守 v2「不再内联截断契约内容」的决定）。
  *
@@ -446,7 +450,7 @@ function buildBatchScopeSection (storyId, batchId) {
     '',
     `- 本批次目标仓: ${[...repoSet].join(', ')}`,
     `- 本批次 task 清单: ${batchTasks.map(t => `${t.id}(${t.title})`).join('、')}`,
-    '- 本批次 files 白名单（只允许修改以下范围，dev-pass 据此限域）:'
+    '- 本批次 files 目标范围（超出的改动会计入 scope-amendments.json，Phase 3 需交代必要性）:'
   ]
   for (const t of batchTasks) {
     for (const f of (t.files || [])) {
@@ -476,7 +480,7 @@ function buildIncrementalFixSection (storyId) {
     { file: 'fix-context.md', desc: '修复回路上下文（上轮问题与修复核对指引）' },
     { file: 'fix-verification.json', desc: '上一轮修复核对结果（若存在，先看上轮改了什么）' }
   ]
-  const lines = ['## 增量修复上下文（窄范围）', '', '本次为限域修复，只处理被点名的问题，不要重新全量消化需求文档：']
+  const lines = ['## 增量修复上下文（窄范围）', '', '本次为窄范围修复，只处理被点名的问题，不要重新全量消化需求文档：']
   let found = false
   for (const c of candidates) {
     const p = path.join(storyDir, c.file)
@@ -593,7 +597,7 @@ function buildRepoSearchEntries (storyId, targetPhase) {
  * @param {number} opts.maxRounds - 最大修复轮次
  * @param {number} opts.sourcePhase - 失败来源 Phase（3=代码审查）
  * @param {Array<{id:string,severity:string,file?:string,line?:string,description:string,suggestion?:string}>} opts.issues - 待修复问题清单
- * @param {string[]} opts.affectedFiles - 受影响文件（dev-pass 限域范围）
+ * @param {string[]} opts.affectedFiles - 受影响文件（本次修复的目标范围）
  * @returns {string} 完整可注入的修复任务 prompt
  */
 function buildFixLoopSpawnPrompt (opts) {
@@ -638,6 +642,60 @@ function buildFixLoopSpawnPrompt (opts) {
 }
 
 /**
+ * 构造 Phase 3 的「范围外改动核对」段
+ *
+ * scope-amendments.json 由 policy.js 在 Phase 2→3 门控生成（内容 = git 实际变更中
+ * 未声明在 task-dag.json files[] 的 src/ 文件）。文件级限域改为事后审计后，
+ * 这是唯一要求 Agent 交代「为什么动这些范围外文件」的地方 —— 不注入就等于没有牙齿。
+ *
+ * @param {string} storyId - Story ID
+ * @param {number} phase - 目标 Phase，非 Phase 3 返回空数组
+ * @returns {string[]} 待拼入 promptLines 的行；无需注入时为空数组
+ */
+function buildScopeAmendmentSection (storyId, phase) {
+  if (phase !== 3) return []
+
+  const amPath = path.join(PLANS_DIR, storyId, ARTIFACT.SCOPE_AMENDMENTS)
+  if (!fs.existsSync(amPath)) return []
+
+  let data
+  try {
+    data = JSON.parse(fs.readFileSync(amPath, 'utf-8'))
+  } catch (e) {
+    // 损坏时给路径让审查师自行查看，不静默吞掉 —— 否则审查会误判为「无范围外改动」
+    return [
+      '## 范围外改动核对',
+      '',
+      `\`${ARTIFACT.SCOPE_AMENDMENTS}\` 解析失败，无法列出范围外改动清单，请手动查看该文件后核对。`
+    ]
+  }
+
+  const out = data.outOfScope || []
+  const absPath = toPosix(amPath)
+
+  if (out.length === 0) {
+    return [
+      '## 范围外改动核对',
+      '',
+      `本次全部 src/ 变更均落在 task-dag.json 的 files[] 声明范围内（声明 ${data.declaredCount} 项，范围内 ${data.inScopeCount} 个文件）。`
+    ]
+  }
+
+  return [
+    '## 范围外改动核对',
+    '',
+    `Phase 2 实际改动了 **${out.length} 个范围外文件**（未声明在 task-dag.json 的 files[]）:`,
+    out.map(f => `- \`${f.repo}:${f.path}\``).join('\n'),
+    '',
+    '对每个文件必须判定并写明结论（写入 code-review.json 的问题记录或审查说明）:',
+    '- 改动确属本次需求必需 → 说明为什么必需，并回写 task-dag.json 的 files[] 补齐声明',
+    '- 改动不必要或属越界（改了别人的模块 / 顺手重构 / 无关公共层） → 记为 BLOCKER，要求回退该文件的改动',
+    '',
+    `完整清单: \`${absPath}\``
+  ]
+}
+
+/**
  * 构造下一个 Phase 的 Agent Prompt 及其配套元信息。
  *
  * @param {Object} opts
@@ -646,7 +704,7 @@ function buildFixLoopSpawnPrompt (opts) {
  * @param {number} opts.summaryPhase - 用于取摘要的 Phase（通常是 targetPhase - 1）
  * @param {Object} [opts.summaryInfo] - 已加载的摘要对象；不传则自行加载
  * @param {number} [opts.batchId] - P1-1: 批次 ID（仅 Phase 2 生效）。传入时注入
- *   「本批次目标仓 + task id 清单 + files[] 白名单」段，task 正文仍以 task-dag.json 为唯一信源
+ *   「本批次目标仓 + task id 清单 + files[] 目标范围」段，task 正文仍以 task-dag.json 为唯一信源
  * @param {string} [opts.scope] - P1-2: 'incremental' 时为增量修复窄上下文 —— 跳过
  *   Story 背景资料 / Figma 设计摘要，改注入修复契约文件（fix-request 等）；缺省 'full'
  * @returns {{
@@ -705,7 +763,7 @@ function buildAgentPrompt (opts) {
   const fixLoopContext = buildFixLoopContext(storyId, targetPhase)
 
   // P1-1: batch 级任务范围（仅 Phase 2 且指定 batchId 时注入）——
-  // 输出「目标仓 + task id 清单 + files[] 白名单」，task 正文仍以 task-dag.json 契约为唯一信源，
+  // 输出「目标仓 + task id 清单 + files[] 目标范围」，task 正文仍以 task-dag.json 契约为唯一信源，
   // 消除主 Agent 在多批次开发时手写 prompt 的动机（D1）
   const batchScope = (targetPhase === 2 && opts.batchId !== undefined && opts.batchId !== null)
     ? buildBatchScopeSection(storyId, opts.batchId)
@@ -772,6 +830,7 @@ function buildAgentPrompt (opts) {
     '',
     lessons ? `## 历史教训\n${lessons.trim()}\n` : '',
     metricsInsights ? `## 度量洞察\n${metricsInsights.trim()}\n` : '',
+    buildScopeAmendmentSection(storyId, targetPhase).join('\n'),
     fixLoopContext ? `## 修复回路上下文 (第 ${fixLoopContext.round}/${fixLoopContext.maxRounds} 轮)\n${fixLoopContext.instruction}\n受影响文件: ${fixLoopContext.affectedFiles.join(', ') || '(见 fix-request.json)'}\n` : '',
     incrementalFixSection,
     batchScope ? batchScope.lines.join('\n') : '',
@@ -836,7 +895,7 @@ function buildAgentPrompt (opts) {
  * 只在 task-dag.json 声明了 **多个** batch 时产出；单批/无 batches 字段（旧数据）
  * 返回空序列 —— 单批场景主通道是整份 Phase 2 prompt，多给一层批次包装是噪音。
  *
- * 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 白名单」，
+ * 每个 batch 的 agentPrompt 已含「目标仓 + task id 清单 + files[] 目标范围」，
  * task 正文仍以 task-dag.json 为唯一信源（遵守 v2「不再内联截断契约内容」）。
  *
  * @param {Object} opts
@@ -869,7 +928,7 @@ function buildBatchSequence (opts) {
 
   // Spawn 的 Agent 各 batch 相同（都是 Phase 2 的开发者），取首项即可
   const agent = seq[0] ? seq[0].agent : null
-  const instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${agent} 并注入该 batch 的 agentPrompt（files 白名单已注入各 batch prompt），全部 batch 完成后再执行 advanceCommand`
+  const instruction = `task-dag 声明了 ${batches.length} 个 batch，逐 batch Spawn ${agent} 并注入该 batch 的 agentPrompt（files 目标范围已注入各 batch prompt），全部 batch 完成后再执行 advanceCommand`
 
   return { batches: seq, instruction }
 }

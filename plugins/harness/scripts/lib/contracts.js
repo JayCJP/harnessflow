@@ -14,7 +14,7 @@
  * 使用场景:
  *   - 门控: services/policy.js 在每次 Phase 推进前调用这套 check 裁定能否推进
  *   - 人工诊断: audit/harness-audit.js 复用同一套校验，保证诊断与门控口径一致
- *   - dev-pass 限域: task-dag.json 的 files[] 是限域的唯一来源
+ *   - 范围审计: task-dag.json 的 files[] 是「声明改动范围」的唯一来源（lib/scope.js）
  *
  * 说明:
  *   - 所有 check* 都返回结构化结果（不抛异常），由调用方决定是阻塞还是告警：
@@ -216,14 +216,14 @@ function checkTaskDagJson (storyId) {
       pushIssue(result, 'empty_ac_ref', `${prefix}: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）`, 2, '每个 task 的 acceptanceCriteria 至少引用 1 条 AC')
     }
 
-    // 检查 files 范围（用于 dev-pass 限域）
+    // 检查 files 范围（用于 Phase 2→3 的范围审计比对）
     if (!Array.isArray(task.files) || task.files.length === 0) {
-      result.warnings.push(`${prefix}: files 为空，dev-pass 将降级为 src/** 全局授权（高风险）`)
+      result.warnings.push(`${prefix}: files 为空，Phase 2 的全部改动都会被判为范围外，Phase 3 审查负担加重`)
     }
 
     // 跨项目 task 校验：有 project 字段时必须有 repoPath
     if (task.project && task.project !== repos.primary && !task.repoPath) {
-      pushIssue(result, 'task_missing_repo_path', `${prefix}: 跨项目 task (project=${task.project}) 必须指定 repoPath`, 2, '跨项目 task（project ≠ 主仓）必须指定 repoPath，否则 dev-pass 无法把改动定位到正确仓库')
+      pushIssue(result, 'task_missing_repo_path', `${prefix}: 跨项目 task (project=${task.project}) 必须指定 repoPath`, 2, '跨项目 task（project ≠ 主仓）必须指定 repoPath，否则 Phase 2→3 的范围审计无法把改动定位到正确仓库')
     }
 
     // 跨项目 task 强制细化：description 必须包含行号引用

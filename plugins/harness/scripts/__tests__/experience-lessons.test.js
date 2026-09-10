@@ -3,7 +3,7 @@
  * 历史教训注入回归测试 — getLessonsForPhase 的注入侧归并（v3.1，2026-09）
  *
  * 背景: 写入侧的去重键含 rootCause 前 50 字符，对「不同根因」是对的，但模板化根因
- * （消息里嵌绝对路径，如 dev_pass_scope_violation 的「试图编辑限域外的文件: <path>」）
+ * （消息里嵌绝对路径或文件名的模板化根因）
  * 每换一个文件就新开一条 pattern，对策却完全相同。这类条目 occurrences 极高，
  * 恒排 Top N 之首，会把真正不同的教训挤出注入窗口（maxItems=5）。
  * v3.1 只在注入侧按 failureType + resolution 归并，库里仍按根因分条留档。

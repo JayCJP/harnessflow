@@ -19,7 +19,7 @@
  *   - --json: { project, metrics, insights }
  *   - --global-stats: 全局洞察库摘要（totalProjects / totalStories / insights 列表）
  *   - 默认: 人读报告（Story 数 / Phase 耗时 / 门控一次通过率 / Fix-loop 触发率与成功率 /
- *     dev-pass 限域精度 / Skill 与 MCP 资源使用），并合并洞察到全局经验库
+ *     Skill 与 MCP 资源使用），并合并洞察到全局经验库
  *
  * 使用场景:
  *   - 自动触发: Phase 7 完成时由 commands/advance-phase.js 通过 execSync 调用，
@@ -30,14 +30,14 @@
  *     （哪个 Phase 最慢、门控是否一次通过、fix-loop 是否反复触发）时手动跑
  *
  * 说明:
- *   - 8 项核心指标: phaseDurations、gateFirstTryRate、fixLoopTriggerRate、fixLoopSuccessRate、
- *     blockerCount、devPassPrecision、storyCompletionRate、resourceUsage
+ *   - 7 项核心指标: phaseDurations、gateFirstTryRate、fixLoopTriggerRate、fixLoopSuccessRate、
+ *     blockerCount、storyCompletionRate、resourceUsage
  *   - 洞察按 targetPhase 定向注入，触发规则见 THRESHOLDS（如 Phase 平均耗时 > 20min、
- *     门控一次通过率 < 80%、Fix-loop 触发率 > 40%、dev-pass 限域精度 < 70%）
+ *     门控一次通过率 < 80%、Fix-loop 触发率 > 40%）
  *   - Fix-loop 触发率会扣除「全部 issue 均为 skipped 误报、fix-verification.json 中无任何
  *     status=fixed」的空转轮次，避免误报把指标拉高
- *   - dev-pass 限域精度只从 trace 的 dev_pass 事件读取，因为 dev-pass.json
- *     在 Phase 2 → 3 撤销后即被删除，事后无法追溯
+ *   - 原 devPassPrecision 指标已随文件级拦截改为事后审计删除（2026-09）：dev-pass 不再
+ *     携带 allowedPaths，"写得准不准"改由 Phase 2→3 生成的 scope-amendments.json 反映
  *
  * @module metrics-aggregator
  */
@@ -66,8 +66,7 @@ const THRESHOLDS = {
   PHASE_DURATION_MS: 20 * 60 * 1000,      // Phase 耗时 > 20min → 瓶颈
   GATE_FIRST_TRY_RATE: 0.8,                 // 一次通过率 < 80% → 警告
   FIX_LOOP_TRIGGER_RATE: 0.4,              // Fix-loop 触发率 > 40% → 警告
-  FIX_LOOP_SUCCESS_RATE: 0.8,              // Fix-loop 成功率 < 80% → 警告
-  DEV_PASS_PRECISION: 0.7                   // dev-pass 限域精度 < 70% → 提示
+  FIX_LOOP_SUCCESS_RATE: 0.8               // Fix-loop 成功率 < 80% → 警告
 }
 
 // ─── trace.jsonl 解析 ──────────────────────────────────────
@@ -133,8 +132,6 @@ function aggregateMetrics () {
   let fixLoopCount = 0
   let fixLoopSucceeded = 0
   let totalBlockers = 0
-  let totalDevPass = 0
-  let preciseDevPass = 0
   let completedStories = 0
   let totalStories = 0
   // 资源使用统计（S3：skill / 知识库 / MCP 消费情况）
@@ -211,16 +208,6 @@ function aggregateMetrics () {
         storyFixLoopSucceeded = true
       }
 
-      // dev-pass 签发事件（精度统计从 trace 读取，
-      // 因为 dev-pass.json 在 Phase 2→3 撤销后即被删除，无法追溯）
-      if (evt.type === 'dev_pass' && evt.result === 'issued') {
-        totalDevPass++
-        const src = evt.details && evt.details.source
-        if (src && src !== 'fallback-src-glob' && src !== 'none') {
-          preciseDevPass++
-        }
-      }
-
       // 资源调用统计（S3：tool_call 事件，来自 trace-command.js 的旁路采集）
       if (evt.type === 'tool_call') {
         if (evt.skill) {
@@ -275,7 +262,6 @@ function aggregateMetrics () {
     fixLoopTriggerRate: totalPhase3_4Advances > 0 ? fixLoopCount / totalPhase3_4Advances : 0,
     fixLoopSuccessRate: fixLoopCount > 0 ? fixLoopSucceeded / fixLoopCount : 1,
     blockerCount: totalBlockers,
-    devPassPrecision: totalDevPass > 0 ? preciseDevPass / totalDevPass : 1,
     storyCompletionRate: totalStories > 0 ? completedStories / totalStories : 0,
     // 资源使用（S3）
     resourceUsage: {
@@ -360,19 +346,8 @@ function generateInsights (metrics) {
     })
   }
 
-  // 规则 5: dev-pass 限域精度
-  if (metrics.devPassPrecision < THRESHOLDS.DEV_PASS_PRECISION) {
-    insights.push({
-      id: `INSIGHT-${String(insights.length + 1).padStart(3, '0')}`,
-      targetPhase: 1,
-      type: 'dev_pass_scope',
-      severity: 'info',
-      title: `dev-pass 限域精度 ${Math.round(metrics.devPassPrecision * 100)}%`,
-      description: 'task-dag.json 的 files 声明不完整，dev-pass 降级为 src/** 全局授权',
-      recommendation: '任务规划时为每个 task 声明完整的 files 列表，确保 dev-pass 精确限域',
-      evidence: `精度 ${Math.round(metrics.devPassPrecision * 100)}%`
-    })
-  }
+  // 规则 5 原为「dev-pass 限域精度」，随文件级拦截改为事后审计一并删除（2026-09）：
+  // dev-pass 不再承载 allowedPaths，精度无从统计，其职责由 scope-amendments.json 承担。
 
   // 规则 6: Story 完成率
   if (metrics.storyCount >= 3 && metrics.storyCompletionRate < 0.7) {
@@ -476,7 +451,6 @@ for (const [phase, stats] of Object.entries(metrics.phaseDurations)) {
 console.log(`   门控一次通过率: ${Math.round(metrics.gateFirstTryRate * 100)}%`)
 console.log(`   Fix-loop 触发率: ${Math.round(metrics.fixLoopTriggerRate * 100)}%`)
 console.log(`   Fix-loop 成功率: ${Math.round(metrics.fixLoopSuccessRate * 100)}%`)
-console.log(`   dev-pass 限域精度: ${Math.round(metrics.devPassPrecision * 100)}%`)
 const ru = metrics.resourceUsage || {}
 console.log('\n🔧 资源使用:')
 console.log(`   Skill 调用: ${ru.skillCalls || 0} 次 (kb-query/graphify: ${ru.kbCalls || 0} 次)`)
