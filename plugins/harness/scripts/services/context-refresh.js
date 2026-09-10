@@ -161,6 +161,81 @@ function injectMustCheck (storyId) {
   }
 }
 
+// 裁决章节的边界标记 —— 幂等替换靠它定位，改标记等于让旧章节变成孤儿文本
+const DECISIONS_MARK_START = '<!-- harness:decisions:start -->'
+const DECISIONS_MARK_END = '<!-- harness:decisions:end -->'
+
+/**
+ * 构造裁决章节的定位正则
+ * 每次新建而非复用 —— 带 g 标志的正则复用会因 lastIndex 残留导致第二次匹配错位
+ * @param {string} flags - 正则标志
+ * @returns {RegExp} 匹配整个裁决章节（含边界标记与尾部换行）
+ */
+function decisionsBlockRegex (flags) {
+  return new RegExp(`${DECISIONS_MARK_START}[\\s\\S]*?${DECISIONS_MARK_END}\n?`, flags)
+}
+
+/**
+ * 把 open-questions.json 中已裁决的条目同步进需求分析文档
+ *
+ * 用户裁决原先只活在主 Agent 的记忆里：跨 Agent（任务规划师等）完全看不到，
+ * 只能靠主 Agent 把裁决块手写进每个 prompt。此后裁决以需求分析文档为载体流转 ——
+ * open-questions.json 是写入端，文档里的裁决章节是脚本生成的只读投影。
+ *
+ * 幂等：已存在章节则整体替换；已裁决项被清空则移除章节，保持文档与契约一致。
+ *
+ * @param {string} storyId - Story ID
+ * @returns {boolean} 是否实际改动了文档
+ */
+function syncDecisionsToRequirementDoc (storyId) {
+  const storyDir = getStoryDir(storyId)
+  const docPath = path.join(storyDir, ARTIFACT.REQUIREMENT_ANALYSIS)
+  const oqPath = path.join(storyDir, ARTIFACT.OPEN_QUESTIONS)
+  if (!fs.existsSync(docPath) || !fs.existsSync(oqPath)) return false
+
+  try {
+    const oq = JSON.parse(fs.readFileSync(oqPath, 'utf-8'))
+    const resolved = (Array.isArray(oq.questions) ? oq.questions : [])
+      .filter(q => q && q.resolved === true && typeof q.resolution === 'string' && q.resolution.trim())
+
+    const doc = fs.readFileSync(docPath, 'utf-8')
+    const hasBlock = decisionsBlockRegex('').test(doc)
+
+    // 无已裁决项: 移除可能残留的旧章节，否则文档会留下过期的裁决
+    if (resolved.length === 0) {
+      if (!hasBlock) return false
+      fs.writeFileSync(docPath, doc.replace(decisionsBlockRegex('g'), ''), 'utf-8')
+      return true
+    }
+
+    const lines = [
+      DECISIONS_MARK_START,
+      '## 用户裁决事项',
+      '',
+      '> 本段由脚本从 `open-questions.json` 同步生成，请勿手工编辑。',
+      '> 修改裁决请改 `open-questions.json` 的 `resolution` 并重新推进；',
+      '> 后续 Phase 以本段为准，不得重新上报或改判。',
+      ''
+    ]
+    for (const q of resolved) {
+      lines.push(`- **${q.id}**: ${q.question}`)
+      lines.push(`  - 裁决: ${q.resolution.trim()}`)
+    }
+    lines.push(DECISIONS_MARK_END, '')
+
+    const block = lines.join('\n')
+    const next = hasBlock
+      ? doc.replace(decisionsBlockRegex('g'), block)
+      : `${doc.replace(/\s*$/, '')}\n\n${block}`
+    if (next === doc) return false
+    fs.writeFileSync(docPath, next, 'utf-8')
+    return true
+  } catch (e) {
+    // 同步失败不阻断推进，仅返回 false
+    return false
+  }
+}
+
 /**
  * 获取指定 Phase 的产出物信息
  *
@@ -517,6 +592,7 @@ function loadLatestSummary (storyId, currentPhase = Infinity, maxLines = 200) {
 module.exports = {
   generatePhaseSummary,
   injectMustCheck,
+  syncDecisionsToRequirementDoc,
   getPhaseArtifacts,
   getContractFiles,
   loadLatestSummary,

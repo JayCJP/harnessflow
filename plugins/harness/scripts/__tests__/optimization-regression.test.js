@@ -212,8 +212,10 @@ section('4. 代码检索入口（只下发仓目录 + /graphify skill 指引）'
 const rsMain = path.join(SANDBOX, 'repo-main')
 const rsOther = path.join(SANDBOX, 'repo-other')
 const rsNoGraph = path.join(SANDBOX, 'repo-nograph')
-// 图谱/知识库仍造出来，是为了断言「**即使存在**也不再逐仓展开」——
-// 存在性预判与命令样例已移交给 /graphify skill，脚本只留脚本才知道的事实（目录 + cwd 规则）
+// 图谱造出来是为了断言「脚本实测并注入存在性」——
+// 存在性曾是交给 /graphify skill 运行时披露的（2026-09-08 精简），但 skill 由子 Agent
+// 自行调用、是否相信不可控，实测中出现整类「已建判成缺失」的误判，故收回脚本实测注入。
+// 脚本只输出脚本才知道的客观事实：目录 + cwd 规则 + 图谱实测状态
 fs.mkdirSync(path.join(rsMain, 'graphify-out'), { recursive: true })
 fs.writeFileSync(path.join(rsMain, 'graphify-out', 'graph.json'), '{}')
 fs.mkdirSync(path.join(rsOther, 'graphify-out'), { recursive: true })
@@ -238,8 +240,10 @@ ok('每个仓各占一行（正斜杠绝对路径）',
     `- nograph → \`${rsPosix(rsNoGraph)}\``].every(s => rs.agentPrompt.includes(s)))
 ok('注明走 /graphify skill', rs.agentPrompt.includes('/graphify') && rs.agentPrompt.includes('graphify query'))
 ok('保留 cwd 解析提示（跨仓须先 cd，48% 空转根因）', /按 \*\*cwd\*\* 解析/.test(rs.agentPrompt))
-// 精简核心：逐仓的存在性预判 / 建图引导 / bash 样例全部移除
-ok('不再逐仓输出图谱存在性预判', !/graphify 图谱:/.test(rs.agentPrompt))
+// 精简核心：建图引导 / bash 样例仍全部移除；但存在性由脚本实测注入（见上方说明）
+ok('已建仓标注「图谱：已建」', /- other[^\n]*（图谱：已建/.test(rs.agentPrompt))
+ok('未建仓标注「图谱：未建」', /- nograph[^\n]*（图谱：未建/.test(rs.agentPrompt))
+ok('未建仓给出替代检索指引', /未建[\s\S]{0,80}kb-query \+ Grep/.test(rs.agentPrompt))
 ok('不再输出知识库存在性分支', !/只走 graphify \+ 源码精读/.test(rs.agentPrompt))
 ok('不再输出建图命令样例', !/graphify \. +# 首次/.test(rs.agentPrompt) && !/graphify update \./.test(rs.agentPrompt))
 ok('不再输出逐仓 cd 执行样例', !rs.agentPrompt.includes(`cd "${rsPosix(rsOther)}"`))
@@ -450,6 +454,71 @@ const skPb = promptBuilder.buildAgentPrompt({ storyId: 'OPT-SK', targetPhase: 1 
 ok('agentPrompt 含 schema 骨架段', skPb.agentPrompt.includes('产出物 JSON Schema'))
 ok('骨架排在「产出要求」之后（先说产出什么，再说格式）',
   skPb.agentPrompt.indexOf('## 产出要求') < skPb.agentPrompt.indexOf('产出物 JSON Schema'))
+
+// ════════════════════════════════════════════════════════════
+// 10. A-4: 返工轮与首轮的 prompt 语气必须不同
+// ════════════════════════════════════════════════════════════
+section('10. A-4: 返工轮追加「增量模式」提示')
+
+fs.mkdirSync(storyDir('OPT-RW'), { recursive: true })
+writeState('OPT-RW', 0)
+// 背景资料要存在，否则「排在背景资料之前」的断言会因该段缺失而恒真/恒假
+fs.writeFileSync(path.join(storyDir('OPT-RW'), 'story-context.md'), '# 背景\n')
+// 首轮: 产出物尚未落盘
+const rwFirst = promptBuilder.buildAgentPrompt({ storyId: 'OPT-RW', targetPhase: 0 })
+ok('首轮不出现返工提示', !rwFirst.agentPrompt.includes('本轮为返工'))
+
+// 造出 Phase 0 产出物 → 模拟门控未过后的返工轮
+fs.writeFileSync(path.join(storyDir('OPT-RW'), 'requirement-analysis.md'), '# 需求分析\n')
+const rwAgain = promptBuilder.buildAgentPrompt({ storyId: 'OPT-RW', targetPhase: 0 })
+ok('返工轮出现「增量模式」提示', rwAgain.agentPrompt.includes('本轮为返工'))
+ok('返工提示点名已产出的文件', rwAgain.agentPrompt.includes('requirement-analysis.md'))
+ok('返工提示要求只补缺口而非重做', /只补齐缺口/.test(rwAgain.agentPrompt))
+// 提示要早于背景资料，否则 Agent 先读了长背景才知道本轮是返工
+ok('背景资料段确实存在（断言有效的前提）',
+  rwAgain.agentPrompt.includes('Story 背景资料'))
+ok('返工提示排在「Story 背景资料」之前',
+  rwAgain.agentPrompt.indexOf('本轮为返工') < rwAgain.agentPrompt.indexOf('Story 背景资料'))
+// schema 段是门控对齐的关键，A-4 不动它
+ok('返工轮仍注入 schema 骨架', rwAgain.agentPrompt.includes('产出物 JSON Schema'))
+
+// ════════════════════════════════════════════════════════════
+// 11. A-3: 裁决从 open-questions.json 同步进需求分析文档
+// ════════════════════════════════════════════════════════════
+section('11. A-3: 裁决同步进需求分析文档')
+
+const contextRefresh = require(path.join(SCRIPTS_DIR, 'services/context-refresh'))
+fs.mkdirSync(storyDir('OPT-DC'), { recursive: true })
+const dcDoc = path.join(storyDir('OPT-DC'), 'requirement-analysis.md')
+const dcOq = path.join(storyDir('OPT-DC'), 'open-questions.json')
+fs.writeFileSync(dcDoc, '# 需求分析\n\n正文。\n')
+const dcSet = qs => fs.writeFileSync(dcOq, JSON.stringify({ questions: qs }, null, 2))
+const dcRead = () => fs.readFileSync(dcDoc, 'utf-8')
+
+dcSet([
+  { id: 'Q-1', question: '是否需要审批流?', resolved: true, resolution: '需要，二级审批' },
+  { id: 'Q-2', question: '字段命名口径?', resolved: false }
+])
+ok('首次同步写入裁决章节', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === true)
+ok('已裁决项进文档', dcRead().includes('需要，二级审批'))
+ok('未裁决项不进文档', !dcRead().includes('字段命名口径'))
+ok('章节标注由脚本生成、勿手改', dcRead().includes('请勿手工编辑'))
+
+// 幂等: 内容未变时再次同步不应改动文档，也不该重复追加章节
+ok('重复同步不改动（幂等）', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === false)
+ok('重复同步不产生第二个章节',
+  (dcRead().match(/harness:decisions:start/g) || []).length === 1)
+
+// 裁决改写 → 文档同步更新（而非并存新旧两条）
+dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolved: true, resolution: '改为不需要审批' }])
+contextRefresh.syncDecisionsToRequirementDoc('OPT-DC')
+ok('裁决改写后文档更新', dcRead().includes('改为不需要审批'))
+ok('裁决改写后不残留旧裁决', !dcRead().includes('需要，二级审批'))
+
+// 裁决清空 → 移除章节，避免留下过期裁决误导后续 Phase
+dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolved: false }])
+ok('裁决清空后移除章节', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === true)
+ok('裁决清空后无残留', !dcRead().includes('harness:decisions:start'))
 
 // ════════════════════════════════════════════════════════════
 summarize(sandbox)

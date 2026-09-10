@@ -774,6 +774,25 @@ try {
   console.error(`  ⚠ 上下文摘要生成失败: ${e.message}`)
 }
 
+// A-3: 需求分析完成（Phase 0→1）时把裁决同步进需求分析文档 ——
+// 裁决随文档流转，任务规划师读最新 md 即可拿到，无需主 Agent 手写裁决块
+if (currentPhase === 0) {
+  try {
+    if (contextRefresh.syncDecisionsToRequirementDoc(storyId)) {
+      console.error('  ✓ 用户裁决已同步进需求分析文档')
+      trace.appendTrace(storyId, {
+        type: 'context_refresh',
+        phase: '0',
+        result: 'success',
+        details: { action: 'sync_decisions', file: 'requirement-analysis.md' }
+      })
+    }
+  } catch (e) {
+    // 同步失败不阻塞推进
+    console.error(`  ⚠ 用户裁决同步失败: ${e.message}`)
+  }
+}
+
 // 持久化 — 最关键的步骤，必须在 trace 之前完成
 writeStateFile(storyId, state)
 

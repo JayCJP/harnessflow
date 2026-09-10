@@ -508,6 +508,28 @@ function buildIncrementalFixSection (storyId) {
  * @param {number} targetPhase - 目标 Phase
  * @returns {string[]} markdown 行，无需注入时返回空数组
  */
+/**
+ * 实测某仓库的 graphify 图谱是否已建
+ *
+ * 图谱存在性是脚本一行就能确认的客观事实，交给子 Agent 各自探测的结果是
+ * 反复误判（已建的报成缺失，进而退回纯文本搜索）。故由脚本实测后注入 prompt。
+ *
+ * @param {string} repoRoot - 仓库根目录绝对路径
+ * @returns {{ built: boolean, label: string }} built=图谱存在；label=注入 prompt 的短描述
+ */
+function probeGraphStatus (repoRoot) {
+  const graphPath = path.join(repoRoot, 'graphify-out', 'graph.json')
+  try {
+    const st = fs.statSync(graphPath)
+    if (!st.isFile()) return { built: false, label: '图谱：未建' }
+    const mb = st.size / (1024 * 1024)
+    const size = mb >= 1 ? `${mb.toFixed(1)}MB` : `${Math.max(1, Math.round(mb * 1024))}KB`
+    return { built: true, label: `图谱：已建 ${size}` }
+  } catch (e) {
+    return { built: false, label: '图谱：未建' }
+  }
+}
+
 function buildRepoSearchEntries (storyId, targetPhase) {
   if (![0, 1, 2].includes(targetPhase)) return []
   let repos
@@ -523,20 +545,37 @@ function buildRepoSearchEntries (storyId, targetPhase) {
   const names = [primary, ...Object.keys(repos.repos).filter(n => n !== primary)]
     .filter(n => repos.repos[n])
 
+  const entries = names.map(name => ({
+    name,
+    isPrimary: name === primary,
+    graph: probeGraphStatus(repos.repos[name])
+  }))
+  const hasAnyGraph = entries.some(e => e.graph.built)
+
   const lines = [
     '## 🔎 代码检索入口',
     '',
-    // 逐仓只给目录 —— 子 Agent 凭空猜不到绝对路径，这是脚本独有的事实
-    ...names.map(name => {
-      const isPrimary = name === primary
-      return `- ${name}${isPrimary ? '（主仓，即当前工作目录）' : ''} → \`${toPosix(repos.repos[name])}\``
-    }),
+    // 逐仓给目录与图谱实测状态 —— 绝对路径与文件是否存在都是脚本独有的客观事实，
+    // 子 Agent 凭空猜不到，也不该各自探测一遍
+    ...entries.map(e =>
+      `- ${e.name}${e.isPrimary ? '（主仓，即当前工作目录）' : ''} → \`${toPosix(repos.repos[e.name])}\`（${e.graph.label}）`
+    ),
     '',
     '检索统一走 `graphify` skill（`/graphify`）: `graphify query "<模块/关键词>"`。',
     '',
-    '> 先根据上述仓库目录，按需求 `cd` 到对应项目目录，再执行 graphify 操作（graphify 按 **cwd** 解析图谱并自行判定 `graphify-out/graph.json` 是否存在，无需在此重复说明）。',
+    '> 图谱按 **cwd** 解析: 先按上述目录 `cd` 到目标仓，再执行 `graphify query`。',
+    '',
+    hasAnyGraph
+      ? '> 标注「已建」的仓库直接检索即可，无需再探测图谱是否存在。'
+      : '> 本 Story 涉及仓库均未建图谱: 不要耗时探测，检索改用 kb-query + Grep 双源交叉验证。',
     ''
   ]
+  if (hasAnyGraph && entries.some(e => !e.graph.built)) {
+    lines.push(
+      '> 标注「未建」的仓库: 不要耗时探测，改用 kb-query + Grep 双源交叉验证。',
+      ''
+    )
+  }
   return lines
 }
 
@@ -700,12 +739,29 @@ function buildAgentPrompt (opts) {
     expectedDescriptions.unshift('{需求标题}_bug分析报告.md — Bug 事实记录（问题复述 + 复现步骤 + 代码定位 + 根因 + 责任方分类，不含修复方案）')
   }
 
+  // A-4: 本 Phase 已有产出物 = 这不是首轮，而是门控未过后的返工/重试。
+  // 原实现按 Phase 静态拼装，首轮与返工的 prompt 语气完全一致，子 Agent 无从得知
+  // 「已有产出、只需补缺口」，于是把已完成的部分整轮重做（实测 Phase 0 两轮 prompt
+  // 仅差一段背景资料）。此处据「产出物是否已落盘」这一客观事实切换语气。
+  // 增量修复（scope=incremental）已有自己的窄上下文指引，不叠加本提示。
+  const producedBefore = expectedOutputs
+    .filter(f => !f.includes('*') && fs.existsSync(path.join(PLANS_DIR, storyId, f)))
+  const isRework = !incremental && producedBefore.length > 0
+
+  const reworkSection = isRework
+    ? '## ⚠️ 本轮为返工（增量模式）\n' +
+      `本 Phase 已产出: ${producedBefore.join('、')}\n` +
+      '门控未通过说明它们尚不完整或存在问题 —— 请**只补齐缺口、修正已指出的问题**，\n' +
+      '不要从零重写已有内容，也不要推翻已达成共识的结论。\n'
+    : ''
+
   const promptLines = [
     `## Story: ${storyId} | Phase: ${targetPhase} (${getPhaseName(targetPhase)})`,
     '',
     agentInfo ? `## 你的角色\n${agentInfo.label} (注册名: ${agentInfo.agent})` : '',
     agentInfo ? `\n## 你的任务\n${agentInfo.instruction}` : '',
     '',
+    reworkSection,
     storyInputSection,
     storyContext.length > 0 ? `## Story 背景资料\n请读取以下文件获取完整内容：\n${storyContext.join('\n')}\n` : '',
     (targetPhase === 1 && taskPlannerFigmaInstruction.length > 0) ? taskPlannerFigmaInstruction.join('\n') : '',

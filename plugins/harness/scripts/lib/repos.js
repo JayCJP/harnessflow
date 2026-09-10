@@ -44,9 +44,52 @@ function getDefaultRepoName () {
 }
 
 /**
+ * 规范化并校验 repos.json 的配置
+ *
+ * primary 的约定是「仓库名」，但写入方（AI 子 Agent）常误写成仓库根路径，
+ * 于是 repos[primary] 为 undefined —— 原实现直接静默降级成单仓默认，
+ * 后果是多仓注册形同未注册（跨仓检索入口只剩主仓一行），且无任何提示。
+ * 此处把「primary 命中某仓根路径」自动纠正回仓库名，无法纠正时返回 null 由调用方降级。
+ *
+ * @param {Object} data - repos.json 解析出的原始对象
+ * @param {string} [source] - 配置来源描述，进告警文案便于定位是哪个 Story 配错了
+ * @returns {{ primary: string, repos: Object<string,string>, updatedAt?: string }|null}
+ *   规范化后的配置；无法修复时返回 null
+ */
+function normalizeRepos (data, source) {
+  const where = source ? `[repos] (${source}) ` : '[repos] '
+  if (!data || typeof data !== 'object') return null
+  const repos = data.repos
+  if (!repos || typeof repos !== 'object' || Object.keys(repos).length === 0) return null
+
+  const names = Object.keys(repos)
+  // primary 已是合法仓库名 —— 唯一不需要纠正的正常路径
+  if (typeof data.primary === 'string' && Object.prototype.hasOwnProperty.call(repos, data.primary)) {
+    return data
+  }
+
+  // primary 被写成某个仓库的根路径 → 映射回该仓库名
+  if (typeof data.primary === 'string') {
+    const hit = names.find(n => path.resolve(repos[n]) === path.resolve(data.primary))
+    if (hit) {
+      console.warn(`${where}primary 写成了仓库路径而非仓库名，已自动纠正: "${data.primary}" → "${hit}"`)
+      return { ...data, primary: hit }
+    }
+  }
+
+  console.warn(
+    `${where}primary "${data.primary}" 不是 repos 的键（现有: ${names.join(', ')}），` +
+    '多仓注册失效，已回退单仓默认'
+  )
+  return null
+}
+
+/**
  * 加载仓库注册表（repos.json，story 级独立）
  * 统一模式：无论单仓库还是多仓库，永远返回有效对象，不返回 null。
  * - storyId 指定且 repos.json 存在且合法 → 读取返回
+ * - primary 写成了仓库路径 → 自动纠正并告警后返回
+ * - primary 无法纠正 / 解析失败 → 告警并返回单仓库默认
  * - storyId 指定但 repos.json 不存在 → 返回单仓库默认（不写入文件）
  * - storyId 未指定（null/undefined）→ 返回单仓库默认（向后兼容）
  * @param {string} [storyId] - Story ID（story 级独立配置）
@@ -60,10 +103,11 @@ function loadRepos (storyId) {
     if (fs.existsSync(storyReposFile)) {
       try {
         const data = JSON.parse(fs.readFileSync(storyReposFile, 'utf-8'))
-        if (data && data.primary && data.repos && data.repos[data.primary]) {
-          return data
-        }
-      } catch (e) { /* 解析失败，降级为单仓库默认 */ }
+        const normalized = normalizeRepos(data, storyId)
+        if (normalized) return normalized
+      } catch (e) {
+        console.warn(`[repos] (${storyId}) repos.json 解析失败，已回退单仓默认: ${e.message}`)
+      }
     }
   }
   // 单仓库默认（story 未配置或 storyId 未传）
@@ -87,8 +131,16 @@ function ensureReposJson (storyId, overrideConfig) {
   }
   const reposFile = getReposFilePath(storyId)
   // 强制覆盖模式（AI 检测到多仓库后主动写入）
+  // 写入即校验: 无效 primary 直接抛错，否则写进去的仍是「静默失效的多仓配置」
   if (overrideConfig && overrideConfig.primary && overrideConfig.repos) {
-    const config = { ...overrideConfig, updatedAt: new Date().toISOString() }
+    const normalized = normalizeRepos(overrideConfig, storyId)
+    if (!normalized) {
+      throw new Error(
+        `ensureReposJson: primary "${overrideConfig.primary}" 必须是 repos 的键之一` +
+        `（现有: ${Object.keys(overrideConfig.repos).join(', ')}）`
+      )
+    }
+    const config = { ...normalized, updatedAt: new Date().toISOString() }
     fs.writeFileSync(reposFile, JSON.stringify(config, null, 2), 'utf-8')
     return config
   }
