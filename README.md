@@ -130,13 +130,26 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 |---------|---------|----------------------|---------|
 | **TAPD MCP** | Bug 分析、缺陷修复、需求详情拉取 | 需求分析师（fixbugs）、`tapd-bug-analyzer` | fixbugs 模式必需 |
 | **Figma MCP** | 设计稿读取、frame 清单、组件映射 | 需求分析师、前端开发工程师、`figma` / `figma-to-component-map` | 有 Figma 设计稿时必需 |
-| **Playwright MCP** | 原型抓取（墨刀/Axure）、UI 自动化测试、接口验证 | 需求分析师（原型）、测试工程师（验证） | 有原型链接 / 需 UI 测试时必需 |
 | **GitLab MCP** | 创建 Merge Request | 发布助手（②创建 MR） | 需走 MR 流程时必需 |
 | **DevOps MCP** | 云端构建、部署 | 发布助手（⑤构建发布） | 需云端部署时必需 |
 | **Sequential Thinking MCP** | 任务拆解时的结构化推理 | 任务规划师 | 建议启用 |
 
-> **提示**：以上 MCP 服务名（如 `TAPD_MCP_Server`、`Figma_MCP`、`Playwright`、`GitLab`、`Devops`、`Sequential_Thinking`）需与工具配置中的 MCP 名称一致，Agent 通过 `mcp_call_tool(serverName, ...)` 调用。
+> **提示**：以上 MCP 服务名（如 `TAPD_MCP_Server`、`Figma_MCP`、`GitLab`、`Devops`、`Sequential_Thinking`）需与工具配置中的 MCP 名称一致，Agent 通过 `mcp_call_tool(serverName, ...)` 调用。
 > 未配置对应 MCP 时，涉及该能力的环节会失败并如实告知，不会静默跳过。
+
+### 原型抓取：无需 MCP
+
+原型抓取（墨刀 / Axure / Figma 原型）由内置 skill `prototype-capture` 通过
+**`playwright-cli`**（微软官方 CLI，`@playwright/cli`）完成，**不占用 MCP 槽位**：
+
+```bash
+npm install -g @playwright/cli@latest
+playwright-cli --version    # 需 ≥ 0.1.17
+```
+
+| 能力 | 使用场景 | 用到它的 Agent / Skill | 必需程度 |
+|---------|---------|----------------------|---------|
+| **playwright-cli**（内置 skill，无需 MCP） | 原型抓取（墨刀/Axure） | 需求分析师（原型）、`prototype-capture` | 有原型链接时必需 |
 
 ---
 

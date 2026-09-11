@@ -9,9 +9,9 @@
       "blockers": [
         "4 项阻塞级待确认问题未解决 (open-questions: 4)"
       ],
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-09-10T09:03:00.583Z",
-      "lastSeen": "2026-09-10T09:03:00.583Z",
+      "lastSeen": "2026-09-10T10:11:32.165Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
     },
@@ -29,8 +29,108 @@
       "lastSeen": "2026-09-10T09:10:58.398Z",
       "needsManualReview": false,
       "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "task_missing_line_ref",
+      "rootCause": "1 个 task_missing_line_ref 问题 (示例: Task[task-2]: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）)",
+      "resolution": "跨项目 task 的 description 必须包含行号引用（如 L123 或 line 45）",
+      "storyId": "STORY-20260910-AILIFE-FIX",
+      "blockers": [
+        "Task[task-2]: 跨项目 task description 必须包含行号引用（如 L123 或 line 45）"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T10:23:59.928Z",
+      "lastSeen": "2026-09-10T10:23:59.928Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 15 条验收标准未被任何 Task 引用: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "STORY-20260910-AILIFE-FIX",
+      "blockers": [
+        "15 条验收标准未被任何 Task 引用: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T10:27:29.685Z",
+      "lastSeen": "2026-09-10T10:27:29.685Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 4,
+      "failureType": "dev_pass_expired",
+      "rootCause": "Agent 在 Phase 4 试图编辑 src/，dev-pass 仅在 Phase 2 有效",
+      "resolution": "dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2",
+      "storyId": "ai-as",
+      "blockers": [],
+      "occurrences": 4,
+      "firstSeen": "2026-09-10T13:10:33.496Z",
+      "lastSeen": "2026-09-10T13:14:13.375Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 dev-pass 限域外的文件: d:/test-blanch/ai-as/CustomerServiceSystem/src/views/pc/ChatComponents/AiAssistant/SmartQuery.vue",
+      "resolution": "只允许编辑 task-dag.json 中声明的文件，请检查 files 列表",
+      "storyId": "ai-as",
+      "blockers": [],
+      "occurrences": 4,
+      "firstSeen": "2026-09-10T13:10:33.507Z",
+      "lastSeen": "2026-09-10T13:14:13.384Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 15 个 blocker（类型: schema_validation_failed，示例: Schema 校验失败: task-dag.json.tasks[0].figmaLink: should be null），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "ai-as-r2",
+      "blockers": [
+        "Schema 校验失败: task-dag.json.tasks[0].figmaLink: should be null",
+        "Schema 校验失败: task-dag.json.tasks[0].figmaLink: should be array",
+        "Schema 校验失败: task-dag.json.tasks[0].figmaLink: should match exactly one schema in oneOf",
+        "Schema 校验失败: task-dag.json.tasks[0].evidence.source: should be equal to one of the allowed values",
+        "Schema 校验失败: task-dag.json.tasks[1].figmaLink: should be null",
+        "Schema 校验失败: task-dag.json.tasks[1].figmaLink: should be array",
+        "Schema 校验失败: task-dag.json.tasks[1].figmaLink: should match exactly one schema in oneOf",
+        "Schema 校验失败: task-dag.json.tasks[1].evidence.source: should be equal to one of the allowed values",
+        "Schema 校验失败: task-dag.json.tasks[2].figmaLink: should be null",
+        "Schema 校验失败: task-dag.json.tasks[2].figmaLink: should be array",
+        "Schema 校验失败: task-dag.json.tasks[2].figmaLink: should match exactly one schema in oneOf",
+        "Schema 校验失败: task-dag.json.tasks[2].evidence.source: should be equal to one of the allowed values",
+        "Schema 校验失败: task-dag.json.tasks[3].evidence.source: should be equal to one of the allowed values",
+        "Schema 校验失败: task-dag.json.tasks[4].evidence.source: should be equal to one of the allowed values",
+        "Schema 校验失败: task-dag.json.tasks[5].evidence.source: should be equal to one of the allowed values"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T14:11:16.647Z",
+      "lastSeen": "2026-09-10T14:11:16.647Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 45 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "STORY-20260910-01",
+      "blockers": [
+        "45 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-30, AC-31, AC-32, AC-33, AC-34, AC-35, AC-36, AC-37, AC-38, AC-39, AC-40, AC-41, AC-42, AC-43, AC-44, AC-45"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T14:27:41.620Z",
+      "lastSeen": "2026-09-10T14:27:41.620Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
     }
   ],
   "version": "2.1",
-  "lastUpdated": "2026-09-10T09:10:58.398Z"
+  "lastUpdated": "2026-09-10T14:27:41.620Z"
 }

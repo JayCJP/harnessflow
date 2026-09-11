@@ -1,7 +1,43 @@
 {
   "version": "1.0",
-  "totalProjects": 0,
-  "totalStories": 0,
-  "insights": [],
-  "lastUpdated": "2026-09-03T15:58:12.898Z"
+  "totalProjects": 1,
+  "totalStories": 1,
+  "insights": [
+    {
+      "id": "INSIGHT-001",
+      "targetPhase": 2,
+      "type": "fix_loop_trigger",
+      "severity": "warning",
+      "title": "Fix-loop 触发率 100%",
+      "description": "代码审查/测试失败率偏高，开发阶段自测不充分",
+      "recommendation": "开发阶段加强自测：参考知识库 pitfalls.md 避免已知坑点，ESLint 0 error 后再提交审查",
+      "evidence": "触发率 100%",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T16:01:00.233Z",
+      "lastSeen": "2026-09-10T16:01:00.234Z"
+    },
+    {
+      "id": "INSIGHT-002",
+      "targetPhase": 3,
+      "type": "fix_loop_success",
+      "severity": "warning",
+      "title": "Fix-loop 第 1 轮成功率 50%",
+      "description": "BLOCKER 修复建议的可操作性不足，导致需要多轮修复",
+      "recommendation": "代码审查师在 FIX_DATA 块中给出代码级建议（含具体行号和替换方案），而非泛泛描述问题",
+      "evidence": "成功率 50%",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T16:01:00.234Z",
+      "lastSeen": "2026-09-10T16:01:00.234Z"
+    }
+  ],
+  "lastUpdated": "2026-09-10T16:01:00.234Z",
+  "_knownProjects": [
+    "CustomerServiceSystem"
+  ]
 }
