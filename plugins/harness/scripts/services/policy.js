@@ -87,7 +87,19 @@ const RECOVERY_SUGGESTIONS = {
   // Phase 0→1: open-questions 有 blocking 未解决
   blocking_unresolved: {
     level: 4,
-    action: '请用户逐项确认 open-questions 中的 blocking 项并更新 resolved 字段',
+    action: '请用户逐项确认 open-questions 中的 blocking 项，并由需求分析师回填 resolution 后置 resolved 字段为 true',
+    autoFixable: false
+  },
+  // Phase 0→1: open-questions 有非阻塞项未解决（2026-09-12 用户裁定: 不论 blocking，一律拦截）
+  open_questions_unresolved: {
+    level: 4,
+    action: 'open-questions.json 仍有未解决项 —— 由需求分析师逐项给出结论（填写非空 resolution）并置 resolved=true；确实无需处理的也要写明判定依据，不得留空',
+    autoFixable: false
+  },
+  // Phase 0→1: 已置 resolved=true 但 resolution 为空（空壳消解）
+  pseudo_resolved: {
+    level: 4,
+    action: '存在「已置 resolved=true 但未填写 resolution」的项，门控视为未解决 —— 补齐每条的 resolution 结论后重试',
     autoFixable: false
   },
   // Phase 0→1: AC 格式错误
@@ -442,21 +454,27 @@ function checkPhase0Gate (storyId, state, result) {
   }
 
   // 待确认项 — 单一数据源：open-questions.json
+  // 口径（2026-09-12 用户裁定）: 门控点只在 Phase 0→1；未解决项**不论 blocking 与否**一律拦截；
+  // 「已解决」= resolved:true 且 resolution 非空（判定见 contracts.isTrulyResolved）。
+  // 此前非阻塞项只进 warnings 放行，导致 3 条未确认项能一路带到 Phase 5 而无人处理。
   const oqCheck = checkOpenQuestions(storyId)
   const oqUnresolved = oqCheck.exists ? oqCheck.unresolved.length : 0
   const oqBlocking = oqCheck.exists ? oqCheck.unresolved.filter(q => q.blocking).length : 0
+  const oqPseudo = oqCheck.exists ? (oqCheck.pseudoResolved || []).length : 0
 
-  if (oqBlocking > 0) {
-    const blocker = structuredError(
-      'blocking_unresolved',
-      `${oqBlocking} 项阻塞级待确认问题未解决 (open-questions: ${oqBlocking})`,
-      4,
-      '请用户逐项确认 open-questions 中的 blocking 项'
-    )
-    result.blockers.push(blocker)
+  if (oqUnresolved > 0) {
+    const ids = oqCheck.unresolved.map(q => q.id || '?').slice(0, 5).join(', ')
+    const type = oqPseudo > 0
+      ? 'pseudo_resolved'
+      : (oqBlocking > 0 ? 'blocking_unresolved' : 'open_questions_unresolved')
+    const detail = `${oqUnresolved} 项待确认问题未真正解决（阻塞级 ${oqBlocking} 项` +
+      (oqPseudo > 0 ? `，其中 ${oqPseudo} 项仅置 resolved=true 未填 resolution` : '') +
+      `）: ${ids}`
+    const resolution = oqPseudo > 0
+      ? '补齐这些项的 resolution 结论（仅置 resolved=true 视为未解决）后重试'
+      : '由需求分析师逐项给出结论并填写非空 resolution 后置 resolved=true 重试'
+    result.blockers.push(structuredError(type, `open-questions: ${detail}`, 4, resolution))
     result.passed = false
-  } else if (oqUnresolved > 0) {
-    result.warnings.push(`${oqUnresolved} 项待确认问题未解决但无阻塞级`)
   }
 
   // Figma frame inventory 不在 Phase 0→1 校验 —— frame-inventory 由 Phase 1 任务规划师拆 task 时产出，

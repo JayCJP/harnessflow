@@ -847,6 +847,15 @@ function buildAgentPrompt (opts) {
     // 紧随产出清单：先说产出什么，再说按什么格式产出（骨架由 schema-injector 生成）
     schemaSection,
     '',
+    // Phase 0 专属: open-questions 的「真解决」口径。
+    // schema-injector 只渲染白名单/必填/additionalProperties，跨字段规则无法自动进 prompt；
+    // 不写明的话 Agent 会把 resolved 置 true 就交付，要等被门控拦下一次才知道规则。
+    targetPhase === 0
+      ? '## ⚠️ open-questions.json 判定口径\n' +
+        '每一条 question 只有在 **`resolved: true` 且 `resolution` 为非空字符串** 时才算「已解决」；\n' +
+        '只置 `resolved: true` 而不写结论的项，Phase 0→1 门控仍判为未解决。\n' +
+        '**未解决项无论 blocking 与否都会阻断推进** —— 确实无需处理的项也要在 `resolution` 里写明判定依据，不得留空。\n'
+      : '',
     (storyMode === 'fixbugs' && targetPhase === 2)
       ? '## Bug 修复说明\nBug 事实（问题复述 / 复现步骤 / 代码定位 / 根因）已在 Phase 0 分析完毕、并在 Phase 1 消化进 `task-dag.json` 与 `acceptance-criteria.json`。\n**以契约文件为准动手**: `task-dag.json` 的 `files[]` 就是改动范围，`acceptanceCriteria` 关联的 AC 描述里带 Bug 编号。\n修复怎么改由你设计: 先用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再给出实现。\n'
       : '',
