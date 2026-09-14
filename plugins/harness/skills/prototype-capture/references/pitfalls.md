@@ -21,6 +21,7 @@
 cd "$W" && playwright-cli close
 cd "$W" && playwright-cli kill-all          # 必须补这一条
 cd "$W" && playwright-cli --json list       # 复查必须是 {"browsers": []}
+rm -rf "$W/.playwright-cli"                 # 只清缓存；截图与快照保留（见 §7）
 ```
 
 **疑似残留时**：`--json list` 无输出但内存异常 → `kill-all`；仍不行则查系统进程
@@ -100,13 +101,12 @@ cd "$W" && playwright-cli snapshot --filename=topo.yml
 cat "$W/topo.yml"                       # --filename 落在 CWD 根
 ```
 
-或全局改成 stdout 模式（在当前目录建 `playwright-cli.json`）：
-
-```json
-{ "outputMode": "stdout" }
-```
-
-> 对本 skill 不建议改 stdout —— 落文件后可按需 `cat` 片段（如 `head -120`），
+> **关于配置文件**（v0.1.19 逐行核对）：默认读取 `<项目目录>/.playwright/cli.config.json`，
+> 全局配置为 `~/.playwright/cli.config.json`，也可用 `--config=<path>` 显式指定。
+>
+> ⚠️ **0.1.19 不存在 `outputMode` 配置键**（旧文档写的「在当前目录建 `playwright-cli.json`」
+> 是错的：文件名与目录都不对）—— 不要靠配置文件改输出模式，取值统一加 `--raw`（见 §0.1 / §10）。
+> 对本 skill 也不建议改成 stdout —— 落文件后可按需 `cat` 片段（如 `head -120`），
 > 比全量进上下文省得多。
 
 ---
@@ -177,7 +177,7 @@ cd "$W" && playwright-cli network          # 看请求失败
 **根因**：Git Bash / MSYS 对非 ASCII 参数的处理与 Windows 原生不一致。
 
 **规避**：文件名用**序号 + 拼音**（`03-order-list.png`），中文名登记在
-`prototype-analysis.md` 的页面清单表格里。这样文件名可移植、可排序，中文可读性不丢。
+`prototype-capture.md` 的页面清单表格里。这样文件名可移植、可排序，中文可读性不丢。
 
 ---
 
@@ -346,3 +346,68 @@ cd "$W" && playwright-cli --raw eval "() => new Promise(r => setTimeout(r, 3000)
 | 内存暴涨 / 进程堆积 | daemon 残留 | `kill-all`，养成收尾习惯 |
 | 页面文本极少 | 异步未渲染 or Canvas | 先延时再探测；仍少则用 `find` 验证是否真有可读文本 |
 | `find "A\|B"` 匹配不到 | 默认是字面量子串，不是正则 | 多关键词加 `--regex` |
+| 说明面板 `innerText` 取到空 | 面板 `display:none` | 改用 `textContent`，见 §14 |
+| `find "说明"` 一无所获 | 关键词不对 / 说明是 Canvas | 换关键词组再跑；Canvas 只能截图，见 §14 |
+| 页面只截到首屏 | 内容超出视口 | 追加 `--full-page`，见 §15 |
+| 加了 `--full-page` 还是首屏大小 | 播放器类原型文档不滚动 | 先量内容高 → `resize` 调高视口再截，见 §15 |
+| 截图被说明面板遮住 | 面板悬浮在页面上 | 点开前后各截一张，见 §15 |
+
+---
+
+## 14. 说明文字采集：隐藏面板 + Canvas + 关键词假阴性
+
+**现象 A**：`eval` 取说明面板 `innerText` 返回**空字符串**，以为面板没内容 ——
+其实面板 `display:none`，`innerText` 对未渲染元素一律返回空。
+
+**现象 B**：`find "说明"` 一无所获，判定「这个原型没有说明」，结果文档漏掉整节需求说明。
+
+**现象 C**：说明是 Canvas 画上去的，`find` / 探针都拿不到。
+
+**根因与规避**：
+
+| 现象 | 根因 | 规避 |
+|---|---|---|
+| 隐藏面板取到空 | `innerText` 忽略未渲染元素 | 改用 **`textContent`**（见 cli-commands.md §8.2 探针） |
+| 关键词假阴性 | 面板标题不叫「说明」（可能叫「需求」「备注」「逻辑」…） | 换多组关键词再跑，见 cli-commands.md §8.4 |
+| Canvas 说明 | 无 DOM 语义 | 只能截图识别，标注遗漏风险 + 非 blocking 待确认项 |
+
+**另外**：`find` 的文本参数与 `--regex` **互斥**，只能给一个；
+`find "A|B"` 默认按字面量匹配，多关键词必须显式 `--regex`（见 §3.4）。
+
+---
+
+## 15. 截图：整页 / 遮挡 / 中文名
+
+**现象 A**：页面内容超出视口，只截到首屏，下半页字段全丢。
+**现象 B**：点开「说明」面板后截图，面板**浮在页面上遮住正文**。
+**现象 C**：`screenshot --filename=订单列表.png` 在 Git Bash 下乱码报错（同 §9）。
+**现象 D（播放器类原型专属）**：加了 `--full-page`，输出尺寸仍和视口一模一样、内容照样被截断。
+
+**根因 D**：墨刀 / Axure / 产品大牛这类播放器是**固定视高应用** ——
+`document.scrollHeight == innerHeight`（**文档不滚动**），可滚动内容在**内部容器**里。
+`--full-page` 只按文档滚动高度扩展，对内部容器无能为力。
+
+**规避**：
+
+| 现象 | 规避 |
+|---|---|
+| 长页面截不全 | 追加 **`--full-page`**（v0.1.19 实测可用）—— **逐页截图默认必带** |
+| **加了 `--full-page` 还是首屏大小** | **先量内容高，再 `resize` 调高视口**，然后整页截图（见下） |
+| 目标容器自身带滚动条 | `resize` 不够 → 滚动容器分屏截图，或就地截该元素 |
+| 小字号 / Canvas 看不清 | 追加 **`--hires`** |
+| 说明面板遮挡正文 | **点开前后各截一张**，或先截正文再点开截说明 |
+| 中文文件名乱码 | 文件名用「序号-拼音」，中文名登记在 md 表格（见 §9） |
+
+```bash
+# ① 量内容高度
+cd "$W" && playwright-cli --raw eval "() => { const n=document.querySelector('.rResCanvas')||document.querySelector('.zoom-area')||document.querySelector('.screen-container'); return Math.max(n?(n.scrollHeight||n.offsetHeight):0, document.documentElement.scrollHeight) }"
+# ② 视口调到比它高（+播放器页头约 100px），宽度保持默认 1920
+cd "$W" && playwright-cli resize 1920 2250 && playwright-cli --raw eval "() => new Promise(r => setTimeout(r, 2000))"
+# ③ 整页截图（此时才是真的截全）
+cd "$W" && playwright-cli screenshot --filename=03-order-list.png --full-page --hires
+```
+
+> **实测（墨刀，v0.1.19，宽 1920）**：画布内容高 2111px。
+> 默认视口 `1920×1080` 时画布容器仅 1032px（下半截看不到），`--full-page` 输出
+> 仍是 **1920×1080（= 首屏）**，等于没生效；
+> `resize 1920 2250` 后容器 2202px ≥ 2111px，整页截图 **1920×2250** 完整覆盖。

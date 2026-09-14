@@ -81,7 +81,8 @@ W="<storyDir>/prototype-work"     # 本 Story 固定工作目录
 mkdir -p "$W"
 ```
 
-截图与快照都落这里，抓完归档到 `<storyDir>/prototype/`，`$W` 整个删掉。
+截图与快照都落这里，**抓完整体保留**（原始证据，供需求分析师自上而下理解与复核）；
+只清掉 `$W/.playwright-cli/` 缓存目录，**不删 `$W` 本身**。
 
 ---
 
@@ -239,8 +240,8 @@ cd "$W" && playwright-cli --raw eval "() => JSON.stringify([...document.querySel
 # ⑤ 点击后 URL 变化 → 记录跳转关系（写进「交互流程」）
 cd "$W" && playwright-cli --raw eval "() => location.href"
 
-# ⑥ 截图归档（序号按遍历顺序，文件名用拼音）
-cd "$W" && playwright-cli screenshot --filename=03-order-list.png
+# ⑥ 截图归档（序号按遍历顺序，文件名用拼音；整页必带 --full-page）
+cd "$W" && playwright-cli screenshot --filename=03-order-list.png --full-page
 
 # ⑦ 取可见文本（页面内容 → 字段与校验规则）
 cd "$W" && playwright-cli --raw eval "() => document.body.innerText"
@@ -254,12 +255,12 @@ cd "$W" && playwright-cli go-back
 ```bash
 # hover 态
 cd "$W" && playwright-cli hover <ref>
-cd "$W" && playwright-cli screenshot --filename=03-order-list-hover.png
+cd "$W" && playwright-cli screenshot --filename=03-order-list-hover.png --full-page
 
 # 弹窗：点开后 snapshot 记录结构，再 ESC 关闭
 cd "$W" && playwright-cli click <ref>
 cd "$W" && playwright-cli snapshot --filename=modal.yml && cat "$W/modal.yml"
-cd "$W" && playwright-cli screenshot --filename=03-order-list-modal.png
+cd "$W" && playwright-cli screenshot --filename=03-order-list-modal.png --full-page
 cd "$W" && playwright-cli press Escape
 ```
 
@@ -296,7 +297,7 @@ B 类 DOM 是空壳，`eval innerText` / `get_visible_text` 拿不到东西。**
 
 ```bash
 # ① 截图看整体布局（人/AI 读图识别页面清单）
-cd "$W" && playwright-cli screenshot --filename=00-overview.png
+cd "$W" && playwright-cli screenshot --filename=00-overview.png --full-page
 
 # ② snapshot 只用来找导航节点 ref（不要指望拿到页面内容）
 cd "$W" && playwright-cli snapshot --filename=nav.yml && cat "$W/nav.yml"
@@ -304,14 +305,15 @@ cd "$W" && playwright-cli snapshot --filename=nav.yml && cat "$W/nav.yml"
 # ③ 逐页面：点导航 → 截图
 cd "$W" && playwright-cli click <nav-ref>
 cd "$W" && playwright-cli --raw eval "() => new Promise(r => setTimeout(r, 1500))"
-cd "$W" && playwright-cli screenshot --filename=01-login.png
+cd "$W" && playwright-cli screenshot --filename=01-login.png --full-page
 
 # ④ 顺便试一次文本（混合渲染有时残留可读文本，有就白捡）
 cd "$W" && playwright-cli --raw eval "() => document.body.innerText.length"
 ```
 
 **必须执行**：按 SKILL.md「B 类（Canvas 渲染）的强制标注」三条，在
-`prototype-analysis.md` 标注字段来源局限 + 在 `open-questions.json` 留非 blocking 待确认项。
+`prototype-capture.md` 标注字段来源局限，并提醒需求分析师把存疑字段转为 `open-questions.json`
+的非 blocking 待确认项（需求分析师再据此写入 `prototype-analysis.md`）。
 
 > 截图里能看清的字段名/文案**可以**写进文档（这是事实）；
 > 看不清的**禁止**靠上下文推断补全（这是编造）。
@@ -429,9 +431,9 @@ cd "$W" && playwright-cli --raw eval "() => new Promise(r => setTimeout(r, 3000)
 # ④ 取当前页内容（C2 同源时）
 cd "$W" && playwright-cli --raw eval "() => { const d=document.querySelector('iframe').contentDocument; return JSON.stringify({title: d.title, text: d.body.innerText.slice(0,2000)}) }"
 
-# ⑤ 截图（Axure 是 PC 宽屏，先 resize）
-cd "$W" && playwright-cli resize 1440 900
-cd "$W" && playwright-cli screenshot --filename=02-<拼音页面名>.png
+# ⑤ 截图（Axure 是 PC 宽屏，先 resize 到默认视口；高度按内容高调，见 §7）
+cd "$W" && playwright-cli resize 1920 1080
+cd "$W" && playwright-cli screenshot --filename=02-<拼音页面名>.png --full-page
 ```
 
 > ⚠️ **不要用 `?p=<页面名>` URL 跳页** —— 实测（v0.1.19 / 产品大牛）该 URL 会**重新触发
@@ -454,31 +456,185 @@ cd "$W" && playwright-cli screenshot --filename=02-<拼音页面名>.png
 cd "$W" && playwright-cli close
 cd "$W" && playwright-cli kill-all
 cd "$W" && playwright-cli --json list        # 必须为 {"browsers": []}
+rm -rf "$W/.playwright-cli"                  # 只清浏览器缓存，截图与快照保留
 ```
 
 `close` 只清 session 文件，daemon 进程可能仍在。`kill-all` 是强制杀。
 `--json list` 是复查 —— 非空就再跑一次 `kill-all`。
+**`$W` 整体保留**（截图 + 快照 = 原始证据）；**只删 `.playwright-cli/`**。
 
 ## 7. 输出组织
 
-```bash
-# 截图收拢到 Story 产物目录（序号与页面清单表格一致）
-mkdir -p "<storyDir>/prototype"
-cp "$W"/00-overview.png "$W"/01-login.png "<storyDir>/prototype/"
+截图与快照**留在 `<workDir>` 原地**，不搬运 —— `workDir` 就是本 Story 的原型证据目录。
 
-# 快照 yml 不归档；整个 workDir 抓完即删
-rm -rf "$W"
+```bash
+# 只清浏览器缓存；截图与快照保留
+rm -rf "$W/.playwright-cli"
 ```
 
 | 产物 | 位置 | 命名 |
 |---|---|---|
 | 截图（`--filename`） | `<workDir>/`（CWD 根） | `<序号>-<拼音>.png` |
-| 截图（不带参数） | `<workDir>/.playwright-cli/` | 自动生成时间戳名 |
+| 截图（不带参数） | `<workDir>/.playwright-cli/`（**收尾会被清掉**） | 自动生成时间戳名 |
 | 快照（`--filename`） | `<workDir>/`（CWD 根） | `<用途>.yml` |
-| 快照（不带参数） | `<workDir>/.playwright-cli/` | 自动生成时间戳名 |
-| 页面清单 | `prototype-analysis.md` 表格 | 中文名 + 序号 + 截图文件名 + URL/iframe src |
+| 页面清单 | `prototype-capture.md` 表格 | 中文名 + 序号 + 截图文件名 + URL/iframe src |
 
 > **`--filename` 落 CWD 根，不带 `--filename` 落 `.playwright-cli/`** —— 实测确认。
-> 本 skill 统一用 `--filename`（落 CWD 根，路径可预期），抓完整个 `<workDir>` 一起删。
+> 本 skill 统一用 `--filename`（落 CWD 根，路径可预期）。
+> ⚠️ 不带 `--filename` 的产物落在 `.playwright-cli/` 内，收尾清理时一并消失 —— **一律显式给 `--filename`**。
+
+**截图参数（v0.1.19 实测可用）**：
+
+| 选项 | 用途 |
+|---|---|
+| `--full-page` | 截**整页**（含可滚动部分）—— **逐页截图默认必带**，不截首屏 |
+| `--hires` | 按设备像素比截**高清**（小字号 / Canvas 类需要） |
+| `--type=webp\|jpeg` | 换格式，默认按扩展名推断 |
+
+**默认视口 `1920×1080`**（PC）：`open` 后先 `playwright-cli resize 1920 1080` 统一基线；
+H5 / 小程序用 `375×812`。
+
+⚠️ **播放器类原型（墨刀 / Axure / 产品大牛）只加 `--full-page` 仍然截不全**：
+这类页面是固定视高应用，**文档不滚动**（`document.scrollHeight == innerHeight`），
+画布内容在内部容器里**按当前视口高度裁切**（不缩放适配），`--full-page` 覆盖不到。
+**先量内容高度、再把视口调高**：
+
+```bash
+# ① 量出画布真实内容高度
+cd "$W" && playwright-cli --raw eval "() => { const n=document.querySelector('.rResCanvas')||document.querySelector('.zoom-area')||document.querySelector('.screen-container'); return Math.max(n?(n.scrollHeight||n.offsetHeight):0, document.documentElement.scrollHeight) }"
+
+# ② 视口高度调到 ≥ 内容高（+播放器页头约 100px），宽度保持 1920，延时后整页截图
+cd "$W" && playwright-cli resize 1920 2250
+cd "$W" && playwright-cli --raw eval "() => new Promise(r => setTimeout(r, 2000))"
+cd "$W" && playwright-cli screenshot --filename=03-order-list.png --full-page
+```
+
+> 实测（墨刀，v0.1.19，宽 1920）：画布内容高 2111px。
+> - `1920×1080`（默认）→ 画布容器仅 1032px，下半截看不到；`--full-page` 输出仍是 **1920×1080（= 首屏）**。
+> - `resize 1920 2250` → 容器 2202px ≥ 2111px，整页截图 **1920×2250** 完整覆盖。
 
 **中文页面名进 md 表格，不进文件名。**
+
+最终还要落盘**抓取材料 `<storyDir>/prototype-capture.md`**（需求分析师据此 + 截图理解后撰写 `prototype-analysis.md`）—— 见 §9。
+
+---
+
+## 8. 原型说明文字采集（**核心环节**）
+
+原型说明 = 产品经理写在原型里的**需求说明 / 交互说明 / 校验规则**。抓不到它，下游只能靠猜。
+
+### 8.1 关键词探测（首选，会穿透 iframe）
+
+```bash
+cd "$W" && playwright-cli --raw find --regex "说明|备注|批注|标注|注释|交互说明|校验|规则|Notes?|Annotations?"
+```
+
+**实测（v0.1.19）**：`find --regex` **会穿透 iframe** —— iframe 内的说明文字
+（ref 形如 `f1e5`）照样进结果，并带上下文切片。这是**发现说明最可靠的手段**，优先于任何选择器。
+
+命中示例（本地 fixture 实跑）：
+
+```
+- generic [ref=e5]:
+  - iframe [ref=e12]:
+    - generic [ref=f1e1]:
+      - text: 限购数量
+      - textbox "请输入限购数量" [ref=f1e3]
+      - button "立即购买" [ref=f1e4]
+      - generic [ref=f1e5]: 说明：限购数量不可超过当前库存      ← iframe 内的说明被穿透命中
+- complementary [ref=e13]:
+  - generic [ref=e14]: 交互说明：输入框失焦即实时校验，非法值红字提示
+```
+
+### 8.2 通用说明探针（属性提示 + 文本锚点兜底）
+
+`find` 只按关键词命中，会漏掉「面板标题不叫说明、但内容就是说明」的情况。用探针兜底：
+
+```bash
+cd "$W" && playwright-cli --raw eval "() => { const KEY = /(note|annotat|comment|remark|mark|desc|说明|备注|批注|标注|注释)/i; const out = []; const seen = new Set(); const push = (src, el) => { const t = ((el && el.textContent) || '').replace(/\s+/g, ' ').trim(); if (t.length < 2 || t.length > 4000 || seen.has(t)) return; seen.add(t); out.push({ src: src, text: t.slice(0, 800) }); }; const nodes = document.querySelectorAll('div,section,aside,article,li,dl,dd,td,th,p,h1,h2,h3,h4,h5,label,span,button'); const cands = []; nodes.forEach(el => { const sig = [el.id, typeof el.className === 'string' ? el.className : ''].join(' '); if (KEY.test(sig)) cands.push(['attr:' + (el.id || el.className), el]); }); nodes.forEach(el => { const own = (el.textContent || '').trim(); if (own.length <= 12 && KEY.test(own)) { const box = el.closest('section,aside,div,li,dl') || el.parentElement; if (box) cands.push(['anchor:' + own, box]); } }); cands.forEach(c => push(c[0], c[1])); return JSON.stringify(out.slice(0, 40)); }"
+```
+
+**实测输出（本地 fixture）**：
+
+```json
+[
+  {"src":"attr:btnNotes","text":"说明"},
+  {"src":"attr:notesPanel","text":"原型说明 下单页限购数量上限由商品配置决定，默认 5 件 点击「立即购买」时校验库存，库存不足提示「库存不足，请调整数量」 支付结果页展示订单号与实付金额，2 秒后自动跳转订单详情"},
+  {"src":"attr:note-item","text":"下单页限购数量上限由商品配置决定，默认 5 件"},
+  {"src":"attr:canvasRemark","text":"交互说明：输入框失焦即实时校验，非法值红字提示"}
+]
+```
+
+**三条要点**：
+
+1. **用 `textContent` 而非 `innerText`**：`display:none` 的说明面板 `innerText` 返回空，
+   `textContent` 仍返回全文 —— **不点开也能拿到说明文字，点开只为补一张截图**。
+2. `attr:` = 属性命中（id/class 含 note/annotation/comment…），`anchor:` = 文本锚点命中。
+   `anchor:` 会带回工具栏一类噪音（如 `"说明 批注 (1 of 3)"`），**需过滤，不要无脑写进材料**。
+3. **探针是兜底不是替代**：先 `find`（命中即准），再用探针补齐结构化说明面板。
+
+### 8.3 展开说明面板（仅为截图，取文本不需要）
+
+```bash
+cd "$W" && playwright-cli snapshot --filename=notes.yml && cat "$W/notes.yml"   # 找「说明」按钮 ref
+cd "$W" && playwright-cli click <ref>            # 也支持 CSS：playwright-cli click "#btnNotes"
+cd "$W" && playwright-cli --raw eval "() => new Promise(r => setTimeout(r, 500))"
+cd "$W" && playwright-cli screenshot --filename=03-order-list-notes.png
+```
+
+> 点开后面板可能改变布局 → **先点开、再截正文页，或点开前后各截一张**，避免截到被遮挡的页面。
+
+### 8.4 三轮找不到就是真没有
+
+```bash
+cd "$W" && playwright-cli --raw find --regex "需求|背景|交互|校验|逻辑|提示|备注|说明"
+```
+
+三轮都没有 → 在 `prototype-capture.md` 如实写「**未找到说明文字**」，
+**禁止**用通用经验补一段像模像样的规则。
+
+---
+
+## 9. 落盘抓取材料 prototype-capture.md
+
+**`<storyDir>/prototype-capture.md`** 是本 skill 的产物（不是 `<workDir>/`）——
+它只**归拢采集到的事实**。需求分析师读这份材料 + `<storyDir>/prototype-work/` 里的截图与快照，
+**理解后自己撰写 `prototype-analysis.md`**。下面给一份可直接照抄的骨架，`<>` 内按实际填写：
+
+```markdown
+# 原型抓取材料：<需求标题>
+
+## 原型抓取方法
+- 原型地址：<URL>
+- 渲染类型：<A 类 DOM / B 类 Canvas / C 类 iframe（C1/C2/C3）>
+- 说明文字来源：<宿主平台说明面板 / 画布批注 / 画布文本 / 未找到说明>
+- 抓取局限：<登录墙 / Canvas 无 DOM 语义 / 说明缺失 / 链接失效 —— 如实写>
+
+## 页面清单
+| 序号 | 页面名 | URL / iframe src | 截图 | 关键功能点 | 状态变体 |
+|---|---|---|---|---|---|
+| 1 | 首页 | <url> | 01-home.png | <功能点> | <hover/弹窗> |
+| 2 | 下单页 | <url> | 02-order-list.png | <功能点> | 02-order-list-notes.png |
+
+## 原型说明（原文摘录，勿加工）
+> 逐条摘录，标注出处页面与载体；无则写「未找到说明文字」。
+- [下单页 / 说明面板] 限购数量上限由商品配置决定，默认 5 件
+- [下单页 / 画布批注] 输入框失焦即实时校验，非法值红字提示
+
+## 交互流程（实测）
+- <页面A> --点击「立即购买」--> <页面B>（实测 URL / DOM 变化）
+
+## 字段与校验规则（原始提取）
+| 字段 | 类型 | 必填 | placeholder | 校验规则 | 来源 |
+|---|---|---|---|---|---|
+| 限购数量 | 数字 | - | 请输入限购数量 | 不可超过当前库存 | 说明文字 |
+
+## 局限与待确认
+- <存疑字段 / 抓不到的部分>（提醒需求分析师转为 open-questions.json 的非 blocking 项）
+```
+
+**硬约束**：
+
+- 截图保留在 `<storyDir>/prototype-work/`（**不删**），文件名写进「页面清单」表格。
+- 「原型说明」只摘录原文，**不加工成规则、不下结论** —— 功能点归并与 AC 推导是需求分析师的活。
+- Canvas 类的字段来源必须标「截图识别」+ 遗漏风险，并提醒需求分析师转记 `open-questions.json`。
