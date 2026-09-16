@@ -101,12 +101,7 @@ function toPosix (p) {
  */
 const AGENT_CONSTRAINTS = [
   '禁止通过 shell 命令绕过限制写 e2e-state.json / dev-pass.json（hook 会拦截并记录违规）',
-  '查找/定位代码时必须使用 kb-query + graphify 双源交叉验证，禁止仅用 Explore agent 或仅文本搜索',
-  // P3-2（2026-09）: 对齐 buildFigmaAlignInstruction 对 Figma MCP 的「停下上报」语义 ——
-  // 实跑中 Bash/graphify 失败率约 35%，子 Agent 静默降级到文本搜索摸黑穷举（48% 零命中），
-  // 失败被掩盖而非暴露。必须上报主 Agent，由主 Agent 决定替代路径
-  'graphify / Bash 检索失败必须停下上报主 Agent，禁止静默降级到纯文本搜索硬做',
-  '出现 Bash execution failed 需要给出原因，执行了什么，为什么失败'
+  '查找/定位代码时必须使用 /kb-query skill 和 /graphify skill 双源交叉验证',
 ]
 
 /**

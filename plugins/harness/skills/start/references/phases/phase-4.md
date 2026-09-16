@@ -6,7 +6,7 @@
 
 ## 职责
 
-Agent 注册名 **`release-assistant`**（发布助手）。执行 `git add` + `commit` + `push`，并创建 MR。
+Agent 注册名 **`release-assistant`**（发布助手）。执行 `git add` + `commit` + `push`，并创建 MR 合并到 dev 分支。
 
 ## 产出物
 
