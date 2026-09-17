@@ -1,6 +1,6 @@
 ---
 name: "kb-init"
-description: "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录"
+description: "初始化项目知识库目录结构和规范。自动推断项目画像（project_type/source_root/platform），按项目类型动态扫描真实业务域（不再硬编码客服域），扫描编码规范来源并生成编码规范文档，生成 llm-knowledge/ 标准化骨架（.profile.yaml/overview/meta.yaml/域/文档模板/common/含编码规范）。布局：前端项目带端层生成 .docs/llm-knowledge/frontend/，插件/后端/库生成 .docs/llm-knowledge/。触发词：初始化知识库、kb-init、知识库初始化、搭建知识库目录"
 ---
 
 # kb-init — 知识库初始化（全局 Skill）
@@ -10,7 +10,16 @@ description: "初始化项目知识库目录结构和规范。自动推断项目
 > 本 Skill 自包含：模板从 `./templates/`（分套：common + 各项目类型）读取，脚本执行 `./kb-init.cjs`。
 > 不依赖项目中的任何文件，可跨项目复用。
 
-**v2 核心变化**：不再硬编码客服业务域。改为「项目画像 + 动态域扫描」——根据目标项目的实际类型（前端/插件/后端/库），自动推断域列表和文档模板。**新增编码规范总结**：扫描项目规范来源，生成 `common/conventions.md`。
+**核心机制**：不再硬编码客服业务域。改为「项目画像 + 动态域扫描」——根据目标项目的实际类型（前端/插件/后端/库），自动推断域列表和文档模板。**新增编码规范总结**：扫描项目规范来源，生成 `common/conventions.md`。
+
+**布局策略**：按 `project_type` 决定知识库根布局：
+
+| project_type | KB root | 端层 |
+|-------------|---------|------|
+| frontend | `.docs/llm-knowledge/frontend/` | `frontend/`（多端项目可扩展 `h5/`、`miniprogram/`） |
+| plugin / backend / library | `.docs/llm-knowledge/` | 无端层 |
+
+> 前端项目带端层与真实多端项目标杆（`.docs/llm-knowledge/frontend/`）一致。脚本 `kb-init.cjs` 按 `project_type=frontend` 自动落盘到 `frontend/` 端层。
 
 与 `gen-project-docs` 的关系：
 - **kb-init**: 创建**目录骨架 + 项目画像 + meta.yaml 索引 + 模板 + 编码规范**（本 Skill）
@@ -91,8 +100,8 @@ AI 需**读取这些来源文件，总结编码规范**，填充 `common/convent
 
 ```
 知识库初始化完成 ✅
-- 目录: .docs/llm-knowledge/
-- 项目画像: project_type=<type>
+- 目录: .docs/llm-knowledge/frontend/   # 前端项目带端层 frontend/；插件/后端/库为 .docs/llm-knowledge/
+- 项目画像: project_type=<type>, platform=<platform | ->
 - 业务域: N 个 | 模板: common + <type> 特有
 - 编码规范: 已从 M 个来源总结 (common/conventions.md)
 - meta.yaml: git.hash = <current HEAD>
@@ -106,19 +115,46 @@ AI 需**读取这些来源文件，总结编码规范**，填充 `common/convent
 `.profile.yaml` 是知识库动态化的输入，字段：
 
 ```yaml
-project_type: "plugin"      # frontend | backend | plugin | library
-source_root: "plugins/harness"  # 源码根目录
-domain_axis: "feature"      # 域划分依据：business | feature | service | package
+project_type: "frontend"    # frontend | backend | plugin | library
+source_root: "src"         # 源码根目录
+domain_axis: "business"    # 域划分依据：business | feature | service | package
+platform: "frontend"       # 端层目录名（仅 frontend 项目类型带端层）；无端层项目此字段省略
+```
+
+**目录结构**：
+
+前端项目（带端层 `frontend/`）：
+```
+.docs/llm-knowledge/
+└── frontend/              ← 端层（platform）
+    ├── .profile.yaml       ← 项目画像（含 platform: frontend）
+    ├── overview.md
+    ├── meta.yaml           ← 顶层 meta 在端层下
+    ├── log.md
+    ├── business/<域>/      ← 各业务域文档
+    ├── common/             ← 通用切面（含 conventions.md）
+    └── templates/          ← 文档模板
+```
+
+插件/后端/库项目（无端层）：
+```
+.docs/llm-knowledge/
+├── .profile.yaml
+├── overview.md
+├── meta.yaml
+├── business/<域>/
+├── common/
+└── templates/
 ```
 
 **域识别启发式（按 project_type）**：
 
-| project_type | 域识别方式 |
-|-------------|-----------|
-| frontend | 扫描 `src/views/**` 或 `src/pages/**` 一级目录 → 业务域 |
-| plugin | 扫描插件根的一级子目录（agents/commands/scripts/skills）→ 功能模块；scripts 下 lib+services 合并为 scripts-core |
-| backend | 扫描 `service/**` 或 `src/**` 一级目录 |
-| library | 扫描 `src/**` 一级目录（功能包） |
+| project_type | 域识别方式 | 端层 |
+|-------------|-----------|------|
+| frontend | 扫描 `src/views/**` 或 `src/pages/**` 一级目录 → 业务域 | `frontend/` |
+| plugin | 扫描插件根的一级子目录（agents/commands/scripts/skills）→ 功能模块；scripts 下 lib+services 合并为 scripts-core | 无 |
+| backend | 扫描 `service/**` 或 `src/**` 一级目录 | 无 |
+| library | 扫描 `src/**` 一级目录（功能包） | 无 |
 
 **噪音目录过滤**：vendor / node_modules / dist / output-styles / rules / assets / test 等不作为域。
 
@@ -145,5 +181,6 @@ domain_axis: "feature"      # 域划分依据：business | feature | service | p
 - kb-init **不扫描源码生成内容**（由 gen-project-docs 负责）
 - 已有 `custom/` 手工文档不被覆盖
 - 脚本为 CommonJS（`.cjs`），兼容 ES module 项目
-- 模板从 Skill 目录复制到项目 `.docs/llm-knowledge/templates/`
+- 模板从 Skill 目录复制到项目 `.docs/llm-knowledge/[frontend/]templates/`
 - **分层检索（L1/L2/L3）概念不变**：本 skill 只改「目录如何生成」，不改「知识如何检索」
+- **前端项目生成 `frontend/` 端层**（多端可扩展 h5/miniprogram）；插件/后端/库无端层。脚本 `kb-init.cjs` 按 `project_type` 自动决定是否带端层

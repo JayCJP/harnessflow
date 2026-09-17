@@ -10,6 +10,21 @@ description: "渐进式分层知识库检索。三层检索：L1 overview关键�
 
 ---
 
+## KB 根自动探测
+
+知识库根（KB root）按 `project_type` 决定，与 `kb-update.cjs` 的 `resolveKbRoot` 同款逻辑：
+
+| project_type | KB root | meta.yaml 路径 |
+|-------------|---------|---------------|
+| frontend | `.docs/llm-knowledge/frontend/` | `.docs/llm-knowledge/frontend/meta.yaml` |
+| plugin / backend / library | `.docs/llm-knowledge/` | `.docs/llm-knowledge/meta.yaml` |
+
+多端项目可在端层下扩展 `h5/`、`miniprogram/` 等子目录。多候选时按「更像真正知识库根」打分择优：含 `business/` 子目录 +2、含 `overview.md` +1。AI 执行 L1/L2 前应先按上表定位 KB root，后续所有 `overview.md` / `meta.yaml` / 域文档路径都基于该 root 拼接，不再硬编码。
+
+> KB root = `.docs/llm-knowledge/frontend/`。
+
+---
+
 ## 双源交叉验证（kb-query ∥ graphify）— 查找代码辅助
 
 > 全局通用：在查找/定位代码时，**kb-query 应与 graphify 同时调用，双源交叉验证收敛**，不要只依赖单一检索方式（如仅 Explore agent 或仅文本搜索）。
@@ -45,7 +60,7 @@ description: "渐进式分层知识库检索。三层检索：L1 overview关键�
 
 ### L2: meta.yaml 精确筛选
 
-加载 `.docs/llm-knowledge/meta.yaml`。
+加载 KB root 下的 `meta.yaml`。
 
 - 在匹配到的域配置中获取文件字段（`entry_files / files / stores / apis / components`，按项目类型而异）
 - 根据查询模式确定需加载的文档类型
@@ -74,7 +89,7 @@ description: "渐进式分层知识库检索。三层检索：L1 overview关键�
 - 精准定位域后仍全量搜索
 
 ### ✅ 必须
-- 始终先读 overview.md
+- 始终先读 overview.md（路径基于 KB root 自动探测，前端项目在 `frontend/` 端层下）
 - meta.yaml 确认域后再加载域文档
 - 优先 `read_file` 读已生成文档，不命中才 `search_content`
 - 加载时说明命中了哪个域、哪种模式

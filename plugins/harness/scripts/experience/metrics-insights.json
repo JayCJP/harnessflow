@@ -9,7 +9,7 @@
       "type": "fix_loop_trigger",
       "severity": "warning",
       "title": "Fix-loop 触发率偏高",
-      "description": "开发阶段自测不充分，代码审查/测试一次不通过",
+      "description": "开发阶段自测不充分，代码审查一次不通过（含 AC 未通过）",
       "recommendation": "开发前先查知识库 pitfalls 避免已知坑点，ESLint 0 error 后再提交审查",
       "evidence": "触发率 50%（2 次）",
       "sourceProjects": [

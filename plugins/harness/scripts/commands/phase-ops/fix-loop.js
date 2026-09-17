@@ -278,7 +278,7 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   // 9. 持久化 state
   writeStateFile(storyId, state)
 
-  // 9.5 生成 fix-context.md（上下文延续，供下轮审查/测试 Agent 加载）
+  // 9.5 生成 fix-context.md（上下文延续，供下轮审查 Agent 加载）
   const fixContextPath = path.join(storyDir, 'fix-context.md')
   const issueListForContext = issues.map((i) =>
     `- **${i.id}** [${i.severity}]${i.file ? ` \`${i.file}${i.line ? ':' + i.line : ''}\`` : ''}\n  - 问题: ${i.description}\n  - 建议: ${i.suggestion || '请根据上下文分析并修复'}`
@@ -287,7 +287,7 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
     `# 修复回路上下文 (第 ${nextRound}/${MAX_FIX_ROUNDS} 轮)`,
     '',
     `> Story: ${storyId} | 来源: Phase ${sourcePhase} (代码审查) | 生成时间: ${now.toISOString()}`,
-    '> 本文件供下轮代码审查师/测试工程师加载，了解上轮发现的问题和本轮修复情况。',
+    '> 本文件供下轮代码审查师加载，了解上轮发现的问题和本轮修复情况。',
     '',
     '## 上轮发现的问题',
     '',

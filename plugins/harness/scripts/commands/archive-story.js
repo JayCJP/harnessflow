@@ -41,7 +41,7 @@
  *   - restore 默认移动（归档目录随之清空），--keep-archive 改为复制以保留归档副本；
  *     root 存在同名文件时需 --force 覆盖，否则先报冲突清单。
  *   - 复档后 state 恢复 status='running' 并写入 restoredAt / restoredFromRound，同时清除 archived* 字段。
- *   - 本文件无 module.exports，仅作为 CLI 被主 Agent 调用（harness-archive skill）。
+ *   - 本文件无 module.exports，仅作为 CLI 被主 Agent 调用（archive skill）。
  *
  * @module archive-story
  */

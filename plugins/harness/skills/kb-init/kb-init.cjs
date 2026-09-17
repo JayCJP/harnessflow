@@ -23,9 +23,11 @@ const TMPL_COMMON = path.join(SKILL_DIR, 'templates', 'common')
 const TMPL_BY_TYPE = path.join(SKILL_DIR, 'templates')
 // 目标项目（调用时的 cwd）
 const PROJECT_ROOT = process.cwd()
-// v2：去掉 frontend 硬编码层，知识库根为 .docs/llm-knowledge/
-const KB_ROOT = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
-const PROFILE_PATH = path.join(KB_ROOT, '.profile.yaml')
+// 知识库根：前端项目带端层 frontend/（参照真实多端项目标杆 .docs/llm-knowledge/frontend/），
+// 其它项目类型无端层。最终 KB_ROOT 在主逻辑里按 projectType 赋值。
+const LLM_KB_BASE = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
+let KB_ROOT = LLM_KB_BASE
+let PROFILE_PATH = path.join(KB_ROOT, '.profile.yaml')
 
 // ─── 项目画像 ──────────────────────────────────────────────────
 
@@ -283,7 +285,11 @@ const manualType = typeIdx >= 0 ? args[typeIdx + 1] : null
 const projectType = manualType || inferProjectType()
 const sourceRoot = inferSourceRoot(projectType)
 const domainAxis = projectType === 'frontend' ? 'business' : 'feature'
-const profile = { project_type: projectType, source_root: sourceRoot, domain_axis: domainAxis }
+// 前端项目带端层 frontend/，其它项目类型无端层
+KB_ROOT = projectType === 'frontend' ? path.join(LLM_KB_BASE, 'frontend') : LLM_KB_BASE
+PROFILE_PATH = path.join(KB_ROOT, '.profile.yaml')
+const platform = projectType === 'frontend' ? 'frontend' : null
+const profile = { project_type: projectType, source_root: sourceRoot, domain_axis: domainAxis, ...(platform ? { platform } : {}) }
 
 // 2. 扫描真实域
 const domains = discoverDomains(projectType, sourceRoot)
@@ -305,10 +311,11 @@ if (dryRun) {
     projectType,
     sourceRoot,
     domainAxis,
+    platform,
     domains,
     conventionSources,
     templates: selectTemplates(projectType),
-    kbRoot: '.docs/llm-knowledge'
+    kbRoot: path.relative(PROJECT_ROOT, KB_ROOT).replace(/\\/g, '/')
   }, null, 2))
   console.log('\n[DRY-RUN] 未落盘。确认域清单后去掉 --dry-run 正式初始化。')
   process.exit(0)
@@ -335,6 +342,7 @@ if (!fs.existsSync(PROFILE_PATH) || force) {
     `project_type: "${profile.project_type}"`,
     `source_root: "${profile.source_root}"`,
     `domain_axis: "${profile.domain_axis}"`,
+    ...(profile.platform ? [`platform: "${profile.platform}"`] : []),
     ''
   ].join('\n')
   try { fs.writeFileSync(PROFILE_PATH, profileYaml, 'utf-8'); created++; console.log('  ✅ .profile.yaml') } catch (e) { errors.push(`写入失败: ${PROFILE_PATH}`) }
@@ -429,8 +437,9 @@ console.log('\n' + JSON.stringify({
   projectType,
   sourceRoot,
   domainAxis,
+  platform,
   domains,
   conventionSources,
   templates: selectedTemplates,
-  kbRoot: '.docs/llm-knowledge'
+  kbRoot: path.relative(PROJECT_ROOT, KB_ROOT).replace(/\\/g, '/')
 }, null, 2))

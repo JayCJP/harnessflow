@@ -2,7 +2,7 @@
 
 **端到端 AI 开发自动化工作流插件市场。**
 
-通过安装 **Harness** 插件，为你的 AI 编程助手（Claude Code / CodeBuddy Code）接入一条覆盖「Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 代码审查 → 功能测试 → Git 提交 → 知识库更新 → 云端部署」全流程的自动化开发流水线，并配套知识库（KB）管理、文档生成、API 生成、Figma 设计稿协作等能力。
+通过安装 **Harness** 插件，为你的 AI 编程助手（Claude Code / CodeBuddy Code）接入一条覆盖「Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 代码审查 → Git 提交 → 知识库更新 → 云端部署」全流程的自动化开发流水线，并配套知识库（KB）管理、文档生成、API 生成、Figma 设计稿协作等能力。
 
 > **兼容 Claude Code 与 CodeBuddy Code**
 > 两款工具使用相同的 `/plugin` 命令体系，安装步骤完全一致。
@@ -28,7 +28,7 @@
 
 ## 核心特性
 
-### 1. 端到端 8 Phase 工作流
+### 1. 端到端 7 Phase 工作流
 
 一条命令驱动完整研发链路，每个 Phase 有明确的 Agent 分工、产出物与门控校验：
 
@@ -37,48 +37,102 @@
 | 0 | 需求分析 | 需求分析师 | requirement-analysis.md、acceptance-criteria.json |
 | 1 | 任务规划 | 任务规划师 | task-dag.md / task-dag.json（可并行任务 DAG） |
 | 2 | 代码开发 | 前端开发工程师 | 代码变更（dev-pass 限时写保护） |
-| 3 | 代码审查 | 代码审查师 | code-review.json |
-| 4 | 功能测试 | 测试工程师 | test-report.md、acceptance-verification.json |
-| 5 | Git 提交 + MR | 发布助手 | 提交开发分支 + 创建 MR（→ dev）+ 确认已合并 |
-| 6 | 知识库更新 | 发布助手 | 增量知识库文档（kb-update） |
-| 7 | 云端部署 | 发布助手 | dev 分支构建（env=dev, build_other=dev）+ 部署 URL |
+| 3 | 代码审查 | 代码审查师 | code-review.json（AC 逐条核对结论并入 issues[]） |
+| 4 | Git 提交 + MR | 发布助手 | 提交开发分支 + 创建 MR（→ dev）+ 确认已合并 |
+| 5 | 知识库更新 | 发布助手 | 增量知识库文档（kb-update） |
+| 6 | 云端部署 | 发布助手 | dev 分支构建（env=dev, build_other=dev）+ 部署 URL |
 
-#### 8 Phase 横向流转
+#### 7 Phase 横向流转
 
 ```mermaid
 flowchart LR
-    P0["Phase 0<br/>需求分析"] -->|"门控通过"| P1["Phase 1<br/>任务规划"]
-    P1 -->|"门控通过<br/>签发 dev-pass"| P2["Phase 2<br/>代码开发"]
-    P2 -->|"增量 lint + 编译<br/>撤销 dev-pass"| P3["Phase 3<br/>代码审查"]
-    P3 -->|"无 BLOCKER"| P4["Phase 4<br/>功能测试"]
-    P4 -->|"AC 全通过"| P5["Phase 5<br/>提交 + MR → dev"]
-    P5 -->|"确认 MR 已合并"| P6["Phase 6<br/>知识库更新"]
-    P6 -->|"kb-update"| P7["Phase 7<br/>dev 分支构建发布"]
+    subgraph SG1["需求侧"]
+        P0["Phase 0<br/>需求分析<br/><i>需求分析师</i>"]
+    end
+    subgraph SG2["规划侧"]
+        P1["Phase 1<br/>任务规划<br/><i>任务规划师</i>"]
+    end
+    subgraph SG3["开发侧"]
+        P2["Phase 2<br/>代码开发<br/><i>前端开发工程师</i>"]
+        P3["Phase 3<br/>代码审查<br/><i>代码审查师</i>"]
+    end
+    subgraph SG4["发布侧"]
+        P4["Phase 4<br/>提交 + MR → dev<br/><i>发布助手</i>"]
+        P5["Phase 5<br/>知识库更新<br/><i>发布助手</i>"]
+        P6["Phase 6<br/>dev 分支构建发布<br/><i>发布助手</i>"]
+    end
 
-    P3 -.->|"有 BLOCKER → fix-loop 回退"| P2
-    P4 -.->|"验收失败 → fix-loop 回退"| P2
+    P0 -->|"门控通过"| P1
+    P1 -->|"门控通过<br/>签发 dev-pass"| P2
+    P2 -->|"增量 lint + 编译<br/>撤销 dev-pass"| P3
+    P3 -->|"无 BLOCKER"| P4
+    P4 -->|"确认 MR 已合并"| P5
+    P5 -->|"kb-update"| P6
+    P3 -.->|"有 BLOCKER<br/>fix-loop 回退"| P2
+
+    classDef analysis fill:#e3f2fd,stroke:#1976d2,color:#0d47a1,stroke-width:1.5px
+    classDef plan fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c,stroke-width:1.5px
+    classDef dev fill:#e8f5e9,stroke:#388e3c,color:#1b5e20,stroke-width:1.5px
+    classDef review fill:#fff3e0,stroke:#f57c00,color:#e65100,stroke-width:1.5px
+    classDef release fill:#fce4ec,stroke:#c2185b,color:#880e4f,stroke-width:1.5px
+
+    class P0 analysis
+    class P1 plan
+    class P2 dev
+    class P3 review
+    class P4,P5,P6 release
+
+    linkStyle 6 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 5
+    style SG1 fill:#f8fdff,stroke:#90caf9
+    style SG2 fill:#fdf4ff,stroke:#ce93d8
+    style SG3 fill:#f6fdf7,stroke:#a5d6a7
+    style SG4 fill:#fff5f8,stroke:#f48fb1
 ```
 
 #### 主控循环（dispatch.js 四态调度）
 
 ```mermaid
 flowchart TD
-    Start(["/harness start"]) --> Input["写 story-input.json"]
-    Input --> Refresh["create-workflow --refresh-input<br/>回填原型/Figma 判定"]
-    Refresh --> Dispatch{"dispatch.js<br/>读状态 + 判门控"}
+    Start(["/harness start"])
+    Input["写 story-input.json"]
+    Refresh["create-workflow --refresh-input<br/>回填原型 / Figma 判定"]
+    Dispatch{"dispatch.js<br/>读状态 + 判门控"}
 
-    Dispatch -->|"ready · readyToAdvance=true"| Advance["advance-phase.js<br/>推进到下一 Phase"]
+    Advance["advance-phase.js<br/>推进到下一 Phase"]
+    Spawn["Spawn 当前 Phase Agent<br/>（注入 agentPrompt）"]
+    Report["Agent 产出并汇报"]
+    FixLoop["执行 recovery.command<br/>--fix-loop 回退 Phase 2"]
+    Manual["转人工处理<br/>（无自动恢复命令）"]
+    End(["归档 / 流程结束"])
+
+    Start --> Input
+    Input --> Refresh
+    Refresh --> Dispatch
+
+    Dispatch -->|"ready · readyToAdvance=true"| Advance
     Advance --> Dispatch
 
-    Dispatch -->|"ready · 需产出"| Spawn["Spawn 当前 Phase Agent<br/>（注入 agentPrompt）"]
-    Spawn --> Report["Agent 产出并汇报"]
+    Dispatch -->|"ready · 需产出"| Spawn
+    Spawn --> Report
     Report --> Dispatch
 
-    Dispatch -->|"fix_loop"| FixLoop["执行 recovery.command<br/>--fix-loop 回退 Phase 2"]
+    Dispatch -->|"fix_loop"| FixLoop
     FixLoop --> Dispatch
 
-    Dispatch -->|"blocked"| Manual["转人工处理<br/>（无自动恢复命令）"]
-    Dispatch -->|"terminal"| End(["归档 / 流程结束"])
+    Dispatch -->|"blocked"| Manual
+    Dispatch -->|"terminal"| End
+
+    classDef startEnd fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px
+    classDef action fill:#e3f2fd,stroke:#1976d2,color:#0d47a1
+    classDef decision fill:#fff9c4,stroke:#f9a825,color:#e65100,stroke-width:2px
+    classDef fixloop fill:#fff3e0,stroke:#f57c00,color:#e65100,stroke-width:1.5px
+    classDef manual fill:#ffebee,stroke:#c62828,color:#b71c1c,stroke-width:1.5px
+
+    class Start,End startEnd
+    class Input,Refresh,Advance,Spawn,Report action
+    class Dispatch decision
+    class FixLoop fixloop
+    class Manual manual
 ```
 
 > **核心设计：AI 不操作状态，只机械执行。**
@@ -105,9 +159,18 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 
 ### 4. 知识库（KB）管理
 
-- `kb-init` 初始化项目知识库（自动推断项目画像与业务域）
-- `kb-query` 分层检索（需求分析/改代码前自动注入历史教训）
-- `kb-update` 增量更新（任务完成后自动同步，保留手工批注）
+四个 skill 按职责边界划分，覆盖知识库全生命周期：
+
+| Skill | 职责 | 何时用 |
+|-------|------|--------|
+| `kb-init` | 初始化骨架——自动推断项目画像与业务域，创建目录结构 + meta.yaml + 编码规范骨架 | 新项目首次初始化 |
+| `gen-project-docs` | 全量/单域**生成**文档——扫描源码生成 overview/architecture/api 等内容 | kb-init 后首次填充、手动重建某域、新鲜度检测 |
+| `kb-query` | 分层检索——L1 overview 关键词 → L2 meta.yaml → L3 域文档 | 需求分析/改代码前自动注入历史教训 |
+| `kb-update` | **增量**更新——基于 git diff 定位受影响域，AI 直接扫变更文件更新 | 任务完成后自动同步，保留手工批注 |
+
+**布局策略**：前端项目默认带 `frontend/` 端层布局（`.docs/llm-knowledge/frontend/`，参照真实多端项目标杆，可扩展 `h5/`、`miniprogram/` 端层）；插件/后端/库为扁平布局（`.docs/llm-knowledge/`）。`kb-init.cjs` 按 `project_type` 自动决定，`gen-docs.cjs` / `kb-update.cjs` 自动探测 KB 根。
+
+**职责边界**：生成归 `gen-project-docs`（全量/单域），增量归 `kb-update`（git diff 驱动）。`kb-update` 不调用 `gen-project-docs`，AI 直接扫 `affectedDomains.matchedFiles` 更新文档。
 
 ### 5. Figma 设计稿协作
 
@@ -132,7 +195,6 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 | **Figma MCP** | 设计稿读取、frame 清单、组件映射 | 需求分析师、前端开发工程师、`figma` / `figma-to-component-map` | 有 Figma 设计稿时必需 |
 | **GitLab MCP** | 创建 Merge Request | 发布助手（②创建 MR） | 需走 MR 流程时必需 |
 | **DevOps MCP** | 云端构建、部署 | 发布助手（⑤构建发布） | 需云端部署时必需 |
-| **Sequential Thinking MCP** | 任务拆解时的结构化推理 | 任务规划师 | 建议启用 |
 
 > **提示**：以上 MCP 服务名（如 `TAPD_MCP_Server`、`Figma_MCP`、`GitLab`、`Devops`、`Sequential_Thinking`）需与工具配置中的 MCP 名称一致，Agent 通过 `mcp_call_tool(serverName, ...)` 调用。
 > 未配置对应 MCP 时，涉及该能力的环节会失败并如实告知，不会静默跳过。
@@ -239,7 +301,7 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 | 命令 | 说明 |
 | --- | --- |
-| `/harness run` | 执行端到端开发工作流（8 Phase 全流程） |
+| `/harness run` | 执行端到端开发工作流（7 Phase 全流程） |
 | `/harness fixbugs` | 针对缺陷做根因分析并自动修复（免原型文档） |
 | `/harness evolve` | 触发插件自进化体检（audit → 度量 → 诊断 → 治疗 → 验证） |
 | `/harness archive` | 归档已完成的迭代 / 任务 |
@@ -274,14 +336,16 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 ### 5. 修复回路（fix-loop）
 
-- 审查/测试发现 BLOCKER 或验收失败时，工作流自动回退到 Phase 2 修复，重新签发 dev-pass。
+- 代码审查发现 BLOCKER（含 AC 未通过）时，工作流自动回退到 Phase 2 修复，重新签发 dev-pass。
 - **默认最多 2 轮**，超出后转人工介入。不要让 AI 无限重试空转。
 
 ### 6. 知识库（KB）
 
-- 新项目先 `kb-init` 初始化知识库骨架（自动推断项目画像与业务域）。
+- 新项目先 `kb-init` 初始化知识库骨架（自动推断项目画像与业务域，前端项目带 `frontend/` 端层）。
+- 初始化后用 `gen-project-docs --all` 首次全量生成文档内容；后续单域改动可 `gen-project-docs <domain_id>` 重生成。
 - 需求分析/改代码前用 `kb-query` 分层检索，历史教训会自动注入各 Phase 的 prompt。
-- 任务完成后 `kb-update` 增量同步，保留手工批注，避免每次全量重写。
+- 任务完成后 `kb-update` 增量同步（基于 git diff 定位受影响域，AI 直接扫变更文件更新），保留手工批注，避免每次全量重写。
+- 生成归 `gen-project-docs`，增量归 `kb-update`——两者职责不重叠，触发词也不重叠。
 
 ### 7. 多项目协作
 
@@ -332,7 +396,7 @@ harness-marketplace/
 └── plugins/
     └── harness/                          # Harness 插件本体
         ├── plugin.json                   # 插件元信息（agents/skills/hooks 入口）
-        ├── agents/                       # 6 个工程角色代理
+        ├── agents/                       # 5 个工程角色代理
         ├── skills/                       # 工作流 / 编排 / 知识库 / 文档 / 接口 / Figma 技能
         ├── hooks/                        # 阶段钩子（dev-pass / 状态文件守卫）
         ├── rules/                        # 知识库自动检索规则

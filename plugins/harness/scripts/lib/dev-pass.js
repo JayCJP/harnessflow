@@ -4,7 +4,7 @@
  * 职责:
  *   - dev-pass: Phase 2 的 src/ 写权限凭证 —— 签发（issueDevPass）、撤销（revokeDevPass）、
  *     有效性检查（checkDevPass，顺带清理过期文件）、续签（renewDevPass）
- *   - 修复轮次预算: getMaxFixRounds 按失败源（Phase 3 审查 / Phase 4 测试）独立计数
+ *   - 修复轮次预算: getMaxFixRounds 按失败源（Phase 3 代码审查）计数
  *
  * 用法:
  *   const { issueDevPass, revokeDevPass, getMaxFixRounds } = require('./dev-pass')

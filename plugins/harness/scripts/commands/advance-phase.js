@@ -75,7 +75,7 @@
  *   - 命令串（完整性校验失败时的 fixCommand / fixSteps 等）由 lib/paths.js 的 ADVANCE_CMD
  *     统一提供，与 dispatch.js / policy.js 共用同一信源，不在此处二次拼装。
  *     门控失败（最常见的失败路径）不给命令 —— 那是 dispatch.js 的 recovery 职责。
- *   - Phase 7 完成时自动触发 audit/metrics-aggregator.js 聚合度量，并标记工作流为 completed 终态。
+ *   - 推进到终态 Phase 7（Phase 6 云端部署完成）时自动触发 audit/metrics-aggregator.js 聚合度量，并标记工作流为 completed 终态。
  *
  * @module advance-phase
  */
@@ -738,7 +738,7 @@ if (targetPhase === 5) {
   const devPassPath = path.join(PLANS_DIR, storyId, 'dev-pass.json')
   if (fs.existsSync(devPassPath)) {
     revokeDevPass(storyId)
-    console.error('  ✓ dev-pass 兜底撤销 (Phase 4→5，审查+测试双通过，开发窗口关闭)')
+    console.error('  ✓ dev-pass 兜底撤销 (Phase 4→5，Git 提交前兜底，开发窗口关闭)')
     trace.appendTrace(storyId, { type: 'dev_pass', phase: String(targetPhase), result: 'revoked', reason: 'phase_4_to_5_safety_net' })
     if (state.devPass) delete state.devPass
   }

@@ -5,7 +5,7 @@
  * 职责:
  *   - 把门控/Hook 失败模式写入全局经验库 failure-patterns.json，并归档失败案例
  *   - 按 Phase 检索历史教训与度量洞察，供 prompt 与会话启动注入
- *   - 提供失败分布统计（getFailureStats），支撑 harness-evolve 的度量与诊断
+ *   - 提供失败分布统计（getFailureStats），支撑 evolve 的度量与诊断
  *
  * 用法:
  *   作为模块引用:

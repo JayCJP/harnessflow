@@ -15,9 +15,51 @@ const path = require('path')
 const { execSync } = require('child_process')
 
 const PROJECT_ROOT = process.cwd()
-// v2：去掉 frontend 硬编码层，知识库根为 .docs/llm-knowledge/
-const KB_ROOT = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
-const META_PATH = path.join(KB_ROOT, 'meta.yaml')
+
+/**
+ * 探测知识库根与 meta.yaml 路径
+ *
+ * 兼容两种 KB 布局（与 kb-update.cjs 的 resolveKbRoot 同款逻辑）：
+ *   - 前端项目端层布局：`.docs/llm-knowledge/frontend/meta.yaml`
+ *   - 其它项目无端层：`.docs/llm-knowledge/meta.yaml`
+ *
+ * 多候选时按「更像真正知识库根」打分择优：
+ *   含 `business/` 子目录 +2、含 `overview.md` +1；同分时保持候选顺序（扁平优先）。
+ *
+ * @returns {{kbRoot: string, metaPath: string|null}}
+ *   kbRoot 为最终采用的知识库根（未命中时为扁平兜底目录）；metaPath 为 null 表示未找到
+ */
+function resolveKbRoot () {
+  const docsRoot = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
+  const candidates = [docsRoot]
+  let entries = []
+  try {
+    entries = fs.readdirSync(docsRoot, { withFileTypes: true })
+  } catch (e) {
+    entries = []
+  }
+  for (const ent of entries) {
+    if (ent.isDirectory()) candidates.push(path.join(docsRoot, ent.name))
+  }
+
+  const withMeta = candidates.filter(dir => fs.existsSync(path.join(dir, 'meta.yaml')))
+  if (withMeta.length === 0) {
+    return { kbRoot: docsRoot, metaPath: null }
+  }
+
+  const scored = withMeta.map(dir => {
+    let score = 0
+    if (fs.existsSync(path.join(dir, 'business'))) score += 2
+    if (fs.existsSync(path.join(dir, 'overview.md'))) score += 1
+    return { dir, score }
+  })
+  scored.sort((a, b) => b.score - a.score)
+
+  return { kbRoot: scored[0].dir, metaPath: path.join(scored[0].dir, 'meta.yaml') }
+}
+
+// 知识库根自动探测：前端项目带端层 frontend/，其它无端层
+const { kbRoot: KB_ROOT, metaPath: META_PATH } = resolveKbRoot()
 
 function parseMetaYaml (content) {
   const result = { git: {}, domains: [] }
@@ -56,10 +98,17 @@ function parseMetaYaml (content) {
 }
 
 const args = process.argv.slice(2)
-const mode = args.includes('--all') ? 'all' : args.includes('--stale') ? 'stale' : args[0] ? 'single' : 'incremental'
+const mode = args.includes('--all') ? 'all' : args.includes('--stale') ? 'stale' : args[0] ? 'single' : null
 const targetId = mode === 'single' ? args[0] : null
 
-if (!fs.existsSync(META_PATH)) { console.error(JSON.stringify({ error: 'meta.yaml 不存在，请先运行 kb-init' })); process.exit(1) }
+if (!mode) {
+  console.error(JSON.stringify({
+    error: '未指定模式。全量生成用 --all，单域重生成用 <domain_id>，新鲜度检测用 --stale；增量更新请用 kb-update（基于 git diff 定位受影响域，不在本 skill 职责内）'
+  }))
+  process.exit(1)
+}
+
+if (!META_PATH || !fs.existsSync(META_PATH)) { console.error(JSON.stringify({ error: 'meta.yaml 不存在，请先运行 kb-init', kbRoot: KB_ROOT })); process.exit(1) }
 const meta = parseMetaYaml(fs.readFileSync(META_PATH, 'utf-8'))
 
 if (mode === 'stale') {

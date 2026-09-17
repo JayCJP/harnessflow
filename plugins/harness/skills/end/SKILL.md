@@ -4,14 +4,14 @@ description: >
   结束 / 取消当前 Harness 工作流的激活状态。当用户想退出一个正在进行的 harness 会话、
   解除 src/ 编辑的 dev-pass 限制、不再推进某个 Story（说「结束 / 退出 / end / 停止 harness」）
   时使用。注意：这与归档（archive）不同 —— end 只删除激活标记，不移动 Story 文件。
-  归档请使用 /harness-archive。
+  归档请使用 /archive。
 ---
 
 # /end — 结束 Harness 工作流激活
 
 > **结束 ≠ 归档**：
 > - `end`（本 skill）= 删除 `.codebuddy/plans/.harness-active` 标记，解除 src/ 编辑的 dev-pass 限制。
-> - `archive`（`/harness-archive`）= 将 Story 文件移到 `archive/round-N/`，是另一功能。
+> - `archive`（`/archive`）= 将 Story 文件移到 `archive/round-N/`，是另一功能。
 >
 > 通常顺序：先归档（如需保留产物），再 `/end`。
 
@@ -41,7 +41,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/harness-workflow.js end
 
 1. 执行上方脚本命令，读取返回 JSON。
 2. 若返回 `ok: true` 且含 `message`，向用户转述结果。
-3. 结束前**建议先确认**当前 Story 已完成 / 已归档；如需保留产物，先走 `/harness-archive archive` 再 `/end`。
+3. 结束前**建议先确认**当前 Story 已完成 / 已归档；如需保留产物，先走 `/archive archive` 再 `/end`。
 
 ## 边界与安全
 

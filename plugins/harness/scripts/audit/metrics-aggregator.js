@@ -4,7 +4,7 @@
  *
  * 职责:
  *   1. 读取当前项目所有 Story 的 trace.jsonl + e2e-state.json
- *   2. 计算 8 项核心指标（Phase 耗时、门控通过率、Fix-loop 触发率等）
+ *   2. 计算 7 项核心指标（Phase 耗时、门控通过率、Fix-loop 触发率等）
  *   3. 生成跨项目通用的流程级洞察（非项目特定逻辑）
  *   4. 合并到全局经验库 ~/.codebuddy/experience/metrics-insights.json
  *   5. 供 advance-phase.js 和 session-start.js 注入到 Agent prompt
@@ -22,11 +22,11 @@
  *     Skill 与 MCP 资源使用），并合并洞察到全局经验库
  *
  * 使用场景:
- *   - 自动触发: Phase 7 完成时由 commands/advance-phase.js 通过 execSync 调用，
+ *   - 自动触发: 推进到终态 Phase 7（Phase 6 云端部署完成）时由 commands/advance-phase.js 通过 execSync 调用，
  *     把本 Story 的洞察合并进全局经验库（超时或失败均非阻塞）
  *   - 自动消费: hooks/session-start.js 与 services/prompt-builder.js 通过
  *     experience.getMetricsInsights(phase) 读取全局洞察，按 targetPhase 注入 Agent prompt
- *   - 人工诊断: /harness-evolve 的 Step 1 度量；或想定位本项目流程瓶颈
+ *   - 人工诊断: /evolve 的 Step 1 度量；或想定位本项目流程瓶颈
  *     （哪个 Phase 最慢、门控是否一次通过、fix-loop 是否反复触发）时手动跑
  *
  * 说明:
@@ -102,7 +102,7 @@ function computePhaseDurations (state) {
   const durations = {}
   if (!state.phases) return durations
 
-  for (let p = 0; p <= 7; p++) {
+  for (let p = 0; p < PHASE_SLUGS.length; p++) {
     const phaseKey = `${p}_${PHASE_SLUGS[p]}`
     const phaseState = state.phases[phaseKey]
     if (!phaseState) continue
@@ -128,12 +128,16 @@ function aggregateMetrics () {
   const allPhaseDurations = {}  // { phase: [duration1, duration2, ...] }
   let totalAdvances = 0
   let gateFirstTryPasses = 0
-  let totalPhase3_4Advances = 0
   let fixLoopCount = 0
   let fixLoopSucceeded = 0
   let totalBlockers = 0
   let completedStories = 0
   let totalStories = 0
+  // Story 级 fix-loop 口径：到达审查的 Story 数 / 触发过有效 fix-loop 的 Story 数。
+  // 原 totalPhase3_4Advances（推进到 Phase 4/5 的次数）随 Phase 4 功能测试移除后语义已偏，
+  // 改为 Story 级，触发率/成功率分母口径一致。
+  let storiesReachedReview = 0
+  let storiesWithFixLoop = 0
   // 资源使用统计（S3：skill / 知识库 / MCP 消费情况）
   let totalSkillCalls = 0
   let totalKbCalls = 0
@@ -145,6 +149,8 @@ function aggregateMetrics () {
     const state = readStateFile(storyId)
     if (!state) continue
     totalStories++
+    // 到达过 Phase 3 代码审查的 Story（fix-loop 触发率分母，Story 级口径）
+    if ((state.phase || 0) >= 3) storiesReachedReview++
 
     // Story 完成状态
     if (state.status === 'completed' || (state.phase >= 6 && state.phases && state.phases['6_deployment'] && state.phases['6_deployment'].status === 'completed')) {
@@ -164,10 +170,6 @@ function aggregateMetrics () {
         totalAdvances++
         if (gate.pass && (!gate.warnings || gate.warnings.length === 0)) {
           gateFirstTryPasses++
-        }
-        // 统计 Phase 3/4 相关推进
-        if (gate.targetPhase === 4 || gate.targetPhase === 5) {
-          totalPhase3_4Advances++
         }
       }
     }
@@ -229,6 +231,10 @@ function aggregateMetrics () {
     if (storyValidFixLoopCount > 0 && storyFixLoopSucceeded) {
       fixLoopSucceeded++
     }
+    // Story 级 fix-loop 触发标记（触发率分母，与 storiesReachedReview 同口径）
+    if (storyValidFixLoopCount > 0) {
+      storiesWithFixLoop++
+    }
 
     // BLOCKER 统计（从 gateChecks）
     if (state.gateChecks && Array.isArray(state.gateChecks.gateValidationResults)) {
@@ -259,8 +265,12 @@ function aggregateMetrics () {
     completedStories,
     phaseDurations: phaseDurationStats,
     gateFirstTryRate: totalAdvances > 0 ? gateFirstTryPasses / totalAdvances : 1,
-    fixLoopTriggerRate: totalPhase3_4Advances > 0 ? fixLoopCount / totalPhase3_4Advances : 0,
-    fixLoopSuccessRate: fixLoopCount > 0 ? fixLoopSucceeded / fixLoopCount : 1,
+    // fix-loop 触发率/成功率统一用 Story 级口径：到达审查的 Story 中触发 fix-loop 的比例、
+    // 触发 fix-loop 的 Story 中首轮修复成功的比例。原事件级/推进级分母口径不一致，且随
+    // Phase 4 功能测试移除后 targetPhase 4/5 语义已偏，故改为 Story 级。
+    fixLoopTriggerRate: storiesReachedReview > 0 ? storiesWithFixLoop / storiesReachedReview : 0,
+    fixLoopSuccessRate: storiesWithFixLoop > 0 ? fixLoopSucceeded / storiesWithFixLoop : 1,
+    fixLoopEventCount: fixLoopCount,
     blockerCount: totalBlockers,
     storyCompletionRate: totalStories > 0 ? completedStories / totalStories : 0,
     // 资源使用（S3）
@@ -326,7 +336,7 @@ function generateInsights (metrics) {
       type: 'fix_loop_trigger',
       severity: 'warning',
       title: `Fix-loop 触发率 ${Math.round(metrics.fixLoopTriggerRate * 100)}%`,
-      description: '代码审查/测试失败率偏高，开发阶段自测不充分',
+      description: '代码审查失败率偏高（含 AC 未通过），开发阶段自测不充分',
       recommendation: '开发阶段加强自测：参考知识库 pitfalls.md 避免已知坑点，ESLint 0 error 后再提交审查',
       evidence: `触发率 ${Math.round(metrics.fixLoopTriggerRate * 100)}%`
     })
@@ -387,15 +397,17 @@ function generateInsights (metrics) {
  * @returns {string} 建议文本
  */
 function getRecommendationForPhase (phase) {
+  // Phase 编号对齐 lib/phases.js（0 需求 / 1 规划 / 2 开发 / 3 审查 / 4 Git提交 /
+  // 5 知识库 / 6 部署 / 7 终态）。原 Phase 4「功能测试」移除后，4-7 的建议整体前移一位。
   const recommendations = {
     0: '需求分析阶段确保 AC 覆盖完整、格式正确，open-questions 全部 resolved 后再推进',
     1: '任务规划时将大 task 拆为 Fork-Join 并行，单 task 控制在 15min 内，为每个 task 声明完整 files',
     2: '开发阶段加强自测，ESLint 0 error 后再提交审查，参考知识库 pitfalls.md 避免已知坑点',
-    3: '代码审查师在 FIX_DATA 块中给出代码级建议（含行号和替换方案）',
-    4: '测试工程师确保 AC 100% 覆盖，evidence 数组至少 1 条',
-    5: 'Git 提交确保 commit 格式规范，禁止 --no-verify',
-    6: '知识库更新时保留手工批注',
-    7: '部署前确认构建产物完整'
+    3: '代码审查师在 FIX_DATA 块中给出代码级建议（含行号和替换方案），并逐条核对 AC',
+    4: 'Git 提交确保 commit 格式规范，禁止 --no-verify，只 stage 本 Story 相关文件',
+    5: '知识库更新时保留手工批注，调用 kb-update 增量同步',
+    6: '云端部署前确认 dev 分支 MR 已合并、构建产物完整',
+    7: '工作流终态，无需优化建议'
   }
   return recommendations[phase] || '优化该 Phase 的执行效率'
 }

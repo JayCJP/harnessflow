@@ -394,7 +394,7 @@ function runGateCheck (storyId, phaseNum, state) {
  *
  * 检查时机：仅在 phaseNum === 3（即 Phase 3→4 门控，代码审查完成、准备进入 Git 提试前）时执行。
  * 此时 Phase 2 开发阶段已全部结束，trace.jsonl 的开发 tool_call 记录最完整，判定最可靠。
- * 早期阶段（phaseNum < 3）开发尚未完成，trace 不完整；后期阶段（phaseNum > 3）已过功能测试，无需重复。
+ * 早期阶段（phaseNum < 3）开发尚未完成，trace 不完整；后期阶段（phaseNum > 3）已过代码审查，无需重复。
  *
  * @param {string} storyId - Story ID
  * @param {number} phaseNum - 要推进到的 Phase 编号（来源 phase）

@@ -31,7 +31,7 @@ node $HARNESS/harness-workflow.js end
 ```
 
 归档前可用 `--dry-run` 核对将要移走的文件清单。归档细节见 `../工作流生命周期.md`
-与 `harness-archive` skill。
+与 `archive` skill。
 
 ## 本 Phase 才暴露的一类错误
 

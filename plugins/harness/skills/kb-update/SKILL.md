@@ -1,6 +1,6 @@
 ---
 name: "kb-update"
-description: "任务完成后自动增量更新知识库。接收 git commit hash，通过 git diff 定位变更文件，基于 meta.yaml 数据驱动受影映射到响业务域，调用 gen-project-docs 增量模式更新文档，保留手工批注。驱动词：更新知识库、kb-update、同步知识库"
+description: "任务完成后自动增量更新知识库。接收 git commit hash，通过 git diff 定位变更文件，基于 meta.yaml 数据驱动匹配受影响域，AI 直接扫描变更文件更新文档，保留手工批注。驱动词：更新知识库、kb-update、同步知识库"
 ---
 
 # kb-update — 任务完成后自动更新知识库（全局 Skill）
@@ -28,20 +28,22 @@ description: "任务完成后自动增量更新知识库。接收 git commit has
 domains:
   - id: "settings"
     path: "business/settings/"
-    entry_files: ["src/views/pc/Settings.vue"]   # 前端项目示例
+    entry_files: ["src/views/pc/Settings.vue"]   # 前端项目示例（端层 frontend/ 下）
   - id: "scripts-core"
     path: "business/scripts-core/"
-    entry_files: ["plugins/harness/scripts/lib/*.js"]   # 插件项目示例
+    entry_files: ["plugins/harness/scripts/lib/*.js"]   # 插件项目示例（无端层）
 ```
+
+> 前端项目的 `meta.yaml` 与 `business/` 都位于端层 `frontend/` 下：`.docs/llm-knowledge/frontend/meta.yaml`、`.docs/llm-knowledge/frontend/business/settings/`。脚本会自动探测到该端层根，无需 `--kb-root`。
 
 **知识库根（KB root）自动探测**：脚本不再硬编码 `.docs/llm-knowledge`，而是按下列候选依次探测 `meta.yaml`：
 
-| 布局 | 路径 | 说明 |
-|------|------|------|
-| 扁平（v2） | `<root>/.docs/llm-knowledge/meta.yaml` | 单端项目 |
-| 带端层（v1） | `<root>/.docs/llm-knowledge/<platform>/meta.yaml` | 如 `frontend/`、`h5/`、`miniprogram/`，扫描一层子目录 |
+| project_type | 路径 | 说明 |
+|-------------|------|------|
+| frontend | `<root>/.docs/llm-knowledge/frontend/meta.yaml` | 前端项目端层，多端项目可扩展 `h5/`、`miniprogram/`，扫描一层子目录 |
+| plugin / backend / library | `<root>/.docs/llm-knowledge/meta.yaml` | 无端层 |
 
-多个候选同时存在时按「更像真正知识库根」打分择优（含 `business/` 子目录 +2、含 `overview.md` +1），避免命中遗留的临时副本。若自动探测不中，可用 `--kb-root=<path>` 或环境变量 `KB_ROOT` 显式指定。
+> 前端项目带端层。多个端层目录同时存在时（多端项目），按「更像真正知识库根」打分择优（含 `business/` 子目录 +2、含 `overview.md` +1），避免命中遗留的临时副本；如自动探测不中，可用 `--kb-root=<path>` 或环境变量 `KB_ROOT` 显式指定。
 
 ---
 
@@ -63,7 +65,7 @@ node "<skill_dir>/kb-update.cjs" --help                # 打印用法
 2. `working-tree` —— `git diff --name-only HEAD`（含暂存 / 未暂存 / 删除），**支持「改动未提交就先同步知识库」**
 3. `untracked` —— `git ls-files --others --exclude-standard`（新增文件尚未 `git add` 的情形）
 
-输出 JSON：
+输出 JSON（前端项目示例，`kbRoot` 落在 `frontend/` 端层下）：
 
 ```json
 {
@@ -74,7 +76,7 @@ node "<skill_dir>/kb-update.cjs" --help                # 打印用法
   "diffSource": "committed:abc123..def456+working-tree+untracked",
   "changedFiles": ["src/views/pc/settings/AssignRule.vue", "..."],
   "kbDocFiles": [".docs/llm-knowledge/frontend/log.md", "..."],
-  "affectedDomains": [{ "id": "settings", "path": "...", "matchedFiles": [...] }],
+  "affectedDomains": [{ "id": "settings", "path": "business/settings/", "matchedFiles": [...] }],
   "designDocs": [{
     "storyId": "STORY-002",
     "title": "1v1客服等级分配模式",
@@ -82,7 +84,7 @@ node "<skill_dir>/kb-update.cjs" --help                # 打印用法
     "sourcePath": ".codebuddy/plans/STORY-002/prototype-analysis.md",
     "targetDomain": "settings",
     "targetPath": "business/settings/design/xxx.md",
-    "targetDir": "<absolute-path>/design/",
+    "targetDir": "<absolute-path>/.docs/llm-knowledge/frontend/business/settings/design",
     "fileName": "xxx.md"
   }],
   "skippedDesignStories": ["STORY-001"],

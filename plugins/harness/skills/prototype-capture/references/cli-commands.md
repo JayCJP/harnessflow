@@ -74,6 +74,15 @@ rm -f /tmp/smoke.png && rm -rf /tmp/.playwright-cli
 > 先用一个公共页面把 CLI 链路验证通，比拿真实原型试错便宜得多。
 > 自检失败 → 先解决环境（未安装 / 版本过低 / daemon 残留），不要带着问题去跑真实原型。
 
+> **未安装时的判断与安装**：跑 `playwright-cli --version`，若报 `command not found` /
+> PowerShell「无法将项识别为命令」即未安装。安装命令（需 Node.js ≥ 20）：
+> ```bash
+> npm install -g @playwright/cli@latest
+> playwright-cli install-browser   # 首次运行 CLI 也会自动下载浏览器，可省略
+> ```
+> 不想全局安装可用 `npx playwright cli <command>` 等价替代。详见 SKILL.md「前置检查 §①」。
+> 安装来源以官方为准：https://playwright.dev/agent-cli/installation
+
 **工作目录约定**：
 
 ```bash
@@ -291,6 +300,10 @@ cd "$W" && playwright-cli --raw eval "() => JSON.stringify([...document.querySel
 ---
 
 ## 4. B 类：截图遍历（Canvas / 图片渲染）
+
+> ⚠️ **「图片渲染」指原型用图片 / canvas 画出来，不是要下载这些图片。**
+> 全程**只整页截图**，原型里的 `<img src>` / 背景图 / icon **一律不下载到本地** ——
+> 截图本身就是唯一视觉证据。详见 SKILL.md 铁律 §9。
 
 B 类 DOM 是空壳，`eval innerText` / `get_visible_text` 拿不到东西。**能拿的只有两样**：
 左侧页面清单的导航节点 + 截图。
