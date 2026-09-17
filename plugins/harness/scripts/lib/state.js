@@ -125,7 +125,6 @@ const {
 
 const {
   DEV_PASS_TTL,
-  getDevPassAllowedPaths,
   issueDevPass,
   revokeDevPass,
   checkDevPass,
@@ -208,7 +207,6 @@ module.exports = {
   checkOpenQuestions,
   checkTaskDagJson,
   validateContractReferences,
-  getDevPassAllowedPaths,
 
   // dev-pass 管理
   issueDevPass,

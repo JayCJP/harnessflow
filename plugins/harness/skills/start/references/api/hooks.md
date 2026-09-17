@@ -27,11 +27,16 @@
 
 ## enforce-dev-pass.js — src/ 编辑保护
 
-三重校验：dev-pass **有效性**（存在且未过期，TTL 2h）+ **路径限域**（目标文件必须在
-`task-dag.json` 的 `files[]` 派生出的白名单内）+ **Phase 校验**（必须 Phase 2）。
+两重校验：dev-pass **有效性**（存在且未过期，TTL 2h）+ **Phase 校验**（必须 Phase 2）。
 
 总开关是 `.codebuddy/plans/.harness-active`：有标记才校验，无标记直接放行
 （即 `harness-workflow.js end` 之后 `src/` 恢复自由编辑）。
+
+> **本 hook 不做文件路径校验**。2026-09 前这里会拿 `task-dag.json` 的 `files[]` 白名单
+> 逐个比对目标路径（`failureType: dev_pass_scope_violation`），已取消 —— Phase 1 无法穷尽
+> 依赖，且 Bash 写入不在本 hook 的 matcher 内，只会逼出绕道。
+> 范围对账改由 `policy.js` 在 Phase 2→3 用 git 实际变更做，产出 `scope-amendments.json`
+> 交 Phase 3 审查核对（详见 `../phases/phase-2.md`）。
 
 **被拦了怎么办**，按提示逐项排查：
 
@@ -39,7 +44,6 @@
 |------|------|
 | 当前 Phase ≠ 2 | 不要设法绕过。走 `advance-phase.js <id> 2 --rollback` 回退到开发 |
 | dev-pass 已过期 | `advance-phase.js <id> 2 --renew-pass` |
-| 文件不在限域内 | `task-dag.json` 的 `files[]` 漏了它 —— 补全后重签 pass，别改 hook |
 
 ## enforce-artifact.js — 防跳 Phase
 

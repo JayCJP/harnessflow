@@ -197,7 +197,7 @@ const flp = promptBuilder.buildFixLoopSpawnPrompt({
 })
 ok('fix-loop prompt 含轮次头', /## 🔧 修复任务 \(第 1\/2 轮\)/.test(flp))
 ok('fix-loop prompt 含 issue 清单', flp.includes('FIX-01') && flp.includes('src/a.vue:10'))
-ok('fix-loop prompt 含限域约束', /仅修复以上列出的文件/.test(flp))
+ok('fix-loop prompt 含窄范围约束', /仅修复以上列出的文件/.test(flp))
 ok('fix-loop prompt 的修复请求为绝对路径', /[A-Za-z]:[\\/].*fix-request\.json/.test(flp))
 
 // Figma designSpec 只在 Phase 2 注入（与 buildFigmaAlignInstruction 的 Phase 过滤对齐）。

@@ -1,5 +1,152 @@
 {
-  "patterns": [],
+  "patterns": [
+    {
+      "phase": 0,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检被 open_questions_unresolved 阻塞：open-questions.json 中仍有未解决的待确认项",
+      "resolution": "预检 blocker 需修复对应产出物后再重跑门控；高频 blocker 类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "generic",
+      "blockers": [
+        "open-questions 存在未解决的待确认项"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-14T03:19:54.045Z",
+      "lastSeen": "2026-09-14T03:19:54.045Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检被 orphan_ac 阻塞：验收标准未被任何 Task 引用",
+      "resolution": "预检 blocker 需修复对应产出物后再重跑门控；高频 blocker 类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "generic",
+      "blockers": [
+        "验收标准未被任何 Task 引用"
+      ],
+      "occurrences": 2,
+      "firstSeen": "2026-09-14T01:23:49.704Z",
+      "lastSeen": "2026-09-15T07:53:59.474Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检被 schema_validation_failed 阻塞：契约文件字段取值不符合 schema（如 task-dag.json 的 evidence.source 枚举非法）",
+      "resolution": "预检 blocker 需修复对应产出物后再重跑门控；高频 blocker 类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "generic",
+      "blockers": [
+        "契约文件字段取值不符合 schema"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-14T04:39:44.149Z",
+      "lastSeen": "2026-09-14T04:39:44.149Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检被 lint_error 阻塞：本次变更文件存在 ESLint error（如 no-undef）",
+      "resolution": "预检 blocker 需修复对应产出物后再重跑门控；高频 blocker 类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "generic",
+      "blockers": [
+        "本次变更文件存在 lint error"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-14T01:41:50.362Z",
+      "lastSeen": "2026-09-14T01:41:50.362Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 2,
+      "failureType": "dev_pass_scope_violation",
+      "rootCause": "Agent 试图编辑 task-dag.json 未声明的范围外文件（dev-pass 限域外）",
+      "resolution": "只编辑 task-dag.json tasks[].files 中声明的文件；确需范围外改动须在 scope-amendments.json 登记理由，否则 Phase 3 审查判为越界",
+      "storyId": "generic",
+      "blockers": [],
+      "occurrences": 28,
+      "firstSeen": "2026-09-15T02:56:14.172Z",
+      "lastSeen": "2026-09-15T02:59:55.644Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 7,
+      "failureType": "dev_pass_expired",
+      "rootCause": "Agent 在 dev-pass 失效的 Phase（>2）试图编辑 src/ 文件",
+      "resolution": "dev-pass 仅在 Phase 2 有效（撤销点 Phase 2→3，兜底 Phase 4→5）；需改代码请回到 Phase 2",
+      "storyId": "generic",
+      "blockers": [],
+      "occurrences": 2,
+      "firstSeen": "2026-09-15T02:56:14.252Z",
+      "lastSeen": "2026-09-15T02:59:55.650Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 45 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "STORY-opt2",
+      "blockers": [
+        "45 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-30, AC-31, AC-32, AC-33, AC-34, AC-35, AC-36, AC-37, AC-38, AC-39, AC-40, AC-41, AC-42, AC-43, AC-44, AC-45, AC-46"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-15T09:50:19.563Z",
+      "lastSeen": "2026-09-15T09:50:19.563Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 33 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "STORY-opt2",
+      "blockers": [
+        "33 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-30, AC-31, AC-32, AC-33"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-16T03:06:30.536Z",
+      "lastSeen": "2026-09-16T03:06:30.536Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 25 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "STORY-opt2-r2",
+      "blockers": [
+        "25 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-16T06:47:06.511Z",
+      "lastSeen": "2026-09-16T06:47:06.511Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    },
+    {
+      "phase": 1,
+      "failureType": "preGateBlocked",
+      "rootCause": "dispatch 预检曾报 1 个 blocker（类型: orphan_ac，示例: 31 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC），修复后被门控放行",
+      "resolution": "预检 blocker 需修复对应产出物后才能推进；高频出现的类型应补录到 policy.js RECOVERY_SUGGESTIONS",
+      "storyId": "STORY-opt2-r2",
+      "blockers": [
+        "31 条验收标准未被任何 Task 引用: AC-01, AC-02, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08, AC-09, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-30, AC-31"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-16T07:08:15.326Z",
+      "lastSeen": "2026-09-16T07:08:15.326Z",
+      "needsManualReview": false,
+      "reviewStatus": "confirmed"
+    }
+  ],
   "version": "2.1",
-  "lastUpdated": "2026-09-08T13:24:51.844Z"
+  "lastUpdated": "2026-09-16T07:08:15.326Z"
 }

@@ -111,11 +111,28 @@ function baseResult (storyId, state) {
  * @param {string} storyId - Story ID
  * @returns {string[]} 告警列表；文件不存在或全部已确认时为空
  */
+/**
+ * open-questions.json 未解决项告警
+ *
+ * 2026-09-12 修正: 旧文案对所有未解决项统一说「请与用户确认后再继续」，
+ * 但门控当时只拦 blocking 项 —— 非阻塞项「告警说要确认、门控照放行」，
+ * 主 Agent 与用户都无法判断到底该不该停，形成幽灵阻塞。
+ * 现按门控真实口径改写：明确哪些会拦、以及 action 是回填 resolution 而非再去问用户。
+ */
 function openQuestionWarnings (storyId) {
   const check = checkOpenQuestions(storyId)
   if (check.unresolved.length > 0) {
     const ids = check.unresolved.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
-    return [`open-questions.json 中有 ${check.unresolved.length} 个未确认问题: ${ids}。请与用户确认后再继续。`]
+    const blockingCount = check.unresolved.filter(q => q.blocking).length
+    const pseudoCount = (check.pseudoResolved || []).length
+    const head = `open-questions.json 中有 ${check.unresolved.length} 项未真正解决: ${ids}`
+    const tail = blockingCount > 0
+      ? `其中 ${blockingCount} 项为阻塞级 —— Phase 0→1 门控会拦截`
+      : '（非阻塞级，但按现行口径同样会拦截）'
+    const pseudoTip = pseudoCount > 0
+      ? ` 另有 ${pseudoCount} 项仅置 resolved=true 未填 resolution，同样视为未解决。`
+      : ''
+    return [`${head}。${tail}。需由需求分析师回填非空 resolution 并置 resolved=true，${pseudoTip}不再需要用户逐项答复。`]
   }
   // 文件不存在不告警（Phase 0 完成前属正常状态）；解析失败仍要提示
   const parseErr = (check.errors || []).find(e => e.includes('解析失败'))

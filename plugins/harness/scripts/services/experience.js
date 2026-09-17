@@ -25,8 +25,8 @@
  *     （reviewStatus=pending），待人工用 confirmUnknownPattern 补录正确类型
  *   - getLessonsForPhase 输出时区分 unknown 类型，提醒人工补录到 policy.js 的 RECOVERY_SUGGESTIONS
  *   - v3.1 注入侧归并: 库里按根因分条留档（v2.0 的决定不变），但 getLessonsForPhase 注入前
- *     把 failureType + resolution 相同的条目合成一条。原因是模板化根因（消息里嵌绝对路径，
- *     如 dev_pass_scope_violation）每换一个文件就新开一条，occurrences 又极高，
+ *     把 failureType + resolution 相同的条目合成一条。原因是模板化根因（消息里嵌绝对路径
+ *     或文件名）每换一个文件就新开一条，occurrences 又极高，
  *     会稳定霸占 Top N 把别的教训挤出注入窗口
  *   - 实现「执行→观测→评估→提纯→知识→门控」闭环
  *   - 经验库目录由 EXPERIENCE_DIR 解析（scripts/experience），全局跨项目共享：
@@ -154,7 +154,7 @@ function recordFailurePattern (pattern) {
  * v3.1: 注入前按 failureType + resolution 归并同类项。
  *     写入侧的去重键是 phase+failureType+rootCause 前 50 字符（见文件头 v2.0 说明），
  *     这对「不同根因」是对的，但对 rootCause 里嵌了变量的模板化消息失效 ——
- *     如 dev_pass_scope_violation 的根因是「Agent 试图编辑 dev-pass 限域外的文件: <绝对路径>」，
+ *     某类 rootCause 形如「... 文件: <绝对路径>」，
  *     每个新文件路径都会新开一条 pattern，对策却完全相同。它们 occurrences 极高、
  *     恒排 Top N 之首，会把真正不同的教训挤出注入窗口。
  *     归并只在**读取/注入**这一侧做: 不改库里的数据（不同根因仍各自留档），

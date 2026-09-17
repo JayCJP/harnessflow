@@ -56,12 +56,14 @@ const {
   errorToString,
   errorToType,
   getStoryMode,
-  findBugAnalysisReports
+  findBugAnalysisReports,
+  isSrcFile
 } = require('../lib/state')
 const { ARTIFACT } = require('../lib/artifacts')
 
 const schemaValidator = require('./schema-validator')
 const debugLog = require('../lib/debug-log')
+const { getDeclaredScope, isFileInDeclaredScope } = require('../lib/scope')
 
 /**
  * advance-phase.js 的绝对调用形式 —— 复用 lib/paths.js 的公共出口。
@@ -85,7 +87,19 @@ const RECOVERY_SUGGESTIONS = {
   // Phase 0→1: open-questions 有 blocking 未解决
   blocking_unresolved: {
     level: 4,
-    action: '请用户逐项确认 open-questions 中的 blocking 项并更新 resolved 字段',
+    action: '请用户逐项确认 open-questions 中的 blocking 项，并由需求分析师回填 resolution 后置 resolved 字段为 true',
+    autoFixable: false
+  },
+  // Phase 0→1: open-questions 有非阻塞项未解决（2026-09-12 用户裁定: 不论 blocking，一律拦截）
+  open_questions_unresolved: {
+    level: 4,
+    action: 'open-questions.json 仍有未解决项 —— 由需求分析师逐项给出结论（填写非空 resolution）并置 resolved=true；确实无需处理的也要写明判定依据，不得留空',
+    autoFixable: false
+  },
+  // Phase 0→1: 已置 resolved=true 但 resolution 为空（空壳消解）
+  pseudo_resolved: {
+    level: 4,
+    action: '存在「已置 resolved=true 但未填写 resolution」的项，门控视为未解决 —— 补齐每条的 resolution 结论后重试',
     autoFixable: false
   },
   // Phase 0→1: AC 格式错误
@@ -440,21 +454,27 @@ function checkPhase0Gate (storyId, state, result) {
   }
 
   // 待确认项 — 单一数据源：open-questions.json
+  // 口径（2026-09-12 用户裁定）: 门控点只在 Phase 0→1；未解决项**不论 blocking 与否**一律拦截；
+  // 「已解决」= resolved:true 且 resolution 非空（判定见 contracts.isTrulyResolved）。
+  // 此前非阻塞项只进 warnings 放行，导致 3 条未确认项能一路带到 Phase 5 而无人处理。
   const oqCheck = checkOpenQuestions(storyId)
   const oqUnresolved = oqCheck.exists ? oqCheck.unresolved.length : 0
   const oqBlocking = oqCheck.exists ? oqCheck.unresolved.filter(q => q.blocking).length : 0
+  const oqPseudo = oqCheck.exists ? (oqCheck.pseudoResolved || []).length : 0
 
-  if (oqBlocking > 0) {
-    const blocker = structuredError(
-      'blocking_unresolved',
-      `${oqBlocking} 项阻塞级待确认问题未解决 (open-questions: ${oqBlocking})`,
-      4,
-      '请用户逐项确认 open-questions 中的 blocking 项'
-    )
-    result.blockers.push(blocker)
+  if (oqUnresolved > 0) {
+    const ids = oqCheck.unresolved.map(q => q.id || '?').slice(0, 5).join(', ')
+    const type = oqPseudo > 0
+      ? 'pseudo_resolved'
+      : (oqBlocking > 0 ? 'blocking_unresolved' : 'open_questions_unresolved')
+    const detail = `${oqUnresolved} 项待确认问题未真正解决（阻塞级 ${oqBlocking} 项` +
+      (oqPseudo > 0 ? `，其中 ${oqPseudo} 项仅置 resolved=true 未填 resolution` : '') +
+      `）: ${ids}`
+    const resolution = oqPseudo > 0
+      ? '补齐这些项的 resolution 结论（仅置 resolved=true 视为未解决）后重试'
+      : '由需求分析师逐项给出结论并填写非空 resolution 后置 resolved=true 重试'
+    result.blockers.push(structuredError(type, `open-questions: ${detail}`, 4, resolution))
     result.passed = false
-  } else if (oqUnresolved > 0) {
-    result.warnings.push(`${oqUnresolved} 项待确认问题未解决但无阻塞级`)
   }
 
   // Figma frame inventory 不在 Phase 0→1 校验 —— frame-inventory 由 Phase 1 任务规划师拆 task 时产出，
@@ -675,6 +695,8 @@ function checkPhase2Gate (storyId, state, result) {
   const repos = loadRepos(storyId)
   const repoNames = Object.keys(repos.repos || {})
   const targets = repoNames.length > 0 ? repoNames : [null]
+  /** 仓库名 → 该仓未提交变更文件（相对仓根路径），供 lint 与范围审计共用 */
+  const changedByRepo = new Map()
   let anyChange = false
   let anyBuildScript = false
 
@@ -692,6 +714,7 @@ function checkPhase2Gate (storyId, state, result) {
     const changed = getChangedFiles(repoRoot)
     if (changed.length === 0) continue
     anyChange = true
+    changedByRepo.set(name || repos.primary, { repoRoot, files: changed })
 
     // 1. 增量 lint
     const lintTargets = changed.filter(f => /\.(js|jsx|ts|tsx|vue)$/i.test(f))
@@ -746,12 +769,92 @@ function checkPhase2Gate (storyId, state, result) {
     result.warnings.push('Phase 2 未检测到未提交的代码变更（可能已提交或本 Story 无代码改动），已跳过 lint 校验')
   }
 
+  // 范围审计：Phase 2→3 时才有完整的开发期变更，是生成清单一的最佳时机。
+  // 放在 anyChange 判断之后：无变更时清单一必为空，不必落盘。
+  if (anyChange) {
+    auditScopeAmendments(storyId, repos, changedByRepo, result)
+  }
+
   // 编译校验关闭是全局默认行为，与是否检测到变更无关，故在循环外只提示一次 ——
   // 放在循环内会随仓库数重复出现，淹没真正的 warning。
   // 前提：仓库确实有构建脚本。纯静态 / 无构建步骤的项目（如单个 HTML 页）根本不会触发
   // 编译错误，对它提示「SCSS/模板编译错误将只能在 Phase 7 暴露」是无差别噪音（2026-09 修正）。
   if (process.env.HARNESS_RUN_BUILD !== '1' && anyBuildScript) {
     result.warnings.push('编译校验默认关闭（设 HARNESS_RUN_BUILD=1 启用），SCSS/模板编译错误将只能在 Phase 7 云端构建暴露')
+  }
+}
+
+/**
+ * 范围审计 —— 把 git 实际变更减去 task-dag.json 声明范围，产出范围外改动清单
+ *
+ * 这是文件级限域从「写前拦截」改为「事后审计」后的落地形态（2026-09）:
+ *   - 事实来源是 `git status`（已在 checkPhase2Gate 采集），不依赖 Agent 的写入意图，
+ *     因此 Bash / 脚本写入同样被计入，不存在绕过面
+ *   - 不阻塞推进：范围外改动只进 warnings，由 Phase 3 审查逐条核对必要性
+ *   - 产物 scope-amendments.json 供 Phase 3 prompt 注入（见 services/prompt-builder.js）
+ *
+ * @param {string} storyId - Story ID
+ * @param {{ primary: string, repos: Object<string,string> }} repos - 仓库注册表
+ * @param {Map<string, {repoRoot: string, files: string[]}>} changedByRepo - 各仓未提交变更
+ * @param {{ warnings: string[], passed: boolean }} result - 门控结果（写入 warnings）
+ * @returns {void}
+ */
+function auditScopeAmendments (storyId, repos, changedByRepo, result) {
+  const declared = getDeclaredScope(storyId)
+  const inScope = []
+  const outOfScope = []
+
+  for (const [repoName, entry] of changedByRepo) {
+    for (const rel of entry.files) {
+      const abs = path.join(entry.repoRoot, rel)
+      // 只审计受保护的 src/：配置、文档、依赖声明等不在原 dev-pass 保护范围内，
+      // 计入清单只会稀释 Phase 3 的注意力
+      if (!isSrcFile(abs)) continue
+      const item = { repo: repoName, path: rel.replace(/\\/g, '/') }
+      if (isFileInDeclaredScope(abs, declared.paths, repos)) inScope.push(item)
+      else outOfScope.push(item)
+    }
+  }
+
+  if (declared.warnings.length > 0) {
+    for (const w of declared.warnings) result.warnings.push(w + '（范围外改动清单可能偏大，供 Phase 3 审查参考）')
+  }
+
+  const payload = {
+    storyId,
+    generatedAt: new Date().toISOString(),
+    declaredSource: declared.source,
+    declaredCount: declared.paths.length,
+    inScopeCount: inScope.length,
+    outOfScope,
+    note: '本清单由 Phase 2→3 门控按 git 实际变更生成。Phase 3 审查须逐条核对 outOfScope 中每个文件的改动必要性；属于本次需求但未声明的，请回写 task-dag.json 的 files[]'
+  }
+
+  try {
+    fs.writeFileSync(
+      path.join(getStoryDir(storyId), ARTIFACT.SCOPE_AMENDMENTS),
+      JSON.stringify(payload, null, 2),
+      'utf-8'
+    )
+  } catch (e) {
+    // 落盘失败不阻塞门控，但必须可见 —— 否则 Phase 3 会当作「没有范围外改动」
+    result.warnings.push(`范围外改动清单写入失败: ${String((e && e.message) || e)}`)
+  }
+
+  debugLog.record(storyId, 'method_output', {
+    method: 'auditScopeAmendments',
+    declaredSource: declared.source,
+    declaredCount: declared.paths.length,
+    inScopeCount: inScope.length,
+    outOfScope
+  }, { source: 'policy.js', phase: 2 })
+
+  if (outOfScope.length > 0) {
+    const list = outOfScope.map(f => `${f.repo}:${f.path}`).join(', ')
+    result.warnings.push(
+      `检测到 ${outOfScope.length} 个范围外改动文件（未声明在 task-dag.json 的 files[]）: ${list}。` +
+      '清单已写入 scope-amendments.json，Phase 3 审查须逐条核对必要性'
+    )
   }
 }
 
@@ -862,7 +965,10 @@ function checkContractRegression (storyId) {
  */
 function getChangedFiles (repoRoot) {
   try {
-    const out = execSync('git status --porcelain', {
+    // -uall 必须显式带上: 默认 porcelain 把未跟踪的新文件聚合成目录条目（"?? src/views/"），
+    // 被下方 "过滤以 / 结尾" 的规则丢掉 —— 结果是 Phase 2 新增的文件既不进增量 lint，
+    // 也不进范围审计。新增文件恰是最容易被漏的一条路径，必须逐个列出。
+    const out = execSync('git status --porcelain -uall', {
       cwd: repoRoot,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

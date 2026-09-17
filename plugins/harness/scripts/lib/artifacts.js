@@ -50,6 +50,8 @@ const ARTIFACT = {
   E2E_STATE: 'e2e-state.json',
   REPOS: 'repos.json',
   DEV_PASS: 'dev-pass.json',
+  // 范围外改动清单：由 policy.js 在 Phase 2→3 门控生成，交 Phase 3 审查核对
+  SCOPE_AMENDMENTS: 'scope-amendments.json',
 
   // ── 日志（追加型）──
   TRACE: 'trace.jsonl',

@@ -71,10 +71,18 @@ function buildAdditionalContext (workflowResults) {
     const bits = [`${storyId} 「${state.title || '未知'}」`, `Phase ${state.phase}(${hookUtils.getPhaseName(state.phase)})`]
     if (state.status && state.status !== 'running') bits.push(state.status)
     if (state.updatedAt) bits.push(`${String(state.updatedAt).slice(5, 10)} 更新`)
-    if (unresolved.length > 0) bits.push(`⛔ 待确认 ${unresolved.length} 项`)
+    if (unresolved.length > 0) {
+      const blockingCount = unresolved.filter(u => u.blocking).length
+      const pseudoCount = unresolved.filter(u => u.pseudo).length
+      const tag = blockingCount > 0
+        ? `⛔ 未解决 ${unresolved.length} 项（阻塞级 ${blockingCount}）`
+        : `⚠️ 未解决 ${unresolved.length} 项（非阻塞，同样拦 Phase 0→1）`
+      bits.push(pseudoCount > 0 ? `${tag}，其中 ${pseudoCount} 项缺 resolution` : tag)
+    }
     lines.push(`${i + 1}. ${bits.join(' · ')}`)
     if (unresolved.length > 0) {
       lines.push(`   → 待确认详情: read_file .codebuddy/plans/${storyId}/open-questions.json`)
+      lines.push('   → 解决方式: 每项填写非空 resolution 并置 resolved=true（仅置 true 无效）')
     }
   }
   if (sorted.length > MAX_LISTED) {
@@ -126,7 +134,14 @@ function main () {
     // 从 open-questions.json 读取未解决确认项（单一数据源）
     const oqCheck = hookUtils.checkOpenQuestions(wf.storyId)
     const unresolved = (oqCheck.exists && !oqCheck.allResolved)
-      ? oqCheck.unresolved.map(q => ({ question: q.question, source: 'open-questions.json' }))
+      ? oqCheck.unresolved.map(q => ({
+        id: q.id,
+        question: q.question,
+        blocking: !!q.blocking,
+        // pseudoResolved 里出现过 = 已置 resolved:true 但未填 resolution，同样是未解决
+        pseudo: (oqCheck.pseudoResolved || []).some(p => p === q),
+        source: 'open-questions.json'
+      }))
       : []
 
     return {

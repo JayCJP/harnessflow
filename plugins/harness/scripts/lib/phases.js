@@ -133,7 +133,7 @@ const PHASE_AGENTS = {
   4: {
     agent: 'release-assistant',
     label: '发布助手',
-    instruction: '执行 git add + commit + push，并创建 MR。禁止使用 --no-verify'
+    instruction: '执行 git add + commit + push，并创建 MR 合并到 dev 分支。禁止使用 --no-verify'
   },
   5: {
     agent: 'release-assistant',

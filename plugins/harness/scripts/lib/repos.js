@@ -10,7 +10,7 @@
  *   const { loadRepos, getRepoRoot, isSrcFile } = require('./repos')
  *
  * 使用场景:
- *   - dev-pass 限域: task 的 files[] 要按 task.project / task.repo 归到正确仓库
+ *   - 范围审计: task 的 files[] 要按 task.project / task.repo 归到正确仓库
  *   - hooks/enforce-dev-pass.js: 判断被编辑的文件是否属于受保护的 src/
  *   - 跨仓 Story 的产出物路径解析
  *

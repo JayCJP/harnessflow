@@ -50,11 +50,7 @@ function runRenewPass ({ storyId, targetPhase }) {
       success: true,
       storyId,
       phase: 2,
-      pass: {
-        expiresAt: pass.expiresAt,
-        allowedPaths: pass.allowedPaths.length + ' files',
-        source: pass.pathSource
-      }
+      pass: { expiresAt: pass.expiresAt }
     }
   }
 }

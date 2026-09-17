@@ -538,6 +538,17 @@ function getContractFiles (storyId, phase) {
     }
   }
 
+  // Phase 1（任务规划）拆解前必须先读懂原型分析文档 —— 页面清单 / 原型说明 / 交互流程
+  // 是拆 Task 粒度的直接依据，跳过它会漏功能、漏页面。
+  // 该文档是条件产出物（仅 prototypeRequired=true 时存在），故按「文件是否存在」注入：
+  // 不存在则静默跳过 —— 纯文字需求不应被要求去读一个不存在的文件。
+  if (nextPhase === 1) {
+    const protoAnalysisFile = path.join(storyDir, ARTIFACT.PROTOTYPE_ANALYSIS)
+    if (fs.existsSync(protoAnalysisFile)) {
+      contracts.push('.codebuddy/plans/' + storyId + '/prototype-analysis.md')
+    }
+  }
+
   return contracts
 }
 

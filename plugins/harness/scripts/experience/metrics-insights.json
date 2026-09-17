@@ -1,7 +1,139 @@
 {
   "version": "1.0",
-  "totalProjects": 0,
-  "totalStories": 0,
-  "insights": [],
-  "lastUpdated": "2026-09-03T15:58:12.898Z"
+  "totalProjects": 1,
+  "totalStories": 4,
+  "insights": [
+    {
+      "id": "INSIGHT-fix-loop-trigger",
+      "targetPhase": 2,
+      "type": "fix_loop_trigger",
+      "severity": "warning",
+      "title": "Fix-loop 触发率偏高",
+      "description": "开发阶段自测不充分，代码审查/测试一次不通过",
+      "recommendation": "开发前先查知识库 pitfalls 避免已知坑点，ESLint 0 error 后再提交审查",
+      "evidence": "触发率 50%（2 次）",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 2,
+      "firstSeen": "2026-09-10T16:01:00.233Z",
+      "lastSeen": "2026-09-14T09:14:43.154Z"
+    },
+    {
+      "id": "INSIGHT-fix-loop-success",
+      "targetPhase": 3,
+      "type": "fix_loop_success",
+      "severity": "warning",
+      "title": "Fix-loop 首轮修复成功率偏低",
+      "description": "审查给出的 BLOCKER 修复建议可操作性不足，需要多轮修复",
+      "recommendation": "审查师的 FIX_DATA 需给出代码级建议（具体文件/行号 + 替换方案），避免泛泛描述问题",
+      "evidence": "首轮成功率 50%",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-10T16:01:00.234Z",
+      "lastSeen": "2026-09-10T16:01:00.234Z"
+    },
+    {
+      "id": "INSIGHT-kb-not-consumed",
+      "targetPhase": 0,
+      "type": "kb_not_consumed",
+      "severity": "warning",
+      "title": "知识库检索（kb-query/graphify）未被调用",
+      "description": "有 skill 调用但从未做知识库检索，注入的历史教训未被查证",
+      "recommendation": "需求分析/任务规划/代码审查阶段必须调用 kb-query ∥ graphify 双源检索并交叉验证",
+      "evidence": "skill 调用 1 次，kb 检索 0 次",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 2,
+      "firstSeen": "2026-09-14T09:14:43.154Z",
+      "lastSeen": "2026-09-14T10:16:58.282Z"
+    },
+    {
+      "id": "INSIGHT-bottleneck-p1",
+      "targetPhase": 0,
+      "type": "bottleneck",
+      "severity": "warning",
+      "title": "Phase 1(任务规划)耗时超出阈值",
+      "description": "任务规划阶段耗时偏长，影响整体交付效率",
+      "recommendation": "大 task 拆为 Fork-Join 并行，单 task 控制在 15min 内，并为每个 task 声明完整 files",
+      "evidence": "2 个 Story: avg=21min, max=22min",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-14T10:16:58.281Z",
+      "lastSeen": "2026-09-14T10:16:58.282Z"
+    },
+    {
+      "id": "INSIGHT-bottleneck-p4",
+      "targetPhase": 3,
+      "type": "bottleneck",
+      "severity": "warning",
+      "title": "Phase 4(Git提交)耗时超出阈值",
+      "description": "提交阶段耗时偏长，影响整体交付效率",
+      "recommendation": "提交前确认工作区干净、commit message 规范，禁止 --no-verify；一次提交只做一件事",
+      "evidence": "2 个 Story: avg=28min, max=53min",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-14T10:16:58.282Z",
+      "lastSeen": "2026-09-14T10:16:58.282Z"
+    },
+    {
+      "id": "INSIGHT-bottleneck-p6",
+      "targetPhase": 5,
+      "type": "bottleneck",
+      "severity": "warning",
+      "title": "Phase 6(云端部署)耗时超出阈值",
+      "description": "云端部署阶段耗时偏长（等待构建/部署），影响整体交付效率",
+      "recommendation": "尽早触发构建，部署等待期间并行推进知识库更新，避免串行空等",
+      "evidence": "2 个 Story: avg=91min, max=183min",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-14T10:16:58.282Z",
+      "lastSeen": "2026-09-14T10:16:58.282Z"
+    },
+    {
+      "id": "INSIGHT-gate-quality",
+      "targetPhase": 0,
+      "type": "gate_quality",
+      "severity": "warning",
+      "title": "门控一次通过率 74%",
+      "description": "26% 的 Phase 推进需要多次门控尝试",
+      "recommendation": "需求分析阶段确保 AC 格式正确（id/description/criteria 非空）、open-questions 全部 resolved、task-dag 使用 title 而非 name",
+      "evidence": "通过率 74% (基于 6 个 Story)",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 2,
+      "firstSeen": "2026-09-14T10:16:58.282Z",
+      "lastSeen": "2026-09-15T09:08:54.317Z"
+    },
+    {
+      "id": "INSIGHT-002",
+      "targetPhase": 0,
+      "type": "completion_rate",
+      "severity": "warning",
+      "title": "Story 完成率 67%",
+      "description": "部分 Story 未完成，可能存在需求不清晰或阻塞未解决",
+      "recommendation": "需求分析阶段确保 open-questions 全部 resolved，需求边界明确后再进入开发",
+      "evidence": "4/6 完成",
+      "sourceProjects": [
+        "CustomerServiceSystem"
+      ],
+      "occurrences": 1,
+      "firstSeen": "2026-09-15T09:08:54.317Z",
+      "lastSeen": "2026-09-15T09:08:54.317Z"
+    }
+  ],
+  "lastUpdated": "2026-09-15T09:08:54.317Z",
+  "_knownProjects": [
+    "CustomerServiceSystem"
+  ]
 }

@@ -14,7 +14,7 @@
  * 使用场景:
  *   - 门控: services/policy.js 在每次 Phase 推进前调用这套 check 裁定能否推进
  *   - 人工诊断: audit/harness-audit.js 复用同一套校验，保证诊断与门控口径一致
- *   - dev-pass 限域: task-dag.json 的 files[] 是限域的唯一来源
+ *   - 范围审计: task-dag.json 的 files[] 是「声明改动范围」的唯一来源（lib/scope.js）
  *
  * 说明:
  *   - 所有 check* 都返回结构化结果（不抛异常），由调用方决定是阻塞还是告警：
@@ -135,12 +135,34 @@ function checkAcceptanceCriteria (storyId) {
 }
 
 /**
+ * 判定一条待确认项是否「真正解决」
+ *
+ * 门控口径（用户 2026-09-12 裁定）: `resolved: true` 本身不足以通过 —— 必须同时填写
+ * 非空的 `resolution`。只把 resolved 置 true 而不写结论（空壳消解）的项，仍算未解决。
+ *
+ * 为什么必须要求 resolution: 契约是跨 Agent 传递结论的唯一载体。若允许「置 true 不写结论」，
+ * 下游无从得知"依据什么判定、落在哪个文件"，复盘与追责都会失效；实测本 Story 的 Q-4/Q-6/Q-7
+ * 就是这样被长期挂在 false 状态，告警反复却不阻断。
+ *
+ * @param {Object} q - open-questions.json 的 questions[] 元素
+ * @returns {boolean} true=真正解决（resolved 为 true 且 resolution 非空）
+ */
+function isTrulyResolved (q) {
+  return !!(q && q.resolved === true &&
+    typeof q.resolution === 'string' && q.resolution.trim().length > 0)
+}
+
+/**
  * 检查待确认项契约 (open-questions.json) 是否全部已解决
+ *
+ * 未解决判定 = resolved 非 true **或** resolution 为空。
+ * `pseudoResolved` 单独列出「已置 true 但未写结论」的项，供门控给出更精准的失败类型。
+ *
  * @param {string} storyId - Story ID
- * @returns {{ exists: boolean, allResolved: boolean, unresolved: Array, errors: string[] }}
+ * @returns {{ exists: boolean, allResolved: boolean, unresolved: Array, pseudoResolved: Array, errors: string[] }}
  */
 function checkOpenQuestions (storyId) {
-  const result = { exists: false, allResolved: false, unresolved: [], errors: [] }
+  const result = { exists: false, allResolved: false, unresolved: [], pseudoResolved: [], errors: [] }
   const data = readJsonArtifact(storyId, OPEN_QUESTIONS_FILE)
 
   if (!data) {
@@ -159,13 +181,20 @@ function checkOpenQuestions (storyId) {
     return result
   }
 
+  // 「已解决」= resolved 为 true 且 resolution 非空。
   // resolved 的契约类型是 boolean（见 schemas/open-questions.schema.json）。
   // 用 !== true 而非 !q.resolved: resolved: 1 / "yes" 这类非法值不该被当作已解决。
-  result.unresolved = data.questions.filter(q => q && q.resolved !== true)
+  result.unresolved = data.questions.filter(q => !isTrulyResolved(q))
+  // 空壳消解: 置了 true 但没写结论。单独列出，门控据此给 pseudo_resolved 失败类型。
+  result.pseudoResolved = data.questions.filter(q => q && q.resolved === true && !isTrulyResolved(q))
   result.allResolved = result.unresolved.length === 0
 
   if (!result.allResolved) {
-    result.errors.push(`${result.unresolved.length} 项待确认问题未解决`)
+    const pseudoCount = result.pseudoResolved.length
+    result.errors.push(
+      `${result.unresolved.length} 项待确认问题未真正解决` +
+      (pseudoCount > 0 ? `（其中 ${pseudoCount} 项仅置 resolved=true 但未填写 resolution）` : '')
+    )
   }
 
   return result
@@ -216,14 +245,14 @@ function checkTaskDagJson (storyId) {
       pushIssue(result, 'empty_ac_ref', `${prefix}: 缺少 acceptanceCriteria 引用（至少需关联 1 条验收标准）`, 2, '每个 task 的 acceptanceCriteria 至少引用 1 条 AC')
     }
 
-    // 检查 files 范围（用于 dev-pass 限域）
+    // 检查 files 范围（用于 Phase 2→3 的范围审计比对）
     if (!Array.isArray(task.files) || task.files.length === 0) {
-      result.warnings.push(`${prefix}: files 为空，dev-pass 将降级为 src/** 全局授权（高风险）`)
+      result.warnings.push(`${prefix}: files 为空，Phase 2 的全部改动都会被判为范围外，Phase 3 审查负担加重`)
     }
 
     // 跨项目 task 校验：有 project 字段时必须有 repoPath
     if (task.project && task.project !== repos.primary && !task.repoPath) {
-      pushIssue(result, 'task_missing_repo_path', `${prefix}: 跨项目 task (project=${task.project}) 必须指定 repoPath`, 2, '跨项目 task（project ≠ 主仓）必须指定 repoPath，否则 dev-pass 无法把改动定位到正确仓库')
+      pushIssue(result, 'task_missing_repo_path', `${prefix}: 跨项目 task (project=${task.project}) 必须指定 repoPath`, 2, '跨项目 task（project ≠ 主仓）必须指定 repoPath，否则 Phase 2→3 的范围审计无法把改动定位到正确仓库')
     }
 
     // 跨项目 task 强制细化：description 必须包含行号引用

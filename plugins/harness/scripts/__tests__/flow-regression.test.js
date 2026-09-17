@@ -3,7 +3,7 @@
  * 流程回归测试 —— 覆盖 2026-08 的流程改造：
  *   1. fixloop 按失败源独立预算（code-review/test 各 2 次，不共享）
  *   2. unverifiable 不阻塞门控（需求4：无法验证就跳过）
- *   3. 目录级 glob 限域（需求2：files 支持目录 glob）
+ *   3. 目录级 glob 匹配（需求2：files 支持目录 glob）
  *   4. Phase 1→2 门控：figma-frame-inventory 存在性与完整性
  *   5. advance-phase.js 输出契约（2026-09）：只给推进结果 + 怎么 Spawn，
  *      不再回吐 phaseSummaryContent / contractFilesToLoad / agentConstraints /

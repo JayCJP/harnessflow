@@ -7,7 +7,7 @@
  *      唯一信源）
  *   2. 按失败源独立计数的修复预算做轮次校验（用尽 → 升级为人工介入）
  *   3. 写 fix-request.json + fix-context.md、归档本轮源产出物
- *   4. 回退到 Phase 2、按受影响文件签发限域 dev-pass、写回 e2e-state.json
+ *   4. 回退到 Phase 2、重签 dev-pass、写回 e2e-state.json
  *   5. 委托 prompt-builder 生成开发者 spawnPrompt，输出结构化结果供主 Agent Spawn
  *
  * 用法（由 advance-phase.js 按 flag 分派，不直接被主 Agent 调用）:
@@ -34,7 +34,8 @@ const {
   getMaxFixRounds,
   loadRepos,
   writeStateFile,
-  DEV_PASS_TTL
+  DEV_PASS_TTL,
+  issueDevPass
 } = require('../../lib/state')
 const trace = require('../../lib/trace')
 const promptBuilder = require('../../services/prompt-builder')
@@ -166,7 +167,7 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   //      - issue.file：问题出现位置（必收）
   //      - issue.repoPath：若它是具体修复点文件（非仓库根路径）→ 作为额外受影响文件加入；
   //        若它是仓库根 → 仅用于把 issue.file 定位到该仓库
-  //    dev-pass 限域据此把每个受影响文件归到正确仓库，避免跨仓修复时被误拦截。
+  //    据此把每个受影响文件归到正确仓库，避免跨仓修复时路径解析错位。
   const reposForFix = loadRepos(storyId)
   // 已注册仓库根路径集合，用于判断 repoPath 是「仓库根」还是「具体文件」
   const repoRoots = new Set(Object.values(reposForFix.repos).map(r => path.resolve(r).replace(/\\/g, '/')))
@@ -258,28 +259,8 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
   state.status = 'running'
   state.updatedAt = now.toISOString()
 
-  // 7. 重新签发 dev-pass（限域到 affectedFiles，跨仓时按 issue 的 project/repoPath 定位到正确仓库）
-  const repos = loadRepos(storyId)
-  const scopedPaths = affectedFiles.length > 0
-    ? affectedFiles.map(f => {
-      const fr = affectedFileRepo[f] || { repo: repos.primary }
-      return { repo: fr.repo, path: f }
-    })
-    : [{ repo: repos.primary, path: 'src/**' }]
-
-  const devPass = {
-    storyId,
-    issuedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + DEV_PASS_TTL).toISOString(),
-    phase: 2,
-    reason: `Fix loop round ${nextRound}/${MAX_FIX_ROUNDS} (from Phase ${sourcePhase})`,
-    allowedPaths: scopedPaths,
-    pathSource: 'fix-loop-scoped',
-    pathWarnings: affectedFiles.length === 0 ? ['affectedFiles 为空，降级为全 src/** 授权'] : [],
-    fixRound: nextRound
-  }
-  const devPassPath = path.join(storyDir, 'dev-pass.json')
-  fs.writeFileSync(devPassPath, JSON.stringify(devPass, null, 2), 'utf-8')
+  // 7. 重新签发 dev-pass（凭证不含文件清单 —— 文件级范围由 policy.js 在 Phase 2→3 按 git 变更审计）
+  const devPass = issueDevPass(storyId, DEV_PASS_TTL, `Fix loop round ${nextRound}/${MAX_FIX_ROUNDS} (from Phase ${sourcePhase})`)
 
   // 8. 记录 trace
   trace.tracePhaseTransition(storyId, currentPhase, 2)
@@ -356,7 +337,6 @@ function runFixLoop ({ storyId, state, currentPhase, ADVANCE_CMD, ARCHIVE_CMD })
       affectedFiles,
       fixRequestPath: path.relative(PROJECT_ROOT, fixRequestPath),
       devPassExpiresAt: devPass.expiresAt,
-      devPassScope: affectedFiles.length > 0 ? `${affectedFiles.length} files` : 'src/**',
       spawnPrompt,
       nextSteps: [
         '1. 主 Agent 将上述 spawnPrompt 作为 Prompt Spawn 前端开发工程师 (agent 注册名: frontend-developer)',
