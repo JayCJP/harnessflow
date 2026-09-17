@@ -46,11 +46,12 @@
               "required": ["nodeId", "link"],
               "properties": {
                 "nodeId": { "type": "string", "minLength": 1, "description": "Figma node ID，如 '3020:83533'" },
-                "link": { "type": "string", "minLength": 1, "description": "该 node 的完整 Figma 链接（含 ?node-id=...&m=dev），供开发 agent 直接拉取，避免从 nodeId 自行拼装" }
+                "link": { "type": "string", "minLength": 1, "description": "该 node 的完整 Figma 链接（含 ?node-id=...&m=dev），供开发 agent 直接拉取，避免从 nodeId 自行拼装" },
+                "name": { "type": "string", "minLength": 1, "description": "该 Figma node 的名称（取自 frame-inventory.frames[].name，如「编辑分组弹窗」），生成时必填，方便开发工程师一眼看出该 nodeId 对应设计稿的什么组件。旧数据缺失不阻断，门控不强制" }
               },
               "additionalProperties": false
             },
-            "description": "开发用精确绑定：task 要拉取的每个 Figma node 的 nodeId + 完整链接配对。一个 task 处理多个组件时有多个元素"
+            "description": "开发用精确绑定：task 要拉取的每个 Figma node 的 nodeId + 完整链接 + node 名称配对。一个 task 处理多个组件时有多个元素"
           },
           "parallelizable": { "type": "boolean" },
           "complexity": { "type": "string", "enum": ["low", "medium", "high"] },

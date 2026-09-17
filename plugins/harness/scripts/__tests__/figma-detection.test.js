@@ -193,13 +193,13 @@ fs.writeFileSync(path.join(storyDir('FG-RUN'), 'task-dag.json'), JSON.stringify(
       id: 'T-1',
       title: '订单列表页',
       files: ['src/views/order/List.vue'],
-      figmaRefs: [{ nodeId: '3020:83533', link: 'https://www.figma.com/design/AbC123/订单中心?node-id=3020-83533&m=dev' }]
+      figmaRefs: [{ nodeId: '3020:83533', name: '订单列表', link: 'https://www.figma.com/design/AbC123/订单中心?node-id=3020-83533&m=dev' }]
     },
     {
       id: 'T-2',
       title: '详情弹窗',
       files: ['src/views/order/Detail.vue'],
-      figmaRefs: [{ nodeId: '3020:78242', link: 'https://www.figma.com/design/AbC123/订单中心?node-id=3020-78242&m=dev' }]
+      figmaRefs: [{ nodeId: '3020:78242', name: '订单详情弹窗', link: 'https://www.figma.com/design/AbC123/订单中心?node-id=3020-78242&m=dev' }]
     }
   ]
 }, null, 2))

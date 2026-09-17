@@ -70,7 +70,7 @@ Phase 3 审查里被逐条追问必要性。
     "files": ["src/store/config.js"],            // Phase 2→3 范围审计的比对基准，尽量列全
     "acceptanceCriteria": ["AC-1"],              // MUST: 非空
     "figmaLink": ["https://www.figma.com/..."],  // UI 任务必填，非 UI 任务为 null
-    "figmaRefs": [{ "nodeId": "3020:83533", "link": "https://www.figma.com/..." }],
+    "figmaRefs": [{ "nodeId": "3020:83533", "name": "编辑分组弹窗", "link": "https://www.figma.com/..." }],
     "parallelizable": true,
     "project": "userlive",                       // 跨项目时必填
     "repoPath": "D:/workfile/userlive"           // 跨项目时必填（绝对路径）

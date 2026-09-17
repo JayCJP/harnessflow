@@ -247,7 +247,7 @@ function buildFigmaAlignInstruction (storyId, targetPhase) {
     '- UI 必须严格对齐设计稿，禁止使用默认/直觉样式。',
     '- 每个 UI 任务**自行调用 Figma MCP** 拉取该节点的完整设计上下文（`get_design_context` 为主，`get_screenshot` 为辅）——设计稿内容以 MCP 返回为准，不要凭截图/摘要推测。',
     '- **开工前先校验 Figma MCP 可用性**；若无法使用（工具不可用 / Figma 桌面端未运行 / 返回错误）——**立即停下当前任务并上报主 Agent，禁止硬做**（设计稿未对齐就开发会导致大量返工）。',
-    `- **精确节点清单在 \`task-dag.json\` 里**: 本 Story 有 ${figmaTasks.length} 个 task 需要 Figma，逐个读 task 的 \`figmaRefs[]\`（\`nodeId\` + \`link\`，旧数据回落 \`figmaNodeId\`），按 task 精准拉取对应 node，**不要全量探索整个设计稿文件**。`,
+    `- **精确节点清单在 \`task-dag.json\` 里**: 本 Story 有 ${figmaTasks.length} 个 task 需要 Figma，逐个读 task 的 \`figmaRefs[]\`（\`nodeId\` + \`name\` + \`link\`，旧数据回落 \`figmaNodeId\`），\`name\` 是设计稿中该 node 的名称，先看 \`name\` 就知道这是哪个组件、对应设计稿的哪个画板，不必回头查 inventory；按 task 精准拉取对应 node，**不要全量探索整个设计稿文件**。`,
     ...(detected.urls.length > 0 ? ['- 设计稿文件链接：', ...detected.urls.map(u => `  - ${u}`)] : []),
     ''
   ]
@@ -336,7 +336,7 @@ function buildTaskPlannerFigmaInstruction (storyId) {
     '- 前置条件: Figma 桌面端需处于运行状态并已打开该文件；未运行则如实告知用户并停止，不要退回缓存数据。',
     '- 只针对**要拆分的 task 涉及的文件/组件**产出 `figma-frame-inventory.json`（覆盖每个相关 page / dialog / drawer 的完整 node 链接），**不要全量扫描所有页面**——拆到哪些组件就拉哪些，避免重复分析浪费 token。',
     '- **只用 `get_metadata` 扫帧结构（id/name/type/link/rect），禁止调用 `get_design_context` / `get_screenshot`**——设计稿完整内容（色值/间距/字体/布局/交互）由开发工程师 Phase 2 拉取，你不拉，避免重复调用浪费 token。',
-    '- 为每个 UI task 绑定 `figmaRefs: [{ nodeId, link }]` 精确配对（nodeId 用 `:`，link 用 `-`），前端开发工程师据此一次精准拉取设计稿。',
+    '- 为每个 UI task 绑定 `figmaRefs: [{ nodeId, name, link }]` 精确配对（nodeId 用 `:`，link 用 `-`，name 取自 `figma-frame-inventory.json` 的 `frames[].name` 如「编辑分组弹窗」），前端开发工程师据此一次精准拉取设计稿，且读 `name` 即知该 nodeId 对应什么组件。',
     gateEnabled
       ? '- ⚠️ 本 Story 已开启 Figma 门控，Phase 1→2 会校验 frame-inventory 完整性及 task 的 figmaNodeId 命中清单，缺失或不完整将阻断推进。'
       : '- 本 Story 未开启 Figma 强制门控（fixbugs 模式），但涉及 UI 的改动仍应按清单核对设计规范。',
