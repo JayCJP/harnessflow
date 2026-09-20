@@ -8,3 +8,5 @@ graphify-out/
 .codebuddy/
 .plugins-cache.json
 .claude
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
