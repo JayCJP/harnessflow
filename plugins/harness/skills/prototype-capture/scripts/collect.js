@@ -147,6 +147,13 @@ function openAndProbe (workDir, url, terminal) {
   wait(workDir, WAIT.afterOpen)
   runCli(workDir, ['resize', String(vp.width), String(vp.height)])
 
+  // ⚠️ resize 之后必须重新加载一次，**否则视口尺寸对截图清晰度毫无作用**：
+  // 托管平台的「适应画布」缩放只在页面加载时算一次，之后调窗口不会再重算
+  // （2026-09 实测墨刀：1280→3200 宽度 resize 后缩放恒为加载时算出的 36%）。
+  // 重新加载也让响应式页面按目标视口断点渲染，而不是按 CLI 默认窗口（约 1280 宽）。
+  runCli(workDir, ['reload'])
+  wait(workDir, WAIT.afterOpen)
+
   const gate = handleGateLoop(workDir)
 
   const metricsRun = runCli(workDir, ['--json', 'eval', probe.renderProbeExpression()])
@@ -239,6 +246,19 @@ function canvasFingerprint (workDir, canvasSelectors) {
 }
 
 /**
+ * 读页面名节点的原始文本（未清洗）
+ *
+ * @param {string} workDir - 固定 CWD
+ * @param {string} selector - CSS 选择器（页面名节点，可含容器前缀）
+ * @returns {string[]} 原始文本数组；取不到或非数组时返回空数组
+ */
+function readNameTexts (workDir, selector) {
+  const expr = `() => JSON.stringify([...document.querySelectorAll(${JSON.stringify(selector)})].map(e => (e.innerText || '').trim()).filter(Boolean))`
+  const run = runCli(workDir, ['--json', 'eval', expr])
+  return Array.isArray(run.result) ? run.result : []
+}
+
+/**
  * 取宿主平台页面树里的页面名清单
  *
  * - **Axure**：面板**默认折叠**，不点开会误判「只有一页」；且每次跳页后可能重新折叠。
@@ -256,9 +276,16 @@ function readPageTree (workDir, platform) {
   // 先尝试展开面板（找不到可点节点也无妨，可能本就展开着）
   const panelOpened = tryExpandPanel(workDir, platform)
 
-  const expr = `() => JSON.stringify([...document.querySelectorAll(${JSON.stringify(plan.pageNameNode)})].map(e => (e.innerText || '').trim()).filter(Boolean))`
-  const run = runCli(workDir, ['--json', 'eval', expr])
-  const rawList = Array.isArray(run.result) ? run.result : []
+  // ⚠️ 选择器必须**限定在页面树容器内** —— 实测（2026-09 墨刀）裸用 `li.rn-content-item`
+  // 还会命中左下「页面/图层」面板的画板列表（祖先 `ul#mb-enabled-canvas-list`，
+  // 不在 `#screen_list` 内），不限域就会多收一个幽灵页：材料里多出一页与上一页内容重复的
+  // 「页面 1」。兜底：限域后一个都取不到（容器结构与预期不符）时退回不限域，宁可多收不漏页。
+  const scoped = plan.treeContainer ? `${plan.treeContainer} ${plan.pageNameNode}` : plan.pageNameNode
+  let rawList = readNameTexts(workDir, scoped)
+  if (rawList.length === 0 && scoped !== plan.pageNameNode) {
+    rawList = readNameTexts(workDir, plan.pageNameNode)
+  }
+
   const names = rawList.map(cleanPageName).filter(Boolean)
 
   // 从壳文本解析总页数（Axure: `(1 of 7)`；墨刀: `画布（1）`）
@@ -752,6 +779,7 @@ module.exports = {
   probeIframes,
   identifyPlatform,
   readPageTree,
+  readNameTexts,
   cleanPageName,
   canvasFingerprint,
   tryExpandPanel,

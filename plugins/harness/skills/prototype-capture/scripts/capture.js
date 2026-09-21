@@ -433,8 +433,11 @@ function traverseByType (workDir, opened, env) {
     }
 
     let limitation = ''
-    if (tree.total && names.length < tree.total) {
-      limitation = `页面树声明 ${tree.total} 页，实际取到 ${names.length} 页，可能漏页`
+    // 数量对不上两个方向都要报：少 = 漏页；多 = 幽灵页（如选择器串到了别的面板列表）
+    if (tree.total && names.length !== tree.total) {
+      limitation = names.length < tree.total
+        ? `页面树声明 ${tree.total} 页，实际取到 ${names.length} 页，可能漏页`
+        : `页面树声明 ${tree.total} 页，实际取到 ${names.length} 页，可能多收了非页面树节点（重复页）`
     }
 
     return { pages, platform, iframe: { subtype: ifr.subtype, actionable: ifr.actionable }, limitation }
