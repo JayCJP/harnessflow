@@ -8,94 +8,23 @@
  *   node "<skill_dir>/gen-docs.cjs" [domain_id]   # 单域
  *   node "<skill_dir>/gen-docs.cjs" --all          # 全量
  *   node "<skill_dir>/gen-docs.cjs" --stale        # 新鲜度检测
+ *
+ * 说明:
+ *   - 知识库根探测与 meta.yaml 解析由 `scripts/lib/kb-root.js` 统一提供
+ *     （此前与 kb-update.cjs 各有一份副本且签名漂移，2026-09 收敛）。**纯迁移，行为不变**：
+ *     项目根仍按历史约定取 `process.cwd()`，域过滤保留「必须有 path」的历史条件。
  */
 
 const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
+// 知识库根探测与 meta.yaml 解析的唯一信源（此前与 kb-update.cjs 各有一份漂移副本）
+const { resolveKbRoot, parseMetaYaml } = require('../../scripts/lib/kb-root')
 
 const PROJECT_ROOT = process.cwd()
 
-/**
- * 探测知识库根与 meta.yaml 路径
- *
- * 兼容两种 KB 布局（与 kb-update.cjs 的 resolveKbRoot 同款逻辑）：
- *   - 前端项目端层布局：`.docs/llm-knowledge/frontend/meta.yaml`
- *   - 其它项目无端层：`.docs/llm-knowledge/meta.yaml`
- *
- * 多候选时按「更像真正知识库根」打分择优：
- *   含 `business/` 子目录 +2、含 `overview.md` +1；同分时保持候选顺序（扁平优先）。
- *
- * @returns {{kbRoot: string, metaPath: string|null}}
- *   kbRoot 为最终采用的知识库根（未命中时为扁平兜底目录）；metaPath 为 null 表示未找到
- */
-function resolveKbRoot () {
-  const docsRoot = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
-  const candidates = [docsRoot]
-  let entries = []
-  try {
-    entries = fs.readdirSync(docsRoot, { withFileTypes: true })
-  } catch (e) {
-    entries = []
-  }
-  for (const ent of entries) {
-    if (ent.isDirectory()) candidates.push(path.join(docsRoot, ent.name))
-  }
-
-  const withMeta = candidates.filter(dir => fs.existsSync(path.join(dir, 'meta.yaml')))
-  if (withMeta.length === 0) {
-    return { kbRoot: docsRoot, metaPath: null }
-  }
-
-  const scored = withMeta.map(dir => {
-    let score = 0
-    if (fs.existsSync(path.join(dir, 'business'))) score += 2
-    if (fs.existsSync(path.join(dir, 'overview.md'))) score += 1
-    return { dir, score }
-  })
-  scored.sort((a, b) => b.score - a.score)
-
-  return { kbRoot: scored[0].dir, metaPath: path.join(scored[0].dir, 'meta.yaml') }
-}
-
 // 知识库根自动探测：前端项目带端层 frontend/，其它无端层
-const { kbRoot: KB_ROOT, metaPath: META_PATH } = resolveKbRoot()
-
-function parseMetaYaml (content) {
-  const result = { git: {}, domains: [] }
-  const hm = content.match(/hash:\s*"([^"]+)"/)
-  if (hm) result.git.hash = hm[1]
-
-  // 逐个提取 domain 块（v2：文件字段通用化，不再假设 stores/apis/components）
-  const domainRegex = /\n {2}- id:\s*"([^"]+)"([\s\S]*?)(?=\n {2}- id:\s*"|\n\S|$)/g
-  let match
-  while ((match = domainRegex.exec(content)) !== null) {
-    const id = match[1]
-    const block = match[2]
-    const d = { id, path: '', files: [] }
-    const pm = block.match(/path:\s*"([^"]+)"/)
-    if (pm) d.path = pm[1]
-
-    // 通用：提取所有文件类字段的值（entry_files/stores/apis/components/files/...）
-    // 内联数组: field: ["a", "b"]
-    const inlineRe = /(\w*(?:files|stores|apis|components|entries))\s*:\s*\[([^\]]*)\]/g
-    let im
-    while ((im = inlineRe.exec(block)) !== null) {
-      d.files.push(...im[2].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean))
-    }
-    // 多行数组: field:\n  - "a"\n  - "b"
-    const mlRe = /(\w*(?:files|stores|apis|components|entries))\s*:\s*\n([\s\S]*?)(?=\n\s{4}\w|\n {2}-|\n\s*$)/g
-    let mm
-    while ((mm = mlRe.exec(block)) !== null) {
-      const items = mm[2].match(/- "([^"]+)"/g)
-      if (items) d.files.push(...items.map(s => s.replace(/-?\s*"([^"]+)"/, '$1')))
-    }
-    d.files = [...new Set(d.files)]
-
-    if (d.id && d.path) result.domains.push(d)
-  }
-  return result
-}
+const { kbRoot: KB_ROOT, metaPath: META_PATH } = resolveKbRoot('', PROJECT_ROOT)
 
 const args = process.argv.slice(2)
 const mode = args.includes('--all') ? 'all' : args.includes('--stale') ? 'stale' : args[0] ? 'single' : null
@@ -110,6 +39,9 @@ if (!mode) {
 
 if (!META_PATH || !fs.existsSync(META_PATH)) { console.error(JSON.stringify({ error: 'meta.yaml 不存在，请先运行 kb-init', kbRoot: KB_ROOT })); process.exit(1) }
 const meta = parseMetaYaml(fs.readFileSync(META_PATH, 'utf-8'))
+// 保留历史的「域必须有 path」过滤：旧版本内联解析器只在 `d.id && d.path` 时才收集域，
+// 共用解析器不再做此判断 —— 这里显式补回，保证迁移后 gen-docs 的输出与迁移前逐字一致。
+meta.domains = meta.domains.filter(d => d.id && d.path)
 
 if (mode === 'stale') {
   try {

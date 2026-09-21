@@ -208,6 +208,35 @@ playwright-cli --version    # 需 ≥ 0.1.17
 |---------|---------|----------------------|---------|
 | **playwright-cli**（内置 skill，无需 MCP） | 原型抓取（墨刀/Axure） | 需求分析师（原型）、`prototype-capture` | 有原型链接时必需 |
 
+### 知识库检索加速（可选，Jev）
+
+`kb-query` 的候选域排序可选接入 **Jev**（TypeSafe AI 的 System One 决策模型）做语义重排，
+并从 `meta.yaml` 全量关键词召回（比 `overview.md` 的精简关键词列更准），
+同时直接给出**待读文件清单**（省 token）。**不配也能用** —— 自动降级为关键词排序。
+
+```json
+// ~/.codebuddy/settings.json —— 用户级，勿写入会提交的项目级 settings.json
+{
+  "env": { "TYPESAFE_API_KEY": "<console.typesafe.ai/keys 获取>" }
+}
+```
+
+密钥来源按优先级回退，**插件自己会读 settings.json**（不必等宿主注入、不必重启会话）：
+进程环境变量 `TYPESAFE_API_KEY` > `<项目>/.codebuddy/settings.local.json` >
+`<项目>/.codebuddy/settings.json` > `~/.codebuddy/settings.json`。
+
+| 环境变量 | 说明 | 默认 |
+|---------|------|------|
+| `TYPESAFE_API_KEY` | 密钥；缺失时静默降级为关键词排序 | 空 |
+| `HARNESS_JEV=0` | 关闭 Jev（纯关键词排序，可做 A/B 对照） | 开启 |
+| `JEV_NO_SETTINGS=1` | 不读任何 settings 文件，只用进程环境变量 | 关 |
+| `JEV_HIGH` / `JEV_LOW` | 分层阈值（accept / review / drop） | `0.8` / `0.5` |
+| `JEV_TIMEOUT_MS` | 请求超时 | `8000` |
+
+> 排查「为什么没走 Jev」：看 `kb-query` 输出里的 `source`（`jev` / `keyword-fallback`）与
+> `jev.keySource`（密钥来自哪个来源）。启用后查询主题会发往第三方 API
+> （只发主题与域元数据，不发知识库正文）。
+
 ---
 
 ## 安装

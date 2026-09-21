@@ -39,11 +39,18 @@
  *  11. 修复 `fileFieldRe` 块形式解析缺陷：CRLF 文件 + 字段恰为域块最后一个字段时，
  *      前瞻三分支全部落空导致该字段被**静默丢弃**（真实 meta.yaml 只是恰好未触发）。
  *      前瞻改为 `\r?\n[ \t]*(?:\w|#|- id:)` / `\r?\n[ \t]*$` / `$`，LF 与 CRLF 通吃。
+ *
+ * v5（2026-09-21）变更：
+ *  12. `resolveKbRoot` / `parseMetaYaml` 上移到 `scripts/lib/kb-root.js`，与 gen-docs.cjs
+ *      共用同一实现（消除两份漂移副本）。**纯迁移，本脚本行为不变** ——
+ *      项目根仍按历史约定取 `process.cwd()`，显式传给共用实现。
  */
 
 const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
+// 知识库根探测与 meta.yaml 解析的唯一信源（此前与 gen-docs.cjs 各有一份漂移副本）
+const { resolveKbRoot, parseMetaYaml } = require('../../scripts/lib/kb-root')
 
 const PROJECT_ROOT = process.cwd()
 
@@ -152,120 +159,10 @@ function printUsage () {
   console.log(lines.join('\n'))
 }
 
-/**
- * 探测知识库根目录与 meta.yaml 路径
- *
- * 兼容两种 KB 布局（不再要求固定层级）：
- *   - 扁平布局（v2）: `<root>/.docs/llm-knowledge/meta.yaml`
- *   - 带端层布局（v1）: `<root>/.docs/llm-knowledge/<platform>/meta.yaml`（如 `frontend/`）
- *
- * 当多个候选都存在 meta.yaml 时按「更像真正知识库根」打分择优：
- * 含 `business/` 子目录 +2、含 `overview.md` +1；同分时保持候选顺序（扁平优先）。
- *
- * @param {string} overrideDir `--kb-root=` / 环境变量 KB_ROOT 指定的根（可相对可绝对）
- * @returns {{kbRoot: string, metaPath: string|null, checked: string[]}}
- *   kbRoot 为最终采用的知识库根（未命中时为优先兜底目录）；metaPath 为 null 表示未找到
- */
-function resolveKbRoot (overrideDir) {
-  const docsRoot = path.join(PROJECT_ROOT, '.docs', 'llm-knowledge')
-  const candidates = []
-
-  if (overrideDir) {
-    candidates.push(path.resolve(PROJECT_ROOT, overrideDir))
-  } else {
-    candidates.push(docsRoot)
-    // 扫描一层子目录（frontend / h5 / miniprogram / ...）
-    let entries = []
-    try {
-      entries = fs.readdirSync(docsRoot, { withFileTypes: true })
-    } catch (e) {
-      entries = []
-    }
-    for (const ent of entries) {
-      if (ent.isDirectory()) candidates.push(path.join(docsRoot, ent.name))
-    }
-  }
-
-  const withMeta = candidates.filter(dir => fs.existsSync(path.join(dir, 'meta.yaml')))
-  if (withMeta.length === 0) {
-    return { kbRoot: candidates[0] || docsRoot, metaPath: null, checked: candidates }
-  }
-
-  const scored = withMeta.map(dir => {
-    let score = 0
-    if (fs.existsSync(path.join(dir, 'business'))) score += 2
-    if (fs.existsSync(path.join(dir, 'overview.md'))) score += 1
-    return { dir, score }
-  })
-  scored.sort((a, b) => b.score - a.score)
-
-  return { kbRoot: scored[0].dir, metaPath: path.join(scored[0].dir, 'meta.yaml'), checked: candidates }
-}
-
-/** 简化 YAML 解析 — 只提取 domains[]、git.hash 与已登记的 design_docs story_id（v2：文件字段通用化） */
-function parseMetaYaml (content) {
-  const result = { git: {}, domains: [], designStoryIds: [] }
-  // 只匹配 git: 块下的 hash（避免误匹配 doc_stats.git_hash_at_generation）
-  const gitBlock = content.match(/git:\s*\n([\s\S]*?)(?=\n\S|$)/)
-  if (gitBlock) {
-    const hashMatch = gitBlock[1].match(/hash:\s*"([^"]+)"/)
-    if (hashMatch) result.git.hash = hashMatch[1]
-  }
-
-  // 收集所有 design_docs 条目的 story_id（用于原型文档去重：已搬运过的不再重复报出）
-  const storyIdRe = /story_id:\s*"([^"]+)"/g
-  let storyMatch
-  while ((storyMatch = storyIdRe.exec(content)) !== null) {
-    if (!result.designStoryIds.includes(storyMatch[1])) result.designStoryIds.push(storyMatch[1])
-  }
-
-  // 全局匹配 domains: 块中 2 空格缩进的 - id:"xxx"（domain 级别）
-  const domainsBlock = content.match(/domains:\s*\n([\s\S]*?)(?=\n\S|$)/)
-  if (!domainsBlock) return result
-
-  const idRe = /^ {2}- id:\s*"([^"]+)"/gm
-  let m
-  while ((m = idRe.exec(domainsBlock[1])) !== null) {
-    result.domains.push({ id: m[1], path: '', files: [] })
-  }
-
-  // 补齐每个 domain 的 path 和文件字段（v2：不再假设前端字段名）
-  // 文件字段名可能因项目类型而异：entry_files / stores / apis / components / files / ...
-  for (const domain of result.domains) {
-    const pathRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"[\s\S]*?path:\s*"([^"]+)"`)
-    const pathMatch = domainsBlock[1].match(pathRe)
-    if (pathMatch) domain.path = pathMatch[1]
-
-    // 提取该 domain 块的所有「文件类」字段值，统一归入 files[]
-    const domainBlockRe = new RegExp(String.raw`  - id:\s*"` + domain.id + String.raw`"([\s\S]*?)(?=\n  - id:\s*"|\n\S|$)`)
-    const blockMatch = domainsBlock[1].match(domainBlockRe)
-    if (!blockMatch) continue
-    const block = blockMatch[1]
-
-    // 匹配任意 *_files / stores / apis / components / files 等字段
-    // ⚠️ 块形式（`entry_files:` 换行 + `- "..."` 列表）必须同时兼容 LF / CRLF，
-    //    且前瞻要覆盖「块结尾只剩一个 \r」的情形，否则该字段会被**静默丢弃**
-    //    （历史缺陷：CRLF + 字段恰为域块最后一个字段时，旧前瞻三分支全部落空 → 整个匹配失败）。
-    const fileFieldRe = /\b(\w*(?:files|stores|apis|components|entries))\s*:\s*(\[[\s\S]*?\]|\r?\n[ \t]*- "[\s\S]*?(?=\r?\n[ \t]*(?:\w|#|- id:)|\r?\n[ \t]*$|$))/g
-    let fm
-    const collected = []
-    while ((fm = fileFieldRe.exec(block)) !== null) {
-      const raw = fm[2]
-      // 提取所有被引号包裹的字符串
-      const strs = raw.match(/"([^"]+)"/g)
-      if (strs) collected.push(...strs.map(s => s.replace(/"/g, '')))
-    }
-    // 兜底：匹配内联数组形式的 entry_files: ["a", "b"]
-    const inlineRe = /entry_files\s*:\s*\[([^\]]+)\]/g
-    let im
-    while ((im = inlineRe.exec(block)) !== null) {
-      collected.push(...im[1].split(',').map(s => s.trim().replace(/["']/g, '')).filter(Boolean))
-    }
-    domain.files = [...new Set(collected)]
-  }
-
-  return result
-}
+// ─── resolveKbRoot / parseMetaYaml 已上移到 scripts/lib/kb-root.js ───
+// 收敛原因：与 gen-docs.cjs 各有一份副本且签名已漂移（gen-docs 版无 overrideDir、
+// 不返回 checked、parseMetaYaml 不提取 designStoryIds）。迁移后本脚本行为不变 ——
+// 二者只是位置变化，调用时仍显式传 PROJECT_ROOT（本脚本的项目根按历史约定取 cwd）。
 
 /** 判断变更文件是否属于指定域（前缀匹配 meta.yaml 中的文件字段，v2：字段通用化） */
 function matchFileToDomain (file, domain) {
@@ -284,7 +181,7 @@ if (cli.help) {
   printUsage()
   process.exit(0)
 }
-const { kbRoot: KB_ROOT, metaPath: META_PATH, checked: KB_CHECKED } = resolveKbRoot(cli.kbRoot || process.env.KB_ROOT || '')
+const { kbRoot: KB_ROOT, metaPath: META_PATH, checked: KB_CHECKED } = resolveKbRoot(cli.kbRoot || process.env.KB_ROOT || '', PROJECT_ROOT)
 
 if (!META_PATH) {
   warnings.push(

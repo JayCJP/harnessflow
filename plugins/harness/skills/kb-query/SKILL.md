@@ -1,6 +1,6 @@
 ---
 name: "kb-query"
-description: "渐进式分层知识库检索。三层检索：L1 overview关键词匹配定位域 → L2 meta.yaml精确筛选 → L3 按需加载文档。支持4种模式：需求拆解/技术方案/接口搜索/知识问答。自动触发：代码修改、需求分析、接口查找、技术方案、改bug、新增功能等场景。查找代码时应与 graphify 双源交叉验证（query/explain/path）。"
+description: "渐进式分层知识库检索。三层检索：L1 脚本召回候选域并按相关性重排（Jev，缺失时降级为关键词匹配）→ L2 meta.yaml 精确筛选 → L3 按需加载文档（脚本直接给出待读文件清单）。支持4种模式：需求拆解/技术方案/接口搜索/知识问答。自动触发：代码修改、需求分析、接口查找、技术方案、改bug、新增功能等场景。查找代码时应与 graphify 双源交叉验证（query/explain/path）。"
 ---
 
 # kb-query — 渐进式分层知识库检索（全局 Skill）
@@ -50,13 +50,24 @@ description: "渐进式分层知识库检索。三层检索：L1 overview关键�
 
 ## 检索流程
 
-### L1: 全局总览匹配（始终执行）
+### L1: 候选域召回 + 重排（优先走脚本）
 
-加载 `.docs/llm-knowledge/overview.md` 的「域地图」表。
+```bash
+node "<skill_dir>/kb-query.cjs" --query="<用户问题>" [--mode=A|B|C|D]
+# 已有活跃 Story 时直接取 story-input.json 的主题，并可复用缓存：
+node "<skill_dir>/kb-query.cjs" --story=<storyId> [--mode=A|B|C|D]
+```
 
-- 提取用户问题关键词
-- 与域地图的关键词列匹配 → 收敛到 1-2 个域
-- 无法匹配 → 返回概述，询问补充上下文
+输出按相关性排名的域清单，每行附 `docs`（**已按模式映射 + 存在性过滤**的待读文件清单）
+与 `missingDocs`。按 `ranked[].docs` 读文件即可进入 L3，**不要自行判断该读哪几篇**。
+
+- 脚本会降级但不会失败：无 `TYPESAFE_API_KEY` / `HARNESS_JEV=0` / 命中域不足 2 个 /
+  网络超时，一律降级为关键词排序并在 `source` 字段如实标注
+  （`jev` / `keyword-fallback` / `keyword-only` / `no-kb`）
+- **域关键词的富信源是 `meta.yaml` 的 `domains[].keywords`**（真实知识库单域可达 46 条，
+  含组件名、字段名、枚举值、Story 专属 token）；`overview.md` 的域地图表关键词列是精简版
+  （4~6 个/域），**仅作脚本不可用时的兜底**
+- 无法匹配任何域（`ranked` 为空）→ 返回概述，询问补充上下文
 
 ### L2: meta.yaml 精确筛选
 
@@ -67,12 +78,14 @@ description: "渐进式分层知识库检索。三层检索：L1 overview关键�
 
 ### L3: 按需加载
 
-| 模式 | 触发条件 | 加载文档 |
-|------|---------|---------|
-| **A-需求拆解** | PRD/需求分解为 Story | `overview.md` + `api.md` + `architecture.md` |
-| **B-技术方案** | 设计技术方案、评估改动 | `overview.md` + `pages.md` + `api.md` + `store.md` + `architecture.md` |
-| **C-接口搜索** | 查找特定 API | `api.md` → 未命中则 `search_content` |
-| **D-知识问答** | 业务概念、流程、字段含义 | `overview.md` → 按需 `architecture.md` / `pitfalls.md` / `custom/` |
+**模式 → 文档类型映射表只维护在 `kb-query.cjs` 的 `MODE_DOCS` 常量里**（`node kb-query.cjs --help` 可见），
+本文件不重复该表 —— 两处各存一份必然漂移，且 L1 脚本输出的 `docs` 已按该表 + 存在性过滤算好。
+
+脚本不可用时的兜底顺序（按模式取所需）：
+`overview.md` → `api.md` → 按需 `architecture.md` / `pages.md` / `store.md` / `custom/`（**存在才读**）。
+
+> ⚠️ 真实知识库里并非每个域都有 `config.md` / `pitfalls.md`（实测 chat / group-chat / settings
+> 三域均无）—— 读之前先确认文件存在，否则是一次无效 read（纯 token 浪费）。
 
 ### L4: 深度搜索（兜底）
 
