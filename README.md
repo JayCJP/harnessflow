@@ -2,7 +2,9 @@
 
 **端到端 AI 开发自动化工作流插件市场。**
 
-通过安装 **Harness** 插件，为你的 AI 编程助手（Claude Code / CodeBuddy Code）接入一条覆盖「Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 代码审查 → Git 提交 → 知识库更新 → 云端部署」全流程的自动化开发流水线，并配套知识库（KB）管理、文档生成、API 生成、Figma 设计稿协作等能力。
+通过安装 **Harness** 插件（v2.0.0），为你的 AI 编程助手（Claude Code / CodeBuddy Code）接入一条覆盖「需求分析 → 任务规划 → 代码开发 → 代码审查 → Git 提交 → 知识库更新 → 云端部署」全流程的自动化开发流水线（run / fixbugs 双模式），并配套 12 个 Skill：工作流编排（start / end / archive / evolve）、知识库（KB）管理、原型与设计稿采集、API 生成等能力。
+
+> **快速上手只有一对 Skill：`/start` 启动 → `/end` 收尾。** 中间各 Phase 由主控 Agent 自动调度。
 
 > **兼容 Claude Code 与 CodeBuddy Code**
 > 两款工具使用相同的 `/plugin` 命令体系，安装步骤完全一致。
@@ -18,7 +20,7 @@
 - [环境要求](#环境要求)
 - [安装](#安装)
 - [快速上手](#快速上手)
-- [常用命令](#常用命令)
+- [Skill 一览](#skill-一览)
 - [最佳实践](#最佳实践)
 - [插件配置](#插件配置)
 - [故障排除与卸载](#故障排除与卸载)
@@ -28,9 +30,9 @@
 
 ## 核心特性
 
-### 1. 端到端 7 Phase 工作流
+### 1. 端到端工作流（Phase 0-7）
 
-一条命令驱动完整研发链路，每个 Phase 有明确的 Agent 分工、产出物与门控校验：
+说一句需求（`/start`）即可驱动完整研发链路，每个 Phase 有明确的 Agent 分工、产出物与门控校验。Phase 7（工作流完成）为终态，无产出物、无 Agent：
 
 | Phase | 阶段 | 负责 Agent | 关键产出物 |
 |-------|------|-----------|-----------|
@@ -93,9 +95,9 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Start(["/harness start"])
-    Input["写 story-input.json"]
-    Refresh["create-workflow --refresh-input<br/>回填原型 / Figma 判定"]
+    Start(["/start 启动工作流"])
+    Input["写 story-input.json<br/>（判模式 + 原样搬运 sources）"]
+    Refresh["harness-workflow.js start --input<br/>一次摄入并校验原型 / Figma 判定"]
     Dispatch{"dispatch.js<br/>读状态 + 判门控"}
 
     Advance["advance-phase.js<br/>推进到下一 Phase"]
@@ -159,14 +161,7 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 
 ### 4. 知识库（KB）管理
 
-四个 skill 按职责边界划分，覆盖知识库全生命周期：
-
-| Skill | 职责 | 何时用 |
-|-------|------|--------|
-| `kb-init` | 初始化骨架——自动推断项目画像与业务域，创建目录结构 + meta.yaml + 编码规范骨架 | 新项目首次初始化 |
-| `gen-project-docs` | 全量/单域**生成**文档——扫描源码生成 overview/architecture/api 等内容 | kb-init 后首次填充、手动重建某域、新鲜度检测 |
-| `kb-query` | 分层检索——L1 overview 关键词 → L2 meta.yaml → L3 域文档 | 需求分析/改代码前自动注入历史教训 |
-| `kb-update` | **增量**更新——基于 git diff 定位受影响域，AI 直接扫变更文件更新 | 任务完成后自动同步，保留手工批注 |
+四个 skill 按职责边界划分，覆盖知识库全生命周期（`kb-init` / `gen-project-docs` / `kb-query` / `kb-update`，详见 [Skill 一览](#skill-一览)）：
 
 **布局策略**：前端项目默认带 `frontend/` 端层布局（`.docs/llm-knowledge/frontend/`，参照真实多端项目标杆，可扩展 `h5/`、`miniprogram/` 端层）；插件/后端/库为扁平布局（`.docs/llm-knowledge/`）。`kb-init.cjs` 按 `project_type` 自动决定，`gen-docs.cjs` / `kb-update.cjs` 自动探测 KB 根。
 
@@ -192,7 +187,7 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 | MCP 服务 | 使用场景 | 用到它的 Agent / Skill | 必需程度 |
 |---------|---------|----------------------|---------|
 | **TAPD MCP** | Bug 分析、缺陷修复、需求详情拉取 | 需求分析师（fixbugs）、`tapd-bug-analyzer` | fixbugs 模式必需 |
-| **Figma MCP** | 设计稿读取、frame 清单、组件映射 | 需求分析师、前端开发工程师、`figma` / `figma-to-component-map` | 有 Figma 设计稿时必需 |
+| **Figma MCP** | 设计稿读取、frame 清单、组件映射 | 需求分析师、前端开发工程师、`figma-to-component-map` | 有 Figma 设计稿时必需 |
 | **GitLab MCP** | 创建 Merge Request | 发布助手（②创建 MR） | 需走 MR 流程时必需 |
 | **DevOps MCP** | 云端构建、部署 | 发布助手（⑤构建发布） | 需云端部署时必需 |
 
@@ -257,54 +252,87 @@ playwright-cli --version    # 需 ≥ 0.1.17
 
 ## 快速上手
 
-### 场景 A：新功能开发
+快速上手只有一对 Skill：**`/start` 启动 → `/end` 收尾**。中间的 Phase 推进、门控校验、Agent 调度全部由主控 Agent 自动完成，无需人工干预。
 
-```bash
-/harness start STORY-001 "1v1客服等级分配模式"
+### 第 1 步：`/start` 启动工作流
+
+对 AI 说一句需求即可，AI 会自动完成「判模式 → 写输入 → 启动」：
+
+```
+/start "1v1客服等级分配模式"
 ```
 
-然后在 `.codebuddy/plans/STORY-001/story-input.json` 写入原始输入：
+- **判模式**（run / fixbugs）：给了原型 / Figma 链接或说「新增 / 开发 / 实现」判为 `run`；给了 TAPD 链接或描述「某功能坏了 / 报错」判为 `fixbugs`；无法判定会问你一次，兜底 `run`（fail-loud 优于 fail-silent）。
+- **写输入**：把链接、终端、补充描述**原样**搬进 `.codebuddy/plans/<storyId>/story-input.json`（只搬运、不分析，分析归 Phase 0 需求分析师）。
+- **启动**：`harness-workflow.js start` 带 `--input` 一次摄入并校验，原型 / Figma 门控一次算准，**不需要再执行 `--refresh-input`**。
 
-```json
-{
-  "mode": "run",
-  "storyId": "STORY-001",
-  "title": "1v1客服等级分配模式",
-  "sources": {
-    "prototypeUrls": ["https://proto.example.com/xxx"],
-    "figmaUrls": ["https://www.figma.com/design/AbC123/订单中心?node-id=12-345"],
-    "terminal": "H5",
-    "text": "补充说明"
-  }
-}
+也可以直接把材料给全：原型链接、Figma 链接、终端（H5/PC/小程序）、TAPD 缺陷链接 + 处理人，AI 会写入对应的 `sources` 字段。
+
+### 第 2 步：自动流水线
+
+启动后进入**三步循环**（dispatch 读状态 → Spawn 对应 Agent → 回读状态），逐 Phase 推进直至部署：
+
+```text
+/start 启动
+  → Phase 0 需求分析 → Phase 1 任务规划（签发 dev-pass）
+  → Phase 2 代码开发（增量 lint + 编译）→ Phase 3 代码审查
+  → Phase 4 Git 提交 + MR → dev → Phase 5 知识库更新 → Phase 6 云端部署
+  → Phase 7 完成
 ```
 
-写完后回填判定（必做，否则原型/Figma 门控不生效）：
+- 审查发现 BLOCKER（含 AC 未通过）时自动 **fix-loop 回退 Phase 2**，默认最多 2 轮，超出转人工。
+- 中途断开会话后，再说「继续 / 恢复某个 Story」或再执行 `/start`，即从断点恢复编排。
 
-```bash
-node <插件安装路径>/plugins/harness/scripts/commands/create-workflow.js STORY-001 --refresh-input
+### 第 3 步：`/archive`（可选）→ `/end` 收尾
+
+```
+/archive archive STORY-001    # 归档 Story 全部文件到 archive/round-{N}/（可 restore 复原）
+/end                          # 删除激活标记，解除 src/ 编辑的 dev-pass 限制（幂等）
 ```
 
-之后工作流由主控 Agent 自动调度，逐 Phase 推进直至部署。
+> 注意区分：`/end` 只结束激活、不移动文件；`/archive` 才是归档。需保留产物时先归档再 `/end`。
 
-### 场景 B：Bug 修复
+### Bug 修复场景（fixbugs 模式）
 
-```bash
-/harness fixbugs <storyId> "<标题>"
-```
-
-Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 TAPD 缺陷并产出 Bug 分析报告。
+同样是 `/start`，给出 TAPD 缺陷链接和处理人即可，AI 自动判为 `fixbugs` 模式：免原型文档要求，Phase 0 自动拉取 TAPD 缺陷并产出结构化 Bug 分析报告（问题复述 → 复现步骤 → 代码定位 → 根因 → 责任方）。
 
 ---
 
-## 常用命令
+## Skill 一览
 
-| 命令 | 说明 |
-| --- | --- |
-| `/harness run` | 执行端到端开发工作流（7 Phase 全流程） |
-| `/harness fixbugs` | 针对缺陷做根因分析并自动修复（免原型文档） |
-| `/harness evolve` | 触发插件自进化体检（audit → 度量 → 诊断 → 治疗 → 验证） |
-| `/harness archive` | 归档已完成的迭代 / 任务 |
+插件共 12 个 Skill，按职责分为四组。快速上手只需前两个：**`/start` → `/end`**。
+
+### 工作流生命周期（用户直接调用）
+
+| Skill | 职责 | 何时用 |
+|-------|------|--------|
+| `/start` | 工作流执行器：新建（自动判 run / fixbugs 模式、写 story-input.json、启动）与继续编排（断点恢复），驱动 8 Phase 流水线 | 「做个需求 / 修 bug / 继续某个 Story」 |
+| `/end` | 结束工作流激活，删除 `.harness-active` 标记、解除 src/ 编辑的 dev-pass 限制（幂等，不移动文件） | 「结束 / 退出 / 停止 harness」 |
+| `/archive` | Story 归档 / 复档：全部文件移入 `archive/round-{N}/`（root 清空），可 `restore` 完全复原，`list` / `status` 查历史 | 迭代完成后归档；回滚需复档 |
+| `/evolve` | 自进化体检五步闭环：体检 → 度量 → 诊断 → 治疗 → 验证 | 复盘已归档 Story、改进流程 |
+
+### 知识库（KB）全生命周期
+
+| Skill | 职责 | 何时用 |
+|-------|------|--------|
+| `kb-init` | 初始化骨架——自动推断项目画像与业务域，创建目录结构 + meta.yaml + 编码规范骨架 | 新项目首次初始化 |
+| `gen-project-docs` | 全量/单域**生成**文档——扫描源码生成 overview/architecture/api 等内容 | kb-init 后首次填充、手动重建某域、新鲜度检测 |
+| `kb-query` | 分层检索——L1 overview 关键词 → L2 meta.yaml → L3 域文档 | 需求分析/改代码前自动注入历史教训 |
+| `kb-update` | **增量**更新——基于 git diff 定位受影响域，AI 直接扫变更文件更新 | 任务完成后自动同步，保留手工批注 |
+
+### 需求采集（由 Agent 在流水线内部调用，一般无需手动触发）
+
+| Skill | 职责 | 调用方 |
+|-------|------|--------|
+| `tapd-bug-analyzer` | 从 TAPD 拉取 bugs 按处理人过滤，逐条产出「复现步骤 → 代码定位 → 根因 → 责任方」结构化报告。只记录事实，不设计方案 | Phase 0 需求分析师（fixbugs 模式） |
+| `prototype-capture` | 用 capture.js（playwright-cli 驱动）抓取在线原型（墨刀 / Axure / Figma 原型），自动逐页截图与说明采集，产出 `prototype-capture.md`。零 MCP 占用 | Phase 0 需求分析师（检测到原型链接时） |
+| `figma-to-component-map` | 产出 Figma 画板清单（figma-frame-inventory.json），按「一个 Vue 组件 ↔ 一个 Figma node」精确绑定，找不到设计的组件如实标记 | Phase 1 任务规划师（有设计稿时） |
+
+### 工具生成
+
+| Skill | 职责 | 何时用 |
+|-------|------|--------|
+| `api-generator` | 根据 Swagger JSON（文件路径 / URL）或 API 文档，按模块生成接口定义、请求函数与 JSDoc 注释 | 对接后端接口时 |
 
 ---
 
@@ -312,9 +340,9 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 ### 1. 工作流初始化
 
-- **`start` 之后必须写 `story-input.json`，并执行 `--refresh-input`**。
-  漏掉回填会导致两类问题：无原型的纯文字需求被卡在「必须产出 prototype-analysis.md」；有 Figma 的需求完全不会触发设计稿门控。
+- **启动时把输入材料给全**。`/start` 写入 `story-input.json` 后经 `--input` 一次摄入校验，原型 / Figma 判定一次算准。若启动后才补材料，用补救路径 `create-workflow.js <storyId> --refresh-input` 回填，否则无原型的纯文字需求会卡在「必须产出 prototype-analysis.md」，有 Figma 的需求不会触发设计稿门控。
 - **`story-input.json` 只搬运参数、不做分析**。主 Agent 原样写入用户给的链接/终端/描述，分析归 Phase 0 需求分析师，避免跨 Agent 传递丢失中间推理。
+- **`storyId` 先自己定**（如 `STORY-001`），否则脚本自动生成 id 后就拿不到目录路径去写 `story-input.json`。
 
 ### 2. 状态文件纪律（铁律）
 
@@ -332,7 +360,7 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 - **新功能 / 页面级改造** → `run`（有原型/Figma 门控、featurePoints 功能点枚举）
 - **缺陷修复** → `fixbugs`（免原型文档、Phase 0 产出 Bug 分析报告、后端类 Bug 自动转 open-questions）
-- 选错模式的后果：`fixbugs` 漏加 `--mode=fixbugs` 会退回 run，重新要求原型文档且不做 Bug 报告门控。
+- 模式由 `story-input.json` 的 `mode` 字段决定（`/start` 自动判定），脚本按模式自动处理全部差异，无需传 `--mode`。判错模式时改 `mode` 后用 `--refresh-input` 重跑即可。
 
 ### 5. 修复回路（fix-loop）
 
