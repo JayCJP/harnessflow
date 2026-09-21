@@ -48,7 +48,7 @@
 | `findBugAnalysisReports(storyId)` | 按 `*bug分析报告.md` 后缀匹配（文件名含动态标题，进不了 PHASE_ARTIFACTS） |
 | `hasFigmaDesign(state)` | 读 `state.hasFigmaDesign` 硬门控开关 |
 | `checkFigmaFrameInventory` `validateTaskFigmaReferences` | frame 清单完整性 / task 引用有效性 |
-| `getTasksRequiringFigma` `hasTaskRequiringFigma` | 识别需要 Figma 的 task（支持目录级 glob） |
+| `getTasksRequiringFigma` `hasTaskRequiringFigma` | 识别**显式绑定** figmaRefs/figmaNodeId 的 task（含 .vue 但未绑定的漏绑由门控 unmatched warning 提醒，不做推断） |
 | `checkRequirementDoc` `checkTaskDAGDoc` | md 型产出物检查 |
 
 ### 契约 JSON 读取与校验

@@ -378,12 +378,19 @@ function validateTaskFigmaReferences (storyId) {
 /**
  * 获取本 Story 中「需要 Figma」的 task 列表（开发阶段判断是否要求校验 Figma MCP）
  *
- * 判定：task 声明了 figmaNodeId（单值或数组）或 files 含 .vue 文件，即视为涉及 UI、
- * 需要对照设计稿。当需求要求 Figma（story-input 有 figmaUrls）且存在这类 task 时，
- * 开发 Agent 开工前必须先校验 Figma MCP 可用性，不可用则停下流程。
+ * 判定口径（2026-09 修正）：**只认显式绑定** —— task 声明了 figmaRefs[] 或
+ * figmaNodeId（单值/数组）才算「需要 Figma」。此前还把「files 含 .vue 或目录
+ * glob」也保守判进来，导致大量误判：真实 Story 中纯逻辑改动（改权限消费）、
+ * 无设计稿的端（H5）、跨仓页面（设计稿根本没有对应帧）都会因含 .vue 被算进
+ * 「需要 Figma」，开发 prompt 里「有 N 个 task 需要 Figma，逐个读 figmaRefs」
+ * 的 N 与实际可读的 figmaRefs 数量对不上，开发 Agent 逐个核对时发现对不齐。
+ *
+ * 「含 .vue 但未绑定」属于**疑似漏绑**，其发现职责在 Phase 1→2 门控
+ * （validateTaskFigmaReferences 的 unmatched → warning，policy.js 消费），
+ * 由任务规划师据 warning 补绑定 —— 不在本函数用猜测补位。
  *
  * @param {string} storyId - Story ID
- * @returns {Array<{id: string, title: string, figmaNodeIds: string[]}>} 需要 Figma 的 task 列表
+ * @returns {Array<{id: string, title: string, figmaNodeIds: string[]}>} 需要 Figma 的 task 列表（仅显式绑定）
  */
 function getTasksRequiringFigma (storyId) {
   const taskData = readJsonArtifact(storyId, TASK_DAG_JSON_FILE)
@@ -392,6 +399,7 @@ function getTasksRequiringFigma (storyId) {
   const result = []
   for (const task of taskData.tasks) {
     // 归一化 figmaRefs / figmaNodeId（figmaRefs 优先，其次单值 string 或多值 array）
+    // —— 历史数据三种写法都存在，只做兼容读取，不做任何推断
     let nodeIds = []
     if (Array.isArray(task.figmaRefs)) {
       nodeIds = task.figmaRefs.map(r => r && r.nodeId).filter(Boolean)
@@ -401,16 +409,9 @@ function getTasksRequiringFigma (storyId) {
       nodeIds = [task.figmaNodeId.trim()]
     }
 
-    // 涉及 UI 的判定：
-    //   1) 显式声明了 figmaNodeId/figmaRefs
-    //   2) files 含 .vue 文件
-    //   3) files 是目录级 glob（如 src/views/pc/modules/** 或纯目录）——可能涵盖 .vue 组件，保守视为需 Figma
-    const hasVueFile = Array.isArray(task.files) && task.files.some(f => {
-      if (f.includes('.vue')) return true
-      // 目录 glob / 目录路径 → 该目录下可能含 .vue 组件，保守视为 UI 相关
-      return /\*\*|\*/.test(f) || /\/$/.test(f)
-    })
-    if (nodeIds.length > 0 || hasVueFile) {
+    // 只认显式绑定：没有 figmaRefs/figmaNodeId 的 task（无论是否含 .vue）
+    // 都不算「需要 Figma」，漏绑由门控 unmatched warning 提醒任务规划师补齐
+    if (nodeIds.length > 0) {
       result.push({ id: task.id, title: task.title || task.id, figmaNodeIds: nodeIds })
     }
   }

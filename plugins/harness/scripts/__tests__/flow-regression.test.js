@@ -48,23 +48,32 @@ ok('getMaxFixRounds(缺省 sourcePhase)=review 预算', state.getMaxFixRounds('F
 // ════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════
-section('2. 目录级 glob 判定（getTasksRequiringFigma）')
+section('2. Figma task 识别（getTasksRequiringFigma：只认显式绑定）')
 
 const dir3 = storyDir('GL-1')
 fs.mkdirSync(dir3, { recursive: true })
 fs.writeFileSync(path.join(dir3, 'figma-frame-inventory.json'), JSON.stringify({ frames: [{ id: '3020:1', name: 'A', type: 'dialog', link: 'x' }] }))
 fs.writeFileSync(path.join(dir3, 'task-dag.json'), JSON.stringify({
   tasks: [
-    // 目录 glob files → 保守视为 UI 相关（目录下可能含 .vue）
+    // 显式绑定 figmaNodeId（即使 files 是目录 glob 也只按显式绑定判定）
     { id: 'task-1', title: '目录组件', files: ['src/views/pc/modules/**'], acceptanceCriteria: ['AC-1'], parallelizable: false, figmaNodeId: '3020:1' },
-    // 纯逻辑 task
+    // 纯逻辑 task：无绑定 → 不识别（即使含 .vue 也不识别，漏绑由门控 unmatched warning 提醒）
     { id: 'task-2', title: 'API', files: ['src/api/index.js'], acceptanceCriteria: ['AC-2'], parallelizable: false }
   ],
   batches: [{ batchId: 1, taskIds: ['task-1', 'task-2'] }]
 }))
 const tasks = state.getTasksRequiringFigma('GL-1')
-ok('目录 glob 的 task-1 被识别为需 Figma', tasks.some(t => t.id === 'task-1'), JSON.stringify(tasks.map(t => t.id)))
+ok('显式绑定 figmaNodeId 的 task-1 被识别', tasks.some(t => t.id === 'task-1'), JSON.stringify(tasks.map(t => t.id)))
 ok('纯逻辑 task-2 不被识别', !tasks.some(t => t.id === 'task-2'), JSON.stringify(tasks.map(t => t.id)))
+// 2026-09 修正回归：含 .vue 但无绑定的 task 不再被保守推断为「需 Figma」
+fs.writeFileSync(path.join(dir3, 'task-dag.json'), JSON.stringify({
+  tasks: [
+    { id: 'task-3', title: '纯逻辑改 .vue', files: ['src/views/pc/Foo.vue'], acceptanceCriteria: ['AC-3'], parallelizable: false }
+  ],
+  batches: [{ batchId: 1, taskIds: ['task-3'] }]
+}))
+const tasks3 = state.getTasksRequiringFigma('GL-1')
+ok('含 .vue 但无显式绑定 -> 不识别（防误判回归）', tasks3.length === 0, JSON.stringify(tasks3.map(t => t.id)))
 
 // ════════════════════════════════════════════════════════════
 section('3. Phase 1→2 门控：figma-frame-inventory 存在性 & 完整性')
