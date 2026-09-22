@@ -94,7 +94,7 @@ cat ${STORY_DIR}/story-input.json
 | 处理人 | ✅ | `sources.owner` | "处理人: XXX"、"负责人: XXX"、"指派给 XXX" |
 | `storyId` | ✅ | 顶层 `storyId` | `/start fixbugs <storyId>` 或用户消息中指定 |
 | `story_id` | 选填 | `sources.storyIdInTapd` | `/story/detail/{story_id}` 从 TAPD 链接提取 |
-| 状态筛选 | 选填 | `sources.statusFilter` | 默认 "待解决"，可指定 "重新打开" 等 |
+| 状态筛选 | 选填 | `sources.statusFilter` | **缺省 = "待解决" + "重新打开"（两者都取）**；用户显式指定时以指定值为准 |
 | 终端类型 | 选填 | `sources.terminal` | "H5"、"PC"、"移动端"、"小程序" |
 
 > 如果 `${STORY_DIR}` 目录不存在，需先创建。
@@ -114,7 +114,8 @@ cat ${STORY_DIR}/story-input.json
 
 3. 遍历 bug_id 列表，逐个 get_bug(id)
    → 按 current_owner 过滤：仅保留处理人匹配的 bugs
-   → 按状态筛选（如有指定）
+   → 按状态筛选：statusFilter 缺省时取「待解决」∪「重新打开」，两者都纳入；
+      用户显式指定了 statusFilter 时，只取该状态
 
 4. 对保留的 bugs 执行 Step 3→4→5
 ```
@@ -130,6 +131,7 @@ get_bug → id=提取的 bug_id
 ```
 get_bug_count → get_bug(current_owner + 状态筛选，分页拉取)
 ```
+> 状态筛选缺省时同样按「待解决」+「重新打开」两次查询（或等价的 in 查询）后合并结果，去重按 bug_id。
 
 ### Step 3：读取 Bug 详情
 

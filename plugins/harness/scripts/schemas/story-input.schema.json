@@ -35,7 +35,7 @@
         },
         "statusFilter": {
           "type": "string",
-          "description": "Bug 状态筛选，默认「待解决」"
+          "description": "Bug 状态筛选。缺省（不写）时默认取「待解决」+「重新打开」两个状态；显式写入时只取该状态"
         },
         "terminal": {
           "type": "string",
