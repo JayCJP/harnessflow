@@ -133,7 +133,12 @@ const PHASE_AGENTS = {
   4: {
     agent: 'release-assistant',
     label: '发布助手',
-    instruction: '执行 git add + commit + push，并创建 MR 合并到 dev 分支。禁止使用 --no-verify'
+    // ⚠️ 停顿点（人工门）：创建 MR 后必须把 MR URL 交给用户并等待确认已合并。
+    // Phase 6 构建的是 dev 分支，代码未合进 dev 时构建产物不含本次变更，
+    // 因此「未确认合并」不得推进 Phase 5。发布助手定义 4.8 同此约束。
+    instruction: '执行 git add + commit + push，并创建 MR 合并到 dev 分支。禁止使用 --no-verify。'
+      + '⚠️ 创建 MR 后必须停止：把 MR URL（含 source→target 分支、commit hash）汇报给用户并等待用户确认已合并，'
+      + '确认后（可用 gitlab_get_merge_request 复核 state=merged）才允许推进下一 Phase；未确认合并不得推进'
   },
   5: {
     agent: 'release-assistant',
