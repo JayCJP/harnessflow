@@ -11,7 +11,7 @@
         "type": "object",
         "required": ["id", "question", "resolved"],
         "properties": {
-          "id": { "type": "string", "pattern": "^Q-\\d+$" },
+          "id": { "type": "string", "pattern": "^Q-\\d+$", "examples": ["Q-1", "Q-2"] },
           "question": { "type": "string", "minLength": 1 },
           "resolved": { "type": "boolean" },
           "owner": { "type": "string" },

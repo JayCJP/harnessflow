@@ -12,7 +12,7 @@
         "type": "object",
         "required": ["id", "title", "files", "acceptanceCriteria", "parallelizable"],
         "properties": {
-          "id": { "type": "string", "pattern": "^task-\\d+$" },
+          "id": { "type": "string", "pattern": "^task-\\d+$", "examples": ["task-1", "task-2"] },
           "title": { "type": "string", "minLength": 1 },
           "description": { "type": "string" },
           "files": {
@@ -23,7 +23,7 @@
           "acceptanceCriteria": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string", "pattern": "^AC-\\d+$" }
+            "items": { "type": "string", "pattern": "^AC-\\d+$", "examples": ["AC-1", "AC-2"] }
           },
           "figmaLink": {
             "oneOf": [
@@ -90,7 +90,7 @@
           "taskIds": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string", "pattern": "^task-\\d+$" }
+            "items": { "type": "string", "pattern": "^task-\\d+$", "examples": ["task-1", "task-2"] }
           },
           "description": { "type": "string" }
         },
