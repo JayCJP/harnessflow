@@ -161,9 +161,7 @@ get_bug_count → get_bug(current_owner + 状态筛选，分页拉取)
 
 **双源并行检索，交叉验证收敛**：
 
-```
-kb-query ∥ graphify  →  交叉验证  →  search_content 兜底
-```
+kb-query skill 和 graphify skill 对代码进行搜查验证
 
 1. **同时发起两路检索**（不是先后降级）
    - **知识库** (`kb-query`)：按功能模块/接口名检索，拿到业务语义 + 候选文件 + 该域历史踩坑
@@ -192,8 +190,8 @@ kb-query ∥ graphify  →  交叉验证  →  search_content 兜底
 - 提取触发条件（什么情况下会错、什么情况下不会错）
 
 > 根因回答的是「**为什么会错**」，不是「**应该怎么改**」。
-> ✅「`userInfo` 在 onMounted 前被 computed 读取，此时为 undefined」
-> 🚫「应把初始化移到 created 中」
+> 好的回答：「`userInfo` 在 onMounted 前被 computed 读取，此时为 undefined」
+> 坏的回答：「应把初始化移到 created 中」
 
 #### 4.5 复现步骤
 

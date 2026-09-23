@@ -566,12 +566,12 @@ function buildRepoSearchEntries (storyId, targetPhase) {
     '',
     hasAnyGraph
       ? '> 标注「已建」的仓库直接检索即可，无需再探测图谱是否存在。'
-      : '> 本 Story 涉及仓库均未建图谱: 不要耗时探测，检索改用 kb-query + Grep 双源交叉验证。',
+      : '> 本 Story 涉及仓库均未建图谱: 不要耗时探测，检索改用 kb-query skill',
     ''
   ]
   if (hasAnyGraph && entries.some(e => !e.graph.built)) {
     lines.push(
-      '> 标注「未建」的仓库: 不要耗时探测，改用 kb-query + Grep 双源交叉验证。',
+      '> 标注「未建」的仓库: 不要耗时探测，改用 kb-query skill 双源交叉验证。',
       ''
     )
   }
