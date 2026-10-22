@@ -55,7 +55,7 @@ function buildAdditionalContext (workflowResults) {
 
   // 固定规则前置：稳定文本在前命中 KV cache，且约束 skill 加载前的行为边界
   lines.push('⛔ 强制规则（不可违反）:')
-  lines.push('1. open-questions.json 中存在 resolved=false → 禁止推进到 Phase 1')
+  lines.push('1. open-questions.json 中存在未写入 confirmation 的项 → 禁止推进到 Phase 1（不分 blocking；确认只经 resolve-question.js 写入）')
   lines.push('2. 主 Agent 不亲自编写代码 → 必须 spawn 专用 Agent 执行')
   lines.push('3. 禁止直接写/改 e2e-state.json 和 dev-pass.json → 状态机由 advance-phase.js 独占维护')
   lines.push('4. 推进 Phase → 必须执行 node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/advance-phase.js <storyId> <targetPhase>')
@@ -72,17 +72,14 @@ function buildAdditionalContext (workflowResults) {
     if (state.status && state.status !== 'running') bits.push(state.status)
     if (state.updatedAt) bits.push(`${String(state.updatedAt).slice(5, 10)} 更新`)
     if (unresolved.length > 0) {
-      const blockingCount = unresolved.filter(u => u.blocking).length
-      const pseudoCount = unresolved.filter(u => u.pseudo).length
-      const tag = blockingCount > 0
-        ? `⛔ 未解决 ${unresolved.length} 项（阻塞级 ${blockingCount}）`
-        : `⚠️ 未解决 ${unresolved.length} 项（非阻塞，同样拦 Phase 0→1）`
-      bits.push(pseudoCount > 0 ? `${tag}，其中 ${pseudoCount} 项缺 resolution` : tag)
+      const noProposalCount = unresolved.filter(u => u.noProposal).length
+      const tag = `⛔ 未确认 ${unresolved.length} 项（不分阻塞级，全部拦 Phase 0→1）`
+      bits.push(noProposalCount > 0 ? `${tag}，其中 ${noProposalCount} 项缺建议稿` : tag)
     }
     lines.push(`${i + 1}. ${bits.join(' · ')}`)
     if (unresolved.length > 0) {
       lines.push(`   → 待确认详情: read_file .codebuddy/plans/${storyId}/open-questions.json`)
-      lines.push('   → 解决方式: 每项填写非空 resolution 并置 resolved=true（仅置 true 无效）')
+      lines.push('   → 解决方式: 把待确认项逐条交用户确认，用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿）；缺建议稿的项先由需求分析师补 resolution')
     }
   }
   if (sorted.length > MAX_LISTED) {
@@ -131,15 +128,15 @@ function main () {
 
   // 对每个活跃工作流提取未解决确认项（门控预检不在此做，权威预检在 dispatch.js）
   const workflowResults = activeWorkflows.map(wf => {
-    // 从 open-questions.json 读取未解决确认项（单一数据源）
+    // 从 open-questions.json 读取未确认项（单一数据源；v4 口径：放行只看 confirmation 字段）
     const oqCheck = hookUtils.checkOpenQuestions(wf.storyId)
     const unresolved = (oqCheck.exists && !oqCheck.allResolved)
       ? oqCheck.unresolved.map(q => ({
         id: q.id,
         question: q.question,
-        blocking: !!q.blocking,
-        // pseudoResolved 里出现过 = 已置 resolved:true 但未填 resolution，同样是未解决
-        pseudo: (oqCheck.pseudoResolved || []).some(p => p === q),
+        // 缺建议稿（resolution 为空）的项需分析员先补稿，与「待用户确认」区分开；
+        // 按 id 比对而非对象同一性（contracts 实现若改深拷贝，同一性比对会静默失效）
+        noProposal: (oqCheck.noProposal || []).some(p => p.id === q.id),
         source: 'open-questions.json'
       }))
       : []

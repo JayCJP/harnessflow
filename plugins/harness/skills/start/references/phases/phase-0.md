@@ -38,8 +38,9 @@ run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
 |------|------|-------------|
 | `criteria` 为空 / 缺 id / 缺 description / id 重复 | BLOCKER (2) | `ac_empty_criteria` `ac_missing_id` `ac_missing_description` `ac_duplicate_id` |
 | `acceptance-criteria.json` JSON 解析失败 | BLOCKER (2) | `ac_format_error` |
-| `open-questions.json` 有 `blocking:true` 且未 resolved 的项 | BLOCKER (4) | `blocking_unresolved` |
-| 有未 resolved 但非 blocking 的项 | WARNING | — |
+| `open-questions.json` 有项未被用户确认（无 `confirmation`，含 AI 已给建议稿） | BLOCKER (4) | `user_confirmation_required` |
+| `open-questions.json` 有项缺建议稿（`resolution` 为空） | BLOCKER (4) | `open_questions_unresolved` |
+| `confirmation` 缺 `confirmedVia`/`confirmedAt`（疑似未经 resolve-question.js 写入） | WARNING | — |
 | **run 模式** `acceptance-criteria.json` 缺 `featurePoints` | BLOCKER (2) | `prd_coverage_missing` |
 | **run 模式** 功能点 `coverage:"deferred"` 却没写 `deferredReason` | BLOCKER (2) | `prd_coverage_missing` |
 | **run 模式** 功能点 `covered` 却 `acIds` 为空，或引用了不存在的 AC | BLOCKER (2) | `prd_coverage_missing` |
@@ -64,7 +65,8 @@ Figma frame-inventory **不在本门控校验** —— 由 Phase 1 任务规划�
 ```
 
 `open-questions.json`（schema: `scripts/schemas/open-questions.schema.json`）：
-`resolved` 只能由用户确认后标记，**AI 不得自行置 true**。
+`resolved` 字段已废弃（门控不读）；每条 question 须含建议稿 `resolution` + `resolutionSource`；
+**确认的唯一载体是 `confirmation` 字段**，约定由 `resolve-question.js` 在用户答复后写入，AI 不得自行填写。
 
 ## 常见失败与对策
 

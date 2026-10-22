@@ -801,11 +801,20 @@ function buildAgentPrompt (opts) {
     .filter(f => !f.includes('*') && fs.existsSync(path.join(PLANS_DIR, storyId, f)))
   const isRework = !incremental && producedBefore.length > 0
 
+  // open-questions 场景例外（2026-10-20 裁定）: 「已达成共识」对建议稿不成立 ——
+  // 建议稿未经用户确认前只是参考，若已有 confirmation（用户已拍板），以 confirmation 为准修正。
+  const oqReworkNote = (isRework && targetPhase === 0 && producedBefore.includes('open-questions.json'))
+    ? '> ⚠️ 本 Phase 已产出: open-questions.json\n' +
+      '> 其中的条目若已有 `confirmation`，以 `confirmation.answer` 为准修正建议稿引用处；\n' +
+      '> `confirmation` 字段本身不得改动（用户确认记录）。\n'
+    : ''
+
   const reworkSection = isRework
     ? '## ⚠️ 本轮为返工（增量模式）\n' +
       `本 Phase 已产出: ${producedBefore.join('、')}\n` +
       '门控未通过说明它们尚不完整或存在问题 —— 请**只补齐缺口、修正已指出的问题**，\n' +
-      '不要从零重写已有内容，也不要推翻已达成共识的结论。\n'
+      '不要从零重写已有内容，也不要推翻已达成共识的结论。\n' +
+      oqReworkNote
     : ''
 
   const promptLines = [
@@ -842,14 +851,21 @@ function buildAgentPrompt (opts) {
     // 紧随产出清单：先说产出什么，再说按什么格式产出（骨架由 schema-injector 生成）
     schemaSection,
     '',
-    // Phase 0 专属: open-questions 的「真解决」口径。
+    // Phase 0 专属: open-questions 的 v4 判定口径（2026-10-20 用户裁定）。
     // schema-injector 只渲染白名单/必填/additionalProperties，跨字段规则无法自动进 prompt；
     // 不写明的话 Agent 会把 resolved 置 true 就交付，要等被门控拦下一次才知道规则。
+    // 本段是软约束的主阵地：confirmation 无 hook 硬拦截，靠这里每次 spawn 注入的纪律约束。
     targetPhase === 0
       ? '## ⚠️ open-questions.json 判定口径\n' +
-        '每一条 question 只有在 **`resolved: true` 且 `resolution` 为非空字符串** 时才算「已解决」；\n' +
-        '只置 `resolved: true` 而不写结论的项，Phase 0→1 门控仍判为未解决。\n' +
-        '**未解决项无论 blocking 与否都会阻断推进** —— 确实无需处理的项也要在 `resolution` 里写明判定依据，不得留空。\n'
+        '- 每条 question 必须给出**建议稿**：`resolution`（非空结论）+ `resolutionSource`\n' +
+        '  （requirement-doc / prototype / code-evidence / inference）。\n' +
+        '- 建议稿**不构成放行依据** —— 全部待确认项（无论是否 blocking）都必须经用户逐条确认，\n' +
+        '  由主 Agent 拿到用户答复后通过 resolve-question.js 写入 `confirmation` 字段，门控才放行。\n' +
+        '- ⛔ **`confirmation` 字段是用户确认专用，你（以及任何 Agent）不得自行填写** ——\n' +
+        '  它代表用户本人的拍板，擅自填写等于伪造用户意志，是最高优先级的禁止事项。\n' +
+        '  即使你认为答案显而易见，也只能写 `resolution` 建议稿，把 `confirmation` 留给用户确认环节。\n' +
+        '- 不要填 `resolved` 字段（已废弃）；`blocking` 仅用于提示用户"这项建议优先看"。\n' +
+        '- 找不到依据时不要猜、不要留空，写明 inference 并说明不确定点 —— 用户确认环节就是为此设计的。\n'
       : '',
     (storyMode === 'fixbugs' && targetPhase === 2)
       ? '## Bug 修复说明\nBug 事实（问题复述 / 复现步骤 / 代码定位 / 根因）已在 Phase 0 分析完毕、并在 Phase 1 消化进 `task-dag.json` 与 `acceptance-criteria.json`。\n**以契约文件为准动手**: `task-dag.json` 的 `files[]` 就是改动范围，`acceptanceCriteria` 关联的 AC 描述里带 Bug 编号。\n修复怎么改由你设计: 先用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再给出实现。\n'

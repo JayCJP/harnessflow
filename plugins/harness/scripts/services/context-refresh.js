@@ -32,7 +32,7 @@
 const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
-const { getStoryDir, readStateFile, getPhaseName, PHASE_ARTIFACTS, loadRepos } = require('../lib/state')
+const { getStoryDir, readStateFile, getPhaseName, PHASE_ARTIFACTS, loadRepos, checkOpenQuestions } = require('../lib/state')
 const { ARTIFACT } = require('../lib/artifacts')
 const experience = require('./experience')
 
@@ -82,23 +82,23 @@ function generatePhaseSummary (storyId, phase) {
     }
   }
 
-  // 待确认项状态 — 从 open-questions.json 读取
+  // 待确认项状态 — 口径与门控一致（v4：checkOpenQuestions 四态分类，消除同物两信源；
+  // 此处原先裸读 q.resolved 统计，与门控口径不一致 —— pseudo 项在摘要算"已解决"、在门控算"未解决"）
   summaryLines.push('', '## 待确认项状态', '')
   const oqJsonPath = path.join(storyDir, ARTIFACT.OPEN_QUESTIONS)
   if (fs.existsSync(oqJsonPath)) {
-    try {
-      const oqData = JSON.parse(fs.readFileSync(oqJsonPath, 'utf-8'))
-      if (Array.isArray(oqData.questions)) {
-        const resolved = oqData.questions.filter(q => q.resolved)
-        const unresolved = oqData.questions.filter(q => !q.resolved)
-        summaryLines.push(`- 已解决: ${resolved.length} 项`)
-        summaryLines.push(`- 未解决: ${unresolved.length} 项`)
-        if (unresolved.length > 0) {
-          summaryLines.push(`- ⚠️ 未解决项: ${unresolved.map(q => q.id).join(', ')}`)
-        }
-      }
-    } catch (e) {
+    const oq = checkOpenQuestions(storyId)
+    if (!oq.exists) {
       summaryLines.push('- 无法解析 open-questions.json')
+    } else {
+      summaryLines.push(`- 用户已确认: ${oq.confirmed.length + oq.confirmedInformal.length} 项`)
+      summaryLines.push(`- 待用户确认: ${oq.pendingConfirmation.length} 项`)
+      if (oq.pendingConfirmation.length > 0) {
+        summaryLines.push(`- ⚠️ 需用户确认: ${oq.pendingConfirmation.map(q => q.id).join(', ')}`)
+      }
+      if (oq.noProposal.length > 0) {
+        summaryLines.push(`- ⚠️ 缺建议稿: ${oq.noProposal.map(q => q.id).join(', ')}`)
+      }
     }
   } else {
     summaryLines.push('- 无待确认项')
@@ -176,13 +176,18 @@ function decisionsBlockRegex (flags) {
 }
 
 /**
- * 把 open-questions.json 中已裁决的条目同步进需求分析文档
+ * 把 open-questions.json 中已被用户确认的条目同步进需求分析文档
  *
  * 用户裁决原先只活在主 Agent 的记忆里：跨 Agent（任务规划师等）完全看不到，
  * 只能靠主 Agent 把裁决块手写进每个 prompt。此后裁决以需求分析文档为载体流转 ——
- * open-questions.json 是写入端，文档里的裁决章节是脚本生成的只读投影。
+ * open-questions.json 的 confirmation 字段是写入端（resolve-question.js），
+ * 文档里的裁决章节是脚本生成的只读投影。
  *
- * 幂等：已存在章节则整体替换；已裁决项被清空则移除章节，保持文档与契约一致。
+ * v4 口径（2026-10-20 裁定）: 只投影有 `confirmation` 的项 —— 这才是真正的用户意志。
+ * 此前按 `resolved === true && resolution 非空` 过滤，把 AI 自答的建议稿盖章成
+ * 「用户裁决事项」并让下游"不得改判"，是错误答案污染下游的传导路径，已修复。
+ *
+ * 幂等：已存在章节则整体替换；已确认项被清空则移除章节，保持文档与契约一致。
  *
  * @param {string} storyId - Story ID
  * @returns {boolean} 是否实际改动了文档
@@ -195,14 +200,14 @@ function syncDecisionsToRequirementDoc (storyId) {
 
   try {
     const oq = JSON.parse(fs.readFileSync(oqPath, 'utf-8'))
-    const resolved = (Array.isArray(oq.questions) ? oq.questions : [])
-      .filter(q => q && q.resolved === true && typeof q.resolution === 'string' && q.resolution.trim())
+    const confirmed = (Array.isArray(oq.questions) ? oq.questions : [])
+      .filter(q => q && q.confirmation && typeof q.confirmation.answer === 'string' && q.confirmation.answer.trim())
 
     const doc = fs.readFileSync(docPath, 'utf-8')
     const hasBlock = decisionsBlockRegex('').test(doc)
 
-    // 无已裁决项: 移除可能残留的旧章节，否则文档会留下过期的裁决
-    if (resolved.length === 0) {
+    // 无已确认项: 移除可能残留的旧章节，否则文档会留下过期的裁决
+    if (confirmed.length === 0) {
       if (!hasBlock) return false
       fs.writeFileSync(docPath, doc.replace(decisionsBlockRegex('g'), ''), 'utf-8')
       return true
@@ -210,16 +215,18 @@ function syncDecisionsToRequirementDoc (storyId) {
 
     const lines = [
       DECISIONS_MARK_START,
-      '## 用户裁决事项',
+      '## 用户已确认裁决',
       '',
-      '> 本段由脚本从 `open-questions.json` 同步生成，请勿手工编辑。',
-      '> 修改裁决请改 `open-questions.json` 的 `resolution` 并重新推进；',
+      '> 本段由脚本从 `open-questions.json` 的 `confirmation` 字段同步生成，请勿手工编辑。',
+      '> confirmedVia=verbatim 为用户原话；confirmedVia=accept 为用户采纳的分析员建议稿。',
+      '> 修改裁决请重新执行 resolve-question.js（--force 覆盖留 history）并重新推进；',
       '> 后续 Phase 以本段为准，不得重新上报或改判。',
       ''
     ]
-    for (const q of resolved) {
+    for (const q of confirmed) {
       lines.push(`- **${q.id}**: ${q.question}`)
-      lines.push(`  - 裁决: ${q.resolution.trim()}`)
+      lines.push(`  - 裁决: ${q.confirmation.answer.trim()}`)
+      lines.push(`  - 来源: ${q.confirmation.confirmedVia === 'accept' ? '采纳建议稿' : '用户原话'}`)
     }
     lines.push(DECISIONS_MARK_END, '')
 
@@ -264,8 +271,11 @@ function getPhaseArtifacts (storyId, phase) {
           if (f === 'acceptance-criteria.json' && data.criteria) {
             summary = `${data.criteria.length} 条验收标准`
           } else if (f === 'open-questions.json' && data.questions) {
-            const resolved = data.questions.filter(q => q.resolved).length
-            summary = `${data.questions.length} 项 (${resolved} 已解决)`
+            // v4 口径：与门控同一信源 checkOpenQuestions（裸读 q.resolved 会恒显示「0 已解决」——
+            // resolved 字段已废弃，没有任何代码再写它）
+            const oq = checkOpenQuestions(storyId)
+            const confirmedCount = oq.confirmed.length + oq.confirmedInformal.length
+            summary = `${data.questions.length} 项 (${confirmedCount} 已确认 / ${oq.pendingConfirmation.length + oq.noProposal.length} 待确认)`
           } else if (f === 'task-dag.json' && data.tasks) {
             summary = `${data.tasks.length} 个任务`
           } else if (f === 'code-review.json' && Array.isArray(data.issues)) {

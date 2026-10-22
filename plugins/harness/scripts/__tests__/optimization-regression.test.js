@@ -320,12 +320,15 @@ try {
   fs.mkdirSync(storyDir('OPT-PG'), { recursive: true })
   writeState('OPT-PG', 0)
 
-  // 产出物齐全，但 open-questions 含阻塞级待确认项 → dispatch 预检失败于 blocking_unresolved。
+  // 产出物齐全，但 open-questions 含缺建议稿的待确认项 → dispatch 预检失败于 open_questions_unresolved。
   // 必须用真实 blocker（非 artifact_missing）：reconcile 有意排除 artifact_missing —— 首次派单产出物
   // 未落盘是「还没做」而非「做了但没过门控」，不该沉淀 preGateBlocked；只有真实 blocker 修复后才补记。
+  // 注意（2026-10-20 v4 口径）: 不能用「有建议稿未确认」的项（user_confirmation_required）——
+  // dispatch 分支 A0 会把它截获为 blocked 态转人工，不产生 pendingBlockers；缺建议稿的项
+  // （open_questions_unresolved）才走「让分析员补稿」的常规分支 A。
   fs.writeFileSync(path.join(storyDir('OPT-PG'), 'requirement-analysis.md'), '# 需求分析')
   fs.writeFileSync(path.join(storyDir('OPT-PG'), 'open-questions.json'),
-    JSON.stringify({ questions: [{ id: 'Q-1', question: '阻塞级待确认项', resolved: false, blocking: true }] }))
+    JSON.stringify({ questions: [{ id: 'Q-1', question: '缺建议稿的待确认项' }] }))
   writeAC('OPT-PG')
 
   // 1. dispatch 预检：因阻塞级待确认项失败 → pendingBlockers 落盘 .dispatch-precheck.json
@@ -385,9 +388,15 @@ const contractsSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib/contracts.js'),
 const pushedTypes = [...contractsSrc.matchAll(/pushIssue\(\s*result\s*,\s*'([a-z_]+)'/g)].map(m => m[1])
 ok('contracts.js 至少提取到 15 个 pushIssue type', pushedTypes.length >= 15, `实际 ${pushedTypes.length}`)
 
+// 护栏扩扫（2026-10-20）: policy.js 的 structuredError 字面量 type 同样必须登记 ——
+// open-questions v4 新增的两个 type（user_confirmation_required 等）都由 policy.js 产出，
+// 只扫 contracts.js 会让这类新增静默漏登记
+const policySrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'services/policy.js'), 'utf-8')
+const policyTypes = [...policySrc.matchAll(/structuredError\(\s*'([a-z_]+)'/g)].map(m => m[1])
+
 const registeredTypes = Object.keys(policy.RECOVERY_SUGGESTIONS)
-const unregistered = [...new Set(pushedTypes)].filter(t => !registeredTypes.includes(t))
-ok('所有 pushIssue type 均已登记 RECOVERY_SUGGESTIONS', unregistered.length === 0,
+const unregistered = [...new Set([...pushedTypes, ...policyTypes])].filter(t => !registeredTypes.includes(t))
+ok('所有 pushIssue/structuredError type 均已登记 RECOVERY_SUGGESTIONS', unregistered.length === 0,
   `未登记: ${unregistered.join(', ')}`)
 
 // errors 必须与 issues 一一对应 —— 否则外部消费者（dispatch/audit/validate-contracts）
@@ -484,6 +493,8 @@ ok('返工轮仍注入 schema 骨架', rwAgain.agentPrompt.includes('产出物 J
 
 // ════════════════════════════════════════════════════════════
 // 11. A-3: 裁决从 open-questions.json 同步进需求分析文档
+//   （2026-10-20 v4 口径: 投影改读 confirmation 字段 —— 用户确认记录；
+//     AI 建议稿 resolution 不再被盖章成「用户裁决」）
 // ════════════════════════════════════════════════════════════
 section('11. A-3: 裁决同步进需求分析文档')
 
@@ -494,15 +505,17 @@ const dcOq = path.join(storyDir('OPT-DC'), 'open-questions.json')
 fs.writeFileSync(dcDoc, '# 需求分析\n\n正文。\n')
 const dcSet = qs => fs.writeFileSync(dcOq, JSON.stringify({ questions: qs }, null, 2))
 const dcRead = () => fs.readFileSync(dcDoc, 'utf-8')
+const dcConfirm = (answer, via) => ({ answer, confirmedVia: via || 'verbatim', confirmedAt: '2026-10-20T15:30:00+08:00' })
 
 dcSet([
-  { id: 'Q-1', question: '是否需要审批流?', resolved: true, resolution: '需要，二级审批' },
-  { id: 'Q-2', question: '字段命名口径?', resolved: false }
+  { id: 'Q-1', question: '是否需要审批流?', resolution: '建议需要', confirmation: dcConfirm('需要，二级审批') },
+  { id: 'Q-2', question: '字段命名口径?', resolution: '建议稿（未确认）' }
 ])
 ok('首次同步写入裁决章节', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === true)
-ok('已裁决项进文档', dcRead().includes('需要，二级审批'))
-ok('未裁决项不进文档', !dcRead().includes('字段命名口径'))
+ok('已确认项进文档', dcRead().includes('需要，二级审批'))
+ok('未确认项不进文档（仅有建议稿不构成裁决）', !dcRead().includes('字段命名口径'))
 ok('章节标注由脚本生成、勿手改', dcRead().includes('请勿手工编辑'))
+ok('章节标注 confirmation 来源（verbatim/accept）', dcRead().includes('用户原话'))
 
 // 幂等: 内容未变时再次同步不应改动文档，也不该重复追加章节
 ok('重复同步不改动（幂等）', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === false)
@@ -510,13 +523,13 @@ ok('重复同步不产生第二个章节',
   (dcRead().match(/harness:decisions:start/g) || []).length === 1)
 
 // 裁决改写 → 文档同步更新（而非并存新旧两条）
-dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolved: true, resolution: '改为不需要审批' }])
+dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolution: '建议需要', confirmation: dcConfirm('改为不需要审批') }])
 contextRefresh.syncDecisionsToRequirementDoc('OPT-DC')
 ok('裁决改写后文档更新', dcRead().includes('改为不需要审批'))
 ok('裁决改写后不残留旧裁决', !dcRead().includes('需要，二级审批'))
 
-// 裁决清空 → 移除章节，避免留下过期裁决误导后续 Phase
-dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolved: false }])
+// 确认清空 → 移除章节，避免留下过期裁决误导后续 Phase
+dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolution: '建议需要' }])
 ok('裁决清空后移除章节', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === true)
 ok('裁决清空后无残留', !dcRead().includes('harness:decisions:start'))
 

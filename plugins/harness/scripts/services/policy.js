@@ -84,22 +84,24 @@ const { ADVANCE_CMD } = require('../lib/paths')
  * Level 4: 阻止 + 人工介入
  */
 const RECOVERY_SUGGESTIONS = {
-  // Phase 0→1: open-questions 有 blocking 未解决
-  blocking_unresolved: {
+  // Phase 0→1: open-questions 有项未被用户确认（2026-10-20 用户裁定: 不分 blocking，
+  // 全部待确认项必须经用户确认才放行；AI 建议稿不构成放行依据）
+  user_confirmation_required: {
     level: 4,
-    action: '请用户逐项确认 open-questions 中的 blocking 项，并由需求分析师回填 resolution 后置 resolved 字段为 true',
+    action: '把待确认项一次性列给用户（问题 + 建议稿 + 依据来源，blocking 项排前），拿到答复后逐条执行 node scripts/commands/resolve-question.js <storyId> --qid <Q-N> --answer "<用户原话>"；用户明确说"全部采纳"时用 --accept-all 一次落账',
     autoFixable: false
   },
-  // Phase 0→1: open-questions 有非阻塞项未解决（2026-09-12 用户裁定: 不论 blocking，一律拦截）
+  // Phase 0→1: open-questions 有项缺建议稿（resolution 为空）
   open_questions_unresolved: {
     level: 4,
-    action: 'open-questions.json 仍有未解决项 —— 由需求分析师逐项给出结论（填写非空 resolution）并置 resolved=true；确实无需处理的也要写明判定依据，不得留空',
+    action: 'open-questions.json 仍有缺建议稿的项 —— 由需求分析师逐项补写（非空 resolution + resolutionSource 标注依据来源）；建议稿只是给用户的参考，不得自行判定为已解决 —— 全部待确认项必须经用户确认（resolve-question.js 写入 confirmation）',
     autoFixable: false
   },
-  // Phase 0→1: 已置 resolved=true 但 resolution 为空（空壳消解）
-  pseudo_resolved: {
-    level: 4,
-    action: '存在「已置 resolved=true 但未填写 resolution」的项，门控视为未解决 —— 补齐每条的 resolution 结论后重试',
+  // Phase 任意: JSON 产出物 schema 校验失败（静态护栏扩扫 policy.js 后发现的既有未登记 type，
+  // 此前静默落 unknown —— 护栏生效的第一个捕获）
+  schema_validation_failed: {
+    level: 2,
+    action: 'JSON 产出物不符合 schemas/ 下的 schema 定义 —— 按 blocker 消息定位字段（白名单外字段 / 缺必填 / 类型不符），修正后重试',
     autoFixable: false
   },
   // Phase 0→1: AC 格式错误
@@ -279,8 +281,9 @@ function matchRecoverySuggestion (blocker) {
   }
 
   // 兜底兼容: 纯字符串 blocker 的关键词匹配（保留旧逻辑）
+  // 注: 旧关键词「阻塞级待确认」已随 blocking_unresolved 一并删除（无产出方）；
+  // open-questions 类 blocker 均由结构化 type 精确命中，不走关键词兜底。
   const lower = errorToString(blocker).toLowerCase()
-  if (lower.includes('阻塞级待确认') || lower.includes('blocking')) return RECOVERY_SUGGESTIONS.blocking_unresolved
   if (lower.includes('acceptance-criteria') && lower.includes('缺少')) return RECOVERY_SUGGESTIONS.ac_format_error
   if (lower.includes('缺少 title') || lower.includes('"name"')) return RECOVERY_SUGGESTIONS.task_missing_title
   if (lower.includes('blocker')) return RECOVERY_SUGGESTIONS.code_review_blocker
@@ -454,27 +457,47 @@ function checkPhase0Gate (storyId, state, result) {
   }
 
   // 待确认项 — 单一数据源：open-questions.json
-  // 口径（2026-09-12 用户裁定）: 门控点只在 Phase 0→1；未解决项**不论 blocking 与否**一律拦截；
-  // 「已解决」= resolved:true 且 resolution 非空（判定见 contracts.isTrulyResolved）。
-  // 此前非阻塞项只进 warnings 放行，导致 3 条未确认项能一路带到 Phase 5 而无人处理。
+  // 口径（2026-10-20 用户裁定 v4）: 放行只看 confirmation 字段（用户确认记录，
+  // 约定由 resolve-question.js 写入）；不分 blocking，全部待确认项必须经用户确认。
+  // resolved/resolution/blocking 全部退出门控 —— AI 自答不再构成放行依据。
   const oqCheck = checkOpenQuestions(storyId)
-  const oqUnresolved = oqCheck.exists ? oqCheck.unresolved.length : 0
-  const oqBlocking = oqCheck.exists ? oqCheck.unresolved.filter(q => q.blocking).length : 0
-  const oqPseudo = oqCheck.exists ? (oqCheck.pseudoResolved || []).length : 0
 
-  if (oqUnresolved > 0) {
-    const ids = oqCheck.unresolved.map(q => q.id || '?').slice(0, 5).join(', ')
-    const type = oqPseudo > 0
-      ? 'pseudo_resolved'
-      : (oqBlocking > 0 ? 'blocking_unresolved' : 'open_questions_unresolved')
-    const detail = `${oqUnresolved} 项待确认问题未真正解决（阻塞级 ${oqBlocking} 项` +
-      (oqPseudo > 0 ? `，其中 ${oqPseudo} 项仅置 resolved=true 未填 resolution` : '') +
-      `）: ${ids}`
-    const resolution = oqPseudo > 0
-      ? '补齐这些项的 resolution 结论（仅置 resolved=true 视为未解决）后重试'
-      : '由需求分析师逐项给出结论并填写非空 resolution 后置 resolved=true 重试'
-    result.blockers.push(structuredError(type, `open-questions: ${detail}`, 4, resolution))
+  // 第 2 类: 有建议稿但未确认 → 转用户确认（与「缺建议稿」分开：这不是分析员没干完，
+  // 重新 Spawn 分析员只会让它再自答一遍 —— 正是要根治的病）
+  const pending = oqCheck.exists ? oqCheck.pendingConfirmation : []
+  if (pending.length > 0) {
+    const ids = pending.map(q => q.id || '?').slice(0, 5).join(', ')
+    result.blockers.push(structuredError(
+      'user_confirmation_required',
+      `open-questions: ${pending.length} 项待确认问题必须经用户确认（建议稿已就位）: ${ids}`,
+      4,
+      '把待确认项一次性列给用户（问题 + 建议稿 + 依据来源，blocking 项排前），拿到答复后用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿 / 全部采纳用 --accept-all）'
+    ))
     result.passed = false
+  }
+
+  // 第 3 类: 缺建议稿 → 分析员先补稿（没有建议稿，用户也无从答起）
+  const noProposal = oqCheck.exists ? oqCheck.noProposal : []
+  if (noProposal.length > 0) {
+    const ids = noProposal.map(q => q.id || '?').slice(0, 5).join(', ')
+    result.blockers.push(structuredError(
+      'open_questions_unresolved',
+      `open-questions: ${noProposal.length} 项待确认问题缺建议稿（resolution 为空）: ${ids}`,
+      4,
+      '由需求分析师逐项补写建议稿（非空 resolution + resolutionSource 标注依据来源），然后统一交用户确认'
+    ))
+    result.passed = false
+  }
+
+  // 第 1b 类: confirmation 格式不规范（缺 confirmedVia/confirmedAt）→ 放行但记 warning
+  // 脚本写入必然字段齐全，缺斤短两疑似手写 —— v4 软约束的启发式补偿
+  const informal = oqCheck.exists ? oqCheck.confirmedInformal : []
+  if (informal.length > 0) {
+    const ids = informal.map(q => q.id || '?').slice(0, 5).join(', ')
+    result.warnings.push(
+      `open-questions: ${informal.length} 项的 confirmation 缺 confirmedVia/confirmedAt（${ids}），` +
+      '疑似未经 resolve-question.js 写入，请人工核对是否为真实用户确认'
+    )
   }
 
   // Figma frame inventory 不在 Phase 0→1 校验 —— frame-inventory 由 Phase 1 任务规划师拆 task 时产出，

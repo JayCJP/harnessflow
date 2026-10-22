@@ -319,7 +319,7 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 ### 2. 状态文件纪律（铁律）
 
 - 🚫 **AI 不手改 `e2e-state.json` / `dev-pass.json`**。Phase 推进、dev-pass 签发/撤销全部由脚本完成，AI 只执行 `dispatch.js` / `advance-phase.js` 给出的指令。
-- 🚫 **AI 不自行将 `open-questions.json` 的 `resolved` 设为 `true`**。待确认项必须由用户确认。
+- 🚫 **AI 不替用户确认 `open-questions.json` 的待确认项**。建议稿只写 `resolution`；`confirmation` 字段（放行唯一依据）只经 `resolve-question.js` 在用户答复后写入，`resolved` 字段已废弃。
 - 🚫 **Phase ≠ 2 时不要编辑 `src/`**，Hook 守卫会直接拒绝。
 
 ### 3. Figma 使用

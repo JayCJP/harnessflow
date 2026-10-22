@@ -88,7 +88,10 @@ function auditContracts () {
       const ac = checkAcceptanceCriteria(sid)
       if (!ac.valid) warnings.push({ cat: 'contract', severity: 'WARNING', msg: '[' + sid + '] acceptance-criteria.json: ' + ac.errors.join('; ') })
       const oq = checkOpenQuestions(sid)
-      if (!oq.allResolved) warnings.push({ cat: 'contract', severity: 'WARNING', msg: '[' + sid + '] open-questions.json: ' + oq.unresolved.length + ' 项未解决' })
+      // v4 口径: 仅「缺建议稿（noProposal）」告警 —— 待用户确认（pendingConfirmation）是流程的正常
+      // 中间态（用户确认环节就是为此设计），存量 Story 的待确认项不告警，避免刷屏
+      const noProposalCount = (oq.noProposal || []).length
+      if (noProposalCount > 0) warnings.push({ cat: 'contract', severity: 'WARNING', msg: '[' + sid + '] open-questions.json: ' + noProposalCount + ' 项缺建议稿（resolution 为空）' })
     }
     if (ph >= 2 || (st.phases && st.phases['1_task_planning'] && st.phases['1_task_planning'].status === 'completed')) {
       const tdj = checkTaskDagJson(sid)

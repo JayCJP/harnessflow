@@ -80,6 +80,19 @@ function describeLevel (label, node) {
 }
 
 /**
+ * 字段级注解表：骨架只渲染 key + type，白名单本身会暗示「这是合法输出」。
+ * 对「Agent 不得填写」的字段（用户确认专用 / 已废弃）必须显式标注，否则与
+ * 口径段的禁令自相矛盾（open-questions 的 confirmation 就是最脆的部位）。
+ * key: 契约文件名 → 字段名 → 注解文本
+ */
+const FIELD_NOTES = {
+  'open-questions.json': {
+    confirmation: '仅 resolve-question.js 在用户确认后写入，Agent 严禁填写（填写等于伪造用户意志）',
+    resolved: '已废弃字段，门控不读，不要填写'
+  }
+}
+
+/**
  * 构造单个契约文件的 schema 骨架
  *
  * @param {string} fileName - 契约文件名，如 `task-dag.json`
@@ -103,6 +116,13 @@ function buildSchemaSkeleton (fileName) {
   for (const [key, prop] of Object.entries(schema.properties || {})) {
     if (prop.type === 'array' && prop.items && prop.items.type === 'object') {
       lines.push(...describeLevel(`\`${key}[]\` 元素`, prop.items))
+      // 字段级注解（如 open-questions 的 confirmation/resolved）
+      const notes = FIELD_NOTES[fileName]
+      if (notes) {
+        for (const field of Object.keys(prop.items.properties || {})) {
+          if (notes[field]) lines.push(`- 🚫 \`${key}[]\` 元素 \`${field}\`: ${notes[field]}`)
+        }
+      }
     } else if (prop.type === 'object' && prop.properties) {
       lines.push(...describeLevel(`\`${key}\``, prop))
     }

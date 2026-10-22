@@ -103,37 +103,43 @@ function baseResult (storyId, state) {
 }
 
 /**
- * 把 open-questions 契约检查结果转成告警文案（不阻塞，仅提示用户确认）
+ * open-questions.json 未确认项告警
  *
- * 判定逻辑统一由 state.js 的 checkOpenQuestions 提供 —— 这里原有一份私有实现，
- * 与 state.js 版在 resolved 判定与文件缺失时的行为都不一致，脏数据下两处结论会分叉。
+ * 2026-10-20 重构（v4 口径）: 放行只看 confirmation 字段（用户确认记录），
+ * 不分 blocking。旧文案「由需求分析师回填 resolution、不再需要用户逐项答复」
+ * 正是"AI 自答就能过门"的病根，已删除。现按三类分别提示:
+ *   待用户确认（建议稿已就位）/ 缺建议稿 / confirmation 格式不规范（疑似手写）。
+ *
+ * 判定逻辑统一由 contracts.js 的 checkOpenQuestions 提供（单一数据源）。
  *
  * @param {string} storyId - Story ID
  * @returns {string[]} 告警列表；文件不存在或全部已确认时为空
  */
-/**
- * open-questions.json 未解决项告警
- *
- * 2026-09-12 修正: 旧文案对所有未解决项统一说「请与用户确认后再继续」，
- * 但门控当时只拦 blocking 项 —— 非阻塞项「告警说要确认、门控照放行」，
- * 主 Agent 与用户都无法判断到底该不该停，形成幽灵阻塞。
- * 现按门控真实口径改写：明确哪些会拦、以及 action 是回填 resolution 而非再去问用户。
- */
 function openQuestionWarnings (storyId) {
   const check = checkOpenQuestions(storyId)
-  if (check.unresolved.length > 0) {
-    const ids = check.unresolved.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
-    const blockingCount = check.unresolved.filter(q => q.blocking).length
-    const pseudoCount = (check.pseudoResolved || []).length
-    const head = `open-questions.json 中有 ${check.unresolved.length} 项未真正解决: ${ids}`
-    const tail = blockingCount > 0
-      ? `其中 ${blockingCount} 项为阻塞级 —— Phase 0→1 门控会拦截`
-      : '（非阻塞级，但按现行口径同样会拦截）'
-    const pseudoTip = pseudoCount > 0
-      ? ` 另有 ${pseudoCount} 项仅置 resolved=true 未填 resolution，同样视为未解决。`
-      : ''
-    return [`${head}。${tail}。需由需求分析师回填非空 resolution 并置 resolved=true，${pseudoTip}不再需要用户逐项答复。`]
+  const warnings = []
+
+  if (check.pendingConfirmation.length > 0) {
+    const ids = check.pendingConfirmation.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
+    warnings.push(
+      `⛔ open-questions.json 有 ${check.pendingConfirmation.length} 项待确认项必须经用户确认（含 AI 已给建议稿的项）: ${ids} —— ` +
+      'Phase 0→1 门控会拦截。用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿）'
+    )
   }
+  if (check.noProposal.length > 0) {
+    const ids = check.noProposal.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
+    warnings.push(
+      `⚠️ open-questions.json 有 ${check.noProposal.length} 项待确认项尚无建议稿（resolution 为空）: ${ids} —— 需需求分析师补写后再交用户确认`
+    )
+  }
+  if (check.confirmedInformal.length > 0) {
+    const ids = check.confirmedInformal.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
+    warnings.push(
+      `⚠️ open-questions.json 有 ${check.confirmedInformal.length} 项 confirmation 缺 confirmedVia/confirmedAt: ${ids} —— 疑似未经 resolve-question.js 写入，请人工核对`
+    )
+  }
+
+  if (warnings.length > 0) return warnings
   // 文件不存在不告警（Phase 0 完成前属正常状态）；解析失败仍要提示
   const parseErr = (check.errors || []).find(e => e.includes('解析失败'))
   return parseErr ? [`open-questions.json ${parseErr}`] : []
@@ -260,6 +266,38 @@ function dispatch (storyId) {
 
   // ── 分支 A: 当前 Phase 产出物未就绪 → 该 Phase 的 Agent 干活 ──
   if (!gate.passed) {
+    // ── 分支 A0: 待确认项等待用户拍板 ──────────────────────────
+    // 与分支 A（让 Agent 干活）的区别: 这不是"Agent 还没干完"，
+    // 而是"建议稿已就位、缺用户确认" —— 重新 Spawn 分析员没有意义，
+    // 会让它再自答一遍（这正是要根治的病）。故单独走 blocked 态，
+    // 把确认动作交回主 Agent → 用户。
+    if (gate.blockers.some(b => errorToType(b) === 'user_confirmation_required')) {
+      // 清单从 checkOpenQuestions 取完整字段（问题原文 + 建议稿 + 依据来源，blocking 排前），
+      // 而不是只转述 blocker message（只有 id 列表，主 Agent 还得自己去读文件猜内容）
+      const oq = checkOpenQuestions(storyId)
+      const sorted = [...oq.pendingConfirmation].sort((a, b) => (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0))
+      const items = sorted.map(q =>
+        `  ${q.id}${q.blocking ? ' [建议优先]' : ''} ${q.question}\n` +
+        `    建议稿: ${(q.resolution || '').trim()}（依据: ${q.resolutionSource || '未标注'}）`
+      )
+      // 缺建议稿的项一并提示，避免用户确认完再 dispatch 才发现还有 noProposal，多一次往返
+      const noProposalNote = oq.noProposal.length > 0
+        ? `\n另有 ${oq.noProposal.length} 项缺建议稿（${oq.noProposal.map(q => q.id).join(', ')}），需需求分析师先补稿`
+        : ''
+      result.status = 'blocked'
+      result.recovery = {
+        type: 'user_confirmation_required',
+        command: null,
+        description: '以下待确认项必须经用户确认（AI 建议稿不构成放行依据）:\n' + items.join('\n') +
+          `\n详情: read_file .codebuddy/plans/${storyId}/open-questions.json` +
+          '\n操作: 把以上清单一次性列给用户，拿到答复后逐条执行 ' +
+          commandPath('resolve-question.js') + ` ${storyId} --qid <Q-N> --answer "<用户原话>"` +
+          '（用户明确说"全部采纳"时用 --accept-all），然后重新执行 dispatch.js' +
+          noProposalNote
+      }
+      return result
+    }
+
     const agentInfo = getPhaseAgent(phase)
 
     // 修复回路已激活且卡在 Phase 3（代码审查）→ 回退开发修复

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Open Questions Schema",
-  "description": "待确认项契约校验规则",
+  "description": "待确认项契约校验规则。放行判定只读 confirmation 字段（约定由 resolve-question.js 在用户确认后写入，AI 不得自行填写）；resolution/resolutionSource 是给用户的建议稿；resolved 字段已废弃（存量兼容保留，门控不读）。",
   "type": "object",
   "required": ["questions"],
   "properties": {
@@ -9,7 +9,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "question", "resolved"],
+        "required": ["id", "question"],
         "properties": {
           "id": { "type": "string", "pattern": "^Q-\\d+$" },
           "question": { "type": "string", "minLength": 1 },
@@ -17,7 +17,22 @@
           "owner": { "type": "string" },
           "blocking": { "type": "boolean" },
           "source": { "type": "string" },
-          "resolution": { "type": "string" }
+          "resolution": { "type": "string" },
+          "resolutionSource": {
+            "type": "string",
+            "enum": ["requirement-doc", "prototype", "code-evidence", "inference"]
+          },
+          "confirmation": {
+            "type": "object",
+            "required": ["answer"],
+            "properties": {
+              "answer": { "type": "string", "minLength": 1 },
+              "confirmedVia": { "type": "string", "enum": ["verbatim", "accept"] },
+              "confirmedAt": { "type": "string" },
+              "history": { "type": "array" }
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": false
       }
