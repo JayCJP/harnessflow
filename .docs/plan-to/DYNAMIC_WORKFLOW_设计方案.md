@@ -1,10 +1,16 @@
 # Harness 动态可编排工作流 — 方案设计
 
-> 目标: 把当前"固定 8 Phase 线性流水线"扩展为"可编排的动态工作流"，
+> 目标: 把当前"固定 7 Phase 线性流水线"（Phase 0-6 执行 + Phase 7 终态）扩展为"可编排的动态工作流"，
 > 且**不牺牲**现有插件最核心的资产 —— 门控在 LLM 推理链之外、触发权 ≠ 决定权。
 >
 > 状态: 设计稿（未实现）。本文只描述做什么、为什么、怎么做、怎么迁移。
 > 会话: claude --resume d0786d16-6c30-4571-a7a8-ca4c44f6e7de
+>
+> 2026-11 修订: 原稿写于「8 Phase」拓扑时代，其后 **Phase 4（功能测试）已被移除** ——
+> AC 逐条核对并入 Phase 3 code-reviewer（未通过的 AC 以 BLOCKER 记入 code-review.json 的
+> issues[]），code-review.json 成为唯一验收对账产物。现状是 `lib/phases.js` 的
+> `PHASE_SLUGS` 0-7 共 8 槽位（7 是终态 `completed`），与 README 的 7 Phase 表一致。
+> 本文已按此口径全面修订（删除 e2e_verification 节点、修复回路唯一信源化等）。
 
 ---
 
@@ -43,14 +49,14 @@ prompt-builder 收口的理由（"拼接就是判断"），全部指向同一件
 
 | # | 硬编码点 | 位置 | 为什么它让流程"固定" |
 |---|---------|------|---------------------|
-| 1 | 拓扑 = 位置数组 | `lib/state.js` `PHASE_SLUGS` / `PHASE_NAMES` | Phase 身份 = 整数下标。`MAX_PHASE = PHASE_SLUGS.length - 1` 在 `dispatch.js:43`、`advance-phase.js` 各推导一次 |
-| 2 | 节点元数据 = 字面量对象 | `lib/state.js` `PHASE_ARTIFACTS` / `PHASE_AGENTS`（键 0-7） | 产出物、Agent 绑定写死；换一套 Agent 阵容要改源码 |
+| 1 | 拓扑 = 位置数组 | `lib/phases.js` `PHASE_SLUGS` / `PHASE_NAMES`（0-7，7 为终态） | Phase 身份 = 整数下标。`MAX_PHASE = PHASE_SLUGS.length - 1` 已收敛到 `lib/phases.js` 定义处（dispatch / advance-phase / story-state 各取一份） |
+| 2 | 节点元数据 = 字面量对象 | `lib/phases.js` `PHASE_ARTIFACTS` / `PHASE_AGENTS`（键 0-6） | 产出物、Agent 绑定写死；换一套 Agent 阵容要改源码 |
 | 3 | 强制 `+1` 跃迁 | `advance-phase.js` `if (targetPhase !== currentPhase + 1)` | **与任何 DAG 拓扑结构性冲突** —— 分支、跳跃、汇聚一律拒绝 |
-| 4 | 门控 = if/else 阶梯 | `services/policy.js` `runGateCheck` 里 `phaseNum === 0 / 1 / 3 / 4` | 加一个节点就要改 `policy.js` |
-| 5 | 副作用绑死数字 | `advance-phase.js`：dev-pass 签发@2、撤销@3、兜底撤销@5、metrics+完成@7→8 | 节点顺序一变，副作用全错位 |
-| 6 | 修复回路目标写死 | `advance-phase.js --fix-loop` 目标恒为 2，来源恒为 3/4，state key 是字面量 `'2_development'`；`dispatch.js` 里 `const isReviewOrTest = phase === 3 || phase === 4` | 只有一种修复回路形状 |
-| 7 | Agent 阵容单一 | `PHASE_AGENTS` 绑定固定 6 个前端 Agent | 无法切后端 / 纯测试 / hotfix 阵容 |
-| 8 | 影子拓扑表（隐蔽） | `create-workflow.js` 的 `phaseKeys[]`、`context-refresh.js` 的 `baseContracts{}`、`schema-validator.js` 的 `getPhaseArtifacts()`、`prompt-builder.js` 的 `targetPhase !== 3`、`e2e-state.schema.json` 的 `"maximum": 8` | **同一份拓扑知识散落在多个文件里各写一遍。** 这是最危险的一条：改拓扑要同步多处，漏一处就静默错位。<br>已消除：`context-refresh.js` 的 `phaseFiles{}` 改读 `PHASE_ARTIFACTS`；`getNextSteps{}`（第二份 Phase→Agent 映射）已删除 |
+| 4 | 门控 = if/else 阶梯 | `services/policy.js` `runGateCheck` 里 `phaseNum === 0 / 1 / 2 / 3` | 加一个节点就要改 `policy.js` |
+| 5 | 副作用绑死数字 | `advance-phase.js`：dev-pass 签发@2、撤销@3、兜底撤销、metrics+完成@MAX_PHASE | 节点顺序一变，副作用全错位 |
+| 6 | 修复回路目标写死 | `phase-ops/fix-loop.js` 目标恒为 2，来源恒为 3（code-review.json **唯一信源**，`sourcePhase` 硬编码为 3）；`dispatch.js` 里 `isReviewOrTest = phase === 3` | 只有一种修复回路形状。原 Phase 4 功能测试信源（acceptance-verification.json / test-report.md）已随 Phase 4 移除而清理；但「round 跨源独立计数」逻辑仍保留着 review/test 双源的遗迹（fix-loop.js 注释自述） |
+| 7 | Agent 阵容单一 | `PHASE_AGENTS` 绑定固定 4 个注册 Agent（requirement-analyst / task-planner / frontend-developer / code-reviewer + release-assistant 复用于 4/5/6） | 无法切后端 / 纯测试 / hotfix 阵容 |
+| 8 | 影子拓扑表（隐蔽） | `create-workflow.js` 的 `phaseKeys[]`（字面量重列 0-6）、`schema-validator.js` 的 `getPhaseArtifacts()`、`prompt-builder.js` 的 `targetPhase !== 3`、`e2e-state.schema.json` 的 `phase.maximum` | **同一份拓扑知识散落在多个文件里各写一遍。** 这是最危险的一条：改拓扑要同步多处，漏一处就静默错位（Phase 4 移除时就需要逐处清理）。<br>已消除：`context-refresh.js` 的 `phaseFiles{}` 改读 `PHASE_ARTIFACTS`；`getNextSteps{}`（第二份 Phase→Agent 映射）已删除；`MAX_PHASE` 收敛到 `lib/phases.js` |
 
 第 8 条决定了改造顺序 —— **必须先收口，再动态化**。否则动态化只是把 1 份硬编码变成 6 份不一致的动态配置。
 
@@ -149,9 +155,7 @@ prompt-builder 收口的理由（"拼接就是判断"），全部指向同一件
 
 **关键决策：节点用字符串 `id`，不用整数。** 这是整个方案的地基。
 整数下标隐含"全序"，全序隐含"+1 跃迁"，`+1` 跃迁排斥一切非线性拓扑。
-换成命名节点后，"下一个"从算术运算变成图查询。
-
-### 4.2 节点定义
+换成命名节点后，"下一个"从算术运算变成图查询。### 4.2 节点定义
 
 ```jsonc
 {
@@ -211,22 +215,19 @@ prompt-builder 收口的理由（"拼接就是判断"），全部指向同一件
     { "from": "development",          "to": "code_review" },
 
     // 条件分支：门控结果驱动，条件是【注册的谓词 id】，不是任意表达式
-    { "from": "code_review", "to": "e2e_verification", "when": "gate.passed" },
+    // 注：Phase 4（功能测试）已移除，AC 逐条核对由 code_review 节点顺带完成，
+    // 未通过的 AC 以 BLOCKER 记入 code-review.json —— 因此修复回路只剩这一条
+    { "from": "code_review", "to": "git_submit", "when": "gate.passed" },
     { "from": "code_review", "to": "development",
-      "when": "gate.hasBlocker",
+      "when": "gate.hasBlocker",       // 含 AC 未通过（记入 issues[] 的 BLOCKER）
       "kind": "fix_loop",
       "fixLoop": {
         "maxRounds": 2,
-        "issuesFrom": ["code-review.json"],
+        "issuesFrom": ["code-review.json"],   // 唯一信源
         "scopeFrom": "affectedFiles",
         "onExhausted": { "action": "escalate", "level": 4 }
       }
     },
-
-    { "from": "e2e_verification", "to": "git_submit", "when": "gate.passed" },
-    { "from": "e2e_verification", "to": "development",
-      "when": "gate.hasFailedAC", "kind": "fix_loop",
-      "fixLoop": { "maxRounds": 2, "issuesFrom": ["acceptance-verification.json", "test-report.md"] } },
 
     { "from": "git_submit",           "to": "knowledge_base_update" },
     { "from": "knowledge_base_update", "to": "deployment" },
@@ -235,8 +236,8 @@ prompt-builder 收口的理由（"拼接就是判断"），全部指向同一件
 }
 ```
 
-- `when` 只能取**注册谓词**：`gate.passed` / `gate.hasBlocker` / `gate.hasFailedAC` / `flags.<name>` / `state.<field>` 等。**不支持任意表达式求值** —— 模板是数据不是代码，不给注入面。
-- `kind: "fix_loop"` 把修复回路从"硬编码回 Phase 2"泛化成**一类边**。`dispatch.js` 里那句 `phase === 3 || phase === 4` 消失，改为"当前节点存在 kind=fix_loop 的可用出边"。
+- `when` 只能取**注册谓词**：`gate.passed` / `gate.hasBlocker` / `flags.<name>` / `state.<field>` 等。**不支持任意表达式求值** —— 模板是数据不是代码，不给注入面。（原稿的 `gate.hasFailedAC` 谓词随功能测试节点一并移除，AC 失败统一走 `gate.hasBlocker`。）
+- `kind: "fix_loop"` 把修复回路从"硬编码回 Phase 2"泛化成**一类边**。`dispatch.js` 里那句 `isReviewOrTest = phase === 3` 消失，改为"当前节点存在 kind=fix_loop 的可用出边"。
 - `--rollback` 同理归为 `kind: "rollback"` 边（逆向恢复），与 Seata 的**回滚恢复 / 向前恢复**双向语义对齐。
 
 ### 4.4 Phase 2 的 Fork-Join 用图表达
@@ -307,7 +308,8 @@ const GATE_REGISTRY = {
   'open-questions':       { fn: gateOpenQuestions,      produces: ['open_questions_unresolved'] },
   'task-dag-contract':    { fn: gateTaskDag,            produces: ['task_missing_id', 'orphan_ac', ...] },
   'code-review-blocker':  { fn: gateCodeReviewBlocker,  produces: ['code_review_blocker'] },
-  'acceptance-verified':  { fn: gateAcceptanceVerified, produces: ['ac_verification_failed'] },
+  // 注：原 'acceptance-verified' 门控随 Phase 4（功能测试）移除 ——
+  // AC 核对已并入 code-review，其失败模式作为 code_review_blocker 的一种进入注册表
   'figma-inventory':      { fn: gateFigmaInventory,     when: 'state.hasFigmaDesign' }
 }
 
@@ -324,6 +326,9 @@ function runGateCheck (storyId, nodeId, state) {
   return result
 }
 ```
+
+现状对照：`policy.js` 的 `runGateCheck` 当前是 `phaseNum === 0 / 1 / 2 / 3` 四段阶梯
+（Phase 2→3 是唯一带增量 lint+编译的重门控；Phase 4 功能测试段已移除）。
 
 `RECOVERY_SUGGESTIONS`（那张按 `failureType` 索引的大表）、`level 1-4` 分级、
 `structuredError` 结构**全部原样保留**。改的只是"谁在什么时候被调用"，不改"失败怎么处理"。
@@ -354,8 +359,8 @@ const EFFECT_REGISTRY = {
 
 | 原逻辑 | 新逻辑 |
 |--------|--------|
-| `phase > MAX_PHASE - 1` → terminal | `wfGraph.isTerminal(wf, currentNode)` |
-| `phase === 3 \|\| phase === 4` 且 fixLoopAvailable → fix_loop | 存在 `kind=fix_loop` 且 `when` 成立的出边 → fix_loop |
+| `phase > MAX_PHASE - 1` / `isWorkflowTerminal` → terminal | `wfGraph.isTerminal(wf, currentNode)` |
+| `isReviewOrTest = phase === 3` 且 fixLoopAvailable → fix_loop | 存在 `kind=fix_loop` 且 `when` 成立的出边 → fix_loop |
 | `advanceCommand = ... ${phase + 1}` | `advanceCommand = ... ${resolveNext(...)[0].to}` |
 | 多后继时 | 输出 `choices[]`，**由 gate 谓词裁定，不让主 Agent 选**；若谓词无法唯一裁定 → `blocked` + `recovery` 转人工 |
 
@@ -382,7 +387,7 @@ const EFFECT_REGISTRY = {
 
 `phase` 与 `phases` 保留为**只写不读**的兼容投影（由 `topoOrder` 计算），
 让 `metrics-aggregator` / `harness-audit` / 历史 Story 在迁移期继续工作。
-`e2e-state.schema.json` 的 `phase.maximum: 8` 放开为 `minimum: 0`。
+`e2e-state.schema.json` 的 `phase.maximum`（当前为 7）放开为 `minimum: 0`。
 
 ---
 
@@ -392,9 +397,9 @@ const EFFECT_REGISTRY = {
 
 | 模板 id | 场景 | 拓扑要点 |
 |---------|------|---------|
-| `frontend-standard` | 现有 8 Phase | 与今天**行为完全等价**，作为迁移基准和回归基线 |
-| `hotfix` | 紧急修复 | 入口直接 `development`，跳过分析/规划；保留审查+测试；收编现有 `--bypass` |
-| `bugfix` | `/harness fixbugs` | `bug_analysis → development → code_review → e2e → submit`，无部署 |
+| `frontend-standard` | 现有 7 Phase（0-6 + 终态） | 与今天**行为完全等价**，作为迁移基准和回归基线 |
+| `hotfix` | 紧急修复 | 入口直接 `development`，跳过分析/规划；保留审查；收编现有 `--bypass` |
+| `bugfix` | `/harness fixbugs` | `bug_analysis → development → code_review → submit`，无部署（AC 核对由 code_review 顺带完成，无独立测试节点） |
 | `fullstack` | 前后端协同 | `task_planning` 后 `fanout` 到 `frontend-developer` + `backend-developer`，`join` 后统一审查 |
 | `review-only` | 存量代码审计 | `code_review → 输出报告`，无 dev-pass、无提交 |
 | `spike` | 技术预研 | `requirement_analysis → prototype → 归档`，不进主干 |
@@ -442,7 +447,8 @@ const EFFECT_REGISTRY = {
 
 ### Stage 0 — 收口影子拓扑（必做前置，不引入任何新能力）
 
-诊断 #8 是最大的隐患。先把散落的拓扑知识全部收敛到 `lib/state.js` 的单一结构：
+诊断 #8 是最大的隐患。先把散落的拓扑知识全部收敛到 `lib/phases.js` 的单一结构
+（`PHASE_SLUGS` / `PHASE_NAMES` / `PHASE_ARTIFACTS` / `PHASE_AGENTS` 的定义源就是这里）：
 
 ```js
 const PHASE_DEF = [
@@ -504,7 +510,7 @@ const PHASE_ARTIFACTS= Object.fromEntries(PHASE_DEF.map((p, i) => [i, { artifact
 | `enforce-state-file.js` / `enforce-dev-pass.js` | 加一条匹配 | 保护 `workflow.lock.json` |
 | `validatePhaseIntegrity()` | 语义迁移 | 整数比较 → 图后继集合判定 |
 | dev-pass 限域机制 | 零改动 | 从"Phase 2 硬编码"变成"节点 effect 声明"，签发逻辑本身不动 |
-| 契约 Schema (8 个) | 零改动 | 新增 `workflow.schema.json` |
+| 契约 Schema (8 个) | 零改动 | 新增 `workflow.schema.json`；`e2e-state.schema.json` 的 `phase.maximum`（现为 7，对应终态）随拓扑动态化放开 |
 | 五维 Agent Work Loop (`docs/agent-work-loop.md`) | **需重映射** | 维度当前锚定 Phase 编号（如 "Phase 0→1"），须改为锚定**节点角色标签**（如 `role: understanding \| execution \| validation \| delivery`），否则换模板即失效 |
 | `trace.jsonl` | 增字段 | 事件加 `nodeId` / `workflowId`，旧字段保留 |
 | 历史 Story | 可读 | 无 `currentNode` 时按 `phase` + 默认模板反查 |
