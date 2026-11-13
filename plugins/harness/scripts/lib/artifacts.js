@@ -39,6 +39,10 @@ const ARTIFACT = {
   CODE_REVIEW: 'code-review.json',
   FIX_REQUEST: 'fix-request.json',
   FIX_VERIFICATION: 'fix-verification.json',
+  // bug 清单：fixbugs 模式下 Phase 0 产出的结构化缺陷清单（含 TAPD 原始状态、
+  // 分诊分类、评论摘要、回写凭证）。唯一信源 —— 人读的 *_bug分析报告.md 是投影，
+  // 程序只读本文件。
+  BUG_LIST: 'bug-list.json',
 
   // ── 文档（md）──
   REQUIREMENT_ANALYSIS: 'requirement-analysis.md',

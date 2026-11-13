@@ -31,6 +31,28 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
 失败时 `result._meta` 会带 `fixLoopAvailable: true` / `fixLoopSource: 'phase3'` /
 `fixLoopHint`，`dispatch.js` 据此把 `status` 输出成 `fix_loop`。
 
+## 验收通过后回写 TAPD（fixbugs 模式）
+
+Phase 3→4 门控通过（无 open BLOCKER）即视为「前端缺陷已修复」，此时才写回 TAPD ——
+Phase 0 故意不写，就是为了避免「先宣布修复、又被 fix-loop 打回」。
+
+```bash
+# 计划：按分类与验收结果算该给谁写什么（脚本统一判定，不要自己在 prompt 里按分类分支）
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --check-status-map '<状态映射 JSON>'
+# 用 fixed 模板写评论后登记凭证；只有 category=frontend 且验收通过才加 --status-changed
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind fixed --status-changed
+```
+
+| 情形 | 评论 | 改状态 |
+|------|------|--------|
+| `frontend` 且验收通过 | `fixed`（【前端已修复】…，待测试验证） | ✅ 置 `in_progress` |
+| `frontend` 但 fix-loop 用尽转人工 | `manual`（【未自动修复】…，已转人工） | ❌ |
+| `backend` / `collab` | Phase 0 已写过，此处不重复 | ❌ |
+
+- 状态 key 固定 `in_progress`（中文「接受/处理」）。写成 `resolved` 会直接关单，属事故
+  —— 状态映射校验不通过时，本轮跳过所有改状态动作并在报告里告警
+- 评论正文由 `tapd-writeback.buildComment` 生成：只写「现象 + 结论」，不贴代码 / diff / 文件路径
+
 ## 修复回路（fix-loop）
 
 主 Agent 只执行 `dispatch.js` 给的 `recovery.command`，全程由 `advance-phase.js --fix-loop` 编排：

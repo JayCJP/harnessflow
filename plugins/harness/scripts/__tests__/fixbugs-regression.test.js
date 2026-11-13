@@ -39,6 +39,10 @@ function writeReport (id, body) {
   fs.writeFileSync(path.join(storyDir(id), '测试需求_bug分析报告.md'), body)
 }
 
+function writeBugList (id, obj) {
+  fs.mkdirSync(storyDir(id), { recursive: true })
+  fs.writeFileSync(path.join(storyDir(id), 'bug-list.json'), JSON.stringify(obj, null, 2))
+}
 function readReport (id) {
   return fs.readFileSync(path.join(storyDir(id), '测试需求_bug分析报告.md'), 'utf-8')
 }
@@ -126,6 +130,40 @@ ok('越界仅警告，不阻断',
   !g3.blockers.some(b => /bug分析报告|修复建议/i.test(typeof b === 'string' ? b : (b.message || ''))))
 
 // ════════════════════════════════════════════════════════════
+section('2b. bug-list.json 门控（fixbugs 新增契约）')
+
+// 缺清单 -> BLOCKER（人读报告文件名含动态标题，程序读不到，必须靠固定文件名兜住）
+const gb0 = gate('FIX-1', 0)
+ok('缺 bug-list.json -> BLOCKER bug_list_missing',
+  gb0.blockers.some(b => b.type === 'bug_list_missing'))
+
+writeBugList('FIX-1', { bugs: [] })
+const gb1 = gate('FIX-1', 0)
+ok('bugs 为空 -> BLOCKER bug_list_empty', gb1.blockers.some(b => b.type === 'bug_list_empty'))
+
+writeBugList('FIX-1', { bugs: [{ bugId: '1218765', title: '会话窗口缺少草稿标识', status: 'new' }] })
+const gb2 = gate('FIX-1', 0)
+ok('缺 category -> BLOCKER bug_list_missing_category',
+  gb2.blockers.some(b => b.type === 'bug_list_missing_category'))
+
+writeBugList('FIX-1', { bugs: [{ bugId: '1218765', title: '会话窗口缺少草稿标识', status: 'new', category: 'frontend', commentCount: 3, commentDigest: '仅在 PC 端复现' }] })
+const gb3 = gate('FIX-1', 0)
+ok('合规清单 -> 无 bug-list 相关 blocker',
+  !gb3.blockers.some(b => String(b.type || '').startsWith('bug_list')))
+ok('合规清单 -> 无未读评论 warning', !gb3.warnings.some(w => /未读|get_comments/.test(w)))
+
+writeBugList('FIX-1', { bugs: [{ bugId: '1218790', title: '列表不显示草稿态', status: 'new', category: 'backend' }] })
+const gb4 = gate('FIX-1', 0)
+ok('无评论证据 -> 仅 WARNING 不阻断',
+  !gb4.blockers.some(b => String(b.type || '').startsWith('bug_list')) &&
+  gb4.warnings.some(w => /get_comments/.test(w)))
+
+// run 模式不受影响
+ok('run 模式不校验 bug-list', !gate('RUN-1', 0).blockers.some(b => String(b.type || '').startsWith('bug_list')))
+
+// ════════════════════════════════════════════════════════════
+section('2c. 前端缺陷排期覆盖（Phase 1→2）')
+// ════════════════════════════════════════════════════════════
 section('3. fixbugs prompt 注入')
 
 const p0 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 0 })
@@ -138,6 +176,9 @@ ok('P0 含「不写修复方案」', /不要写修复方案|不写修复方案|�
 // 只进 expectedDescriptions（prompt 文字）会导致漏检 —— 见 harness/SKILL.md
 ok('P0 expectedOutputs 含 bug分析报告', JSON.stringify(p0.expectedOutputs).includes('bug分析报告'))
 ok('P0 产出要求文字含 bug分析报告', p0.agentPrompt.includes('bug分析报告'))
+// bug-list.json 是 fixbugs 专属必需产出物，必须进 expectedOutputs（主 Agent 靠它校验汇报）
+ok('P0 expectedOutputs 含 bug-list.json', p0.expectedOutputs.includes('bug-list.json'))
+ok('P0 产出要求文字含 bug-list.json', p0.agentPrompt.includes('bug-list.json'))
 
 const p1 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 1 })
 ok('P1 不重复注入 story-input 原文', !p1.agentPrompt.includes('"tapdUrl"'))

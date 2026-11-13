@@ -25,29 +25,80 @@ description: >
 | 还没有 Story（`.codebuddy/plans/<storyId>/e2e-state.json` 不存在） | **入口 A：新建** |
 | 工作流已存在，或入口 A 刚启动完 | **入口 B：继续编排** |
 
+> ⚠️ 判这张表之前**先确认 storyId**：用户已经给了 id 且目录存在 → 直接进入口 B，
+> 不要因为「想重新开始」就新建一个。重复建 Story 是最常见的失控来源，见 A2。
+
 两套流程（run / fixbugs）走**同一条** 8 Phase 流水线。它们的全部差异都由脚本按
 `story-input.json` 自动处理（`getStoryMode` / `isPrototypeRequired` / `detectFigmaSource` /
 `prompt-builder` 的 mode 分支），**你不需要为两种模式做任何额外动作** —— 只要 mode 和 sources 写对。
 
 ### 入口 A：新建工作流
 
-三步：**判模式 → 写输入 → 启动**。
+四步：**判模式 → 定 storyId → 写输入 → 启动**。前两步都是「宁可多问一句，不要错判一次」。
 
-#### A1. 识别意图 —— 入口 A 里唯一需要判断的动作
+#### A1. 判模式 —— 入口 A 里唯一需要判断的动作
 
-| 信号 | 判定 |
-|------|------|
-| TAPD 链接 + 「修 / bug / 缺陷 / 反馈 / 报错 / 异常 / 不生效 / 白屏」 | `fixbugs` |
-| 明确的故障描述（现有功能坏了、行为不对） | `fixbugs` |
-| 原型链接 / Figma 链接 / 「新增 / 开发 / 实现 / 支持 / 做一个」 | `run` |
-| 两类信号并存，或都没有 | 用 `AskUserQuestion` 问一次，**不要猜** |
-| 用户拒答或仍无法判定 | 兜底 `run` |
+先问一句本质问题：**这件事的新增能力是什么？**
 
-**兜底为什么选 `run`**：误判成 `fixbugs` 会**静默**关掉 Figma 硬门控，UI 开发全程没有 frame 清单
-校验且没人会发现；误判成 `run` 只会在 Phase 0 门控处**显性**阻塞（要求原型分析 / featurePoints），
-一眼可见、一步可改。fail-loud 优于 fail-silent。
+| 本质 | 判定 | 典型信号 | 反例（看着像但不算） |
+|------|------|---------|---------------------|
+| **没有新增能力**，只是让已有的东西按原本该有的样子工作 | `fixbugs` | 报错 / 白屏 / 不生效 / 数值错 / 行为与预期不符 / TAPD 缺陷链接 / 「修一下」「这是 bug」 | 「优化一下这个页面的样式」——没有「坏了」的预期，属改善 |
+| **有新增能力**，用户能做的事变多了 | `run` | 新增 / 开发 / 实现 / 支持 / 做一个 / 加一个 / 原型链接 / Figma 链接 | 改个文案、调个色值 —— 改动小但确实是「以前没有的形态」 |
 
-#### A2. 写输入并启动
+**三分法（信号冲突时按这个顺序判）**：
+
+1. **有缺陷载体 → `fixbugs`**：TAPD 链接 / bug 单号 / 「测试提的」「反馈说」
+2. **有新增载体 → `run`**：原型链接 / Figma 链接 / PRD
+3. **只有自然语言 → 看动词**：「坏 / 错 / 不 / 失效 / 异常 / 崩」→ `fixbugs`；
+   「新 / 加 / 支持 / 实现 / 优化成」→ `run`
+
+**两类信号同时出现**（如「这个页面报错，顺便把新加的导出功能也做了」）：
+说明是两件事，**不要合并成一个 Story**。用 `AskUserQuestion` 问清「先修 bug 还是先做功能」，
+按用户选择只建一个，另一件单独再开一轮。
+
+**判不出来时**：用 `AskUserQuestion` 问一次，**不要猜**；用户拒答或仍无法判定 → 兜底 `run`。
+
+**兜底为什么选 `run`**：误判成 `fixbugs` 会**静默**关掉 Figma 硬门控与 `featurePoints` 功能点枚举
+（UI 开发全程没有 frame 清单校验、功能缺失也无人发现）；误判成 `run` 只会在 Phase 0 门控处
+**显性**阻塞（要求原型分析 / featurePoints），一眼可见、一步可改。fail-loud 优于 fail-silent。
+
+> 判错的代价不对称：`run` 判错会卡在门控（可救），`fixbugs` 判错会静默放行（不可救）。
+> 所以**拿不准就往 `run` 靠**。
+
+#### A2. 定 storyId —— 绝不轻易新建
+
+> 🚫 **默认动作是「复用」，不是「新建」。** 新建 Story 意味着一整套 e2e-state / plans 目录 /
+> 已产出的分析全部作废重来，代价远大于多问一句。
+
+**按以下顺序判定，命中即停：**
+
+| # | 情形 | 动作 |
+|---|------|------|
+| 1 | 用户消息里出现 storyId（`STORY-YYYYMMDD-NN` 或自定 id） | **直接用它**，不要「看起来像旧的就换个新的」 |
+| 2 | 用户给了 TAPD 链接 + 需求 id | 先查是否已有 Story 覆盖同一需求（`story-input.json` 的 `sources.storyIdInTapd`），命中则复用 |
+| 3 | `.codebuddy/plans/` 下存在同主题的 Story（标题相近 / 同一需求） | **列给用户选「复用 X 还是新建」**，不要自己决定 |
+| 4 | 当前有激活的 Story（`.harness-active` 存在） | 脚本会直接拒绝启动并提示先 `/end` —— **不要绕过，按提示处理** |
+| 5 | 确实全新 | 才新建。storyId **自己定**（如 `STORY-20261113-01`），不要省略让脚本自动生成 |
+
+**为什么必须自己定 storyId 而不是省略**：省略时脚本会生成 `STORY-YYYYMMDD-NN`，而
+`STORY_DIR` 需要提前知道才能写 `story-input.json` —— 拿不到目录就只能事后补救；
+且自动生成的 id 与用户口头提到的 id 对不上时，会变成两个 Story 各跑一半。
+
+**枚举已有 Story 的命令**（查同主题重复时用）：
+
+```bash
+ls ${CLAUDE_PROJECT_DIR}/.codebuddy/plans/                 # 全部 Story 目录
+cat ${CLAUDE_PROJECT_DIR}/.codebuddy/plans/.harness-active  # 当前激活的 Story（若存在）
+```
+
+**复用已有 Story 的做法**：不调用 `start`（那会被「工作流已存在」拒绝），直接进
+**入口 B 的三步循环** —— 它会自动接着当前 Phase 往下推。仅在需要更新输入时用
+`create-workflow.js <storyId> --refresh-input` 回填。
+
+> ⚠️ `createWorkflow` 遇到已存在的 storyId 会**报错拒绝**（不覆盖）。看到
+> 「工作流已存在」不要换 id 重试 —— 那是脚本在提醒你「这个 Story 已经有了，去接着跑」。
+
+#### A3. 写输入并启动
 
 `sources` 字段表、两个 JSON 样例、schema 约束、启动命令全部在 `references/启动入口.md` ——
 **现在 `read_file` 它**，按 Step 2A / 2B 执行。
@@ -177,6 +228,12 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 - 🚫 主 Agent 不直接写 / 改 Phase 契约产出物（`acceptance-criteria.json` / `task-dag.json` /
   `*-verification.json` 等）—— 门控校验的就是这些文件，主 Agent 手改等于自己放行；要改就派对应
   子 Agent 增量更新（P3-1，2026-09 实跑诊断：主 Agent 曾手改 AC/task-dag/自写 fix-verification）
+
+**入口判定的两条硬约束**:
+
+- 🚫 **不猜模式** —— 判不准就问，兜底选 `run`（误判成 fixbugs 会静默关闭 Figma 门控与功能点枚举）
+- 🚫 **不轻易新建 Story** —— 先复用、先问、先查 `.harness-active`；用户给了 storyId 就用它。
+  看到「工作流已存在」是脚本在让你去接着跑，不是让你换个 id 重来
 
 **职责不越界**（分析必须在子 Agent 上下文内完成）:
 

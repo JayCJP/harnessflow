@@ -77,7 +77,10 @@ const PHASE_ARTIFACTS = {
       { fileName: ARTIFACT.REQUIREMENT_ANALYSIS, description: '需求分析文档', contract: false },
       { fileName: ARTIFACT.ACCEPTANCE_CRITERIA, description: '验收标准契约', contract: true },
       { fileName: ARTIFACT.OPEN_QUESTIONS, description: '待确认项契约', contract: true },
-      { fileName: ARTIFACT.PROTOTYPE_ANALYSIS, description: '原型分析文档（有原型链接时产出）', contract: false, optional: true }
+      { fileName: ARTIFACT.PROTOTYPE_ANALYSIS, description: '原型分析文档（有原型链接时产出）', contract: false, optional: true },
+      // fixbugs 专有：结构化缺陷清单（TAPD 状态 + 分诊分类 + 评论摘要 + 回写凭证）。
+      // run 模式不产出，故不参与存在性门控；内容完整性由 policy.js 的 checkBugList 按 mode 判定。
+      { fileName: ARTIFACT.BUG_LIST, description: '缺陷清单契约（仅 fixbugs 模式）', contract: true, optional: true }
     ]
   },
   1: {

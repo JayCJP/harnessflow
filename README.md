@@ -293,7 +293,25 @@ node <插件安装路径>/plugins/harness/scripts/commands/create-workflow.js ST
 /harness fixbugs <storyId> "<标题>"
 ```
 
-Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 TAPD 缺陷并产出 Bug 分析报告。
+Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 TAPD 缺陷并产出两份产物：
+
+| 产物 | 读者 | 内容 |
+|------|------|------|
+| `{需求标题}_bug分析报告.md` | 人 | 问题复述、复现步骤、代码定位、根因、责任方分类 |
+| `bug-list.json` | 程序 | 每个缺陷的 TAPD 状态、分诊分类、评论摘要、回写凭证 |
+
+**Phase 0 会读每个缺陷的评论**（不论 `new` 还是 `reopened`）—— 测试常把复现环境、版本号写在评论里，
+只看描述会漏掉。评论要点落进 `bug-list.json` 的 `commentDigest`，后续 Phase 直接复用，不必再翻 TAPD。
+
+修复完成后按分类自动回写 TAPD：
+
+| 分类 | 动作 |
+|------|------|
+| `frontend` 且验收通过 | 写「已修复」评论 + 状态置 `in_progress` |
+| `frontend` 但修复回路用尽转人工 | 写「未自动修复」评论，**不改状态** |
+| `backend` / `collab` | Phase 0 分析完即写评论转交，**不改状态**（流转权归对方） |
+
+> 评论只写「现象 + 结论 + 需要谁做什么」，不贴代码、diff 或文件路径，总长 ≤ 120 字。
 
 ---
 
@@ -321,6 +339,8 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 - 🚫 **AI 不手改 `e2e-state.json` / `dev-pass.json`**。Phase 推进、dev-pass 签发/撤销全部由脚本完成，AI 只执行 `dispatch.js` / `advance-phase.js` 给出的指令。
 - 🚫 **AI 不替用户确认 `open-questions.json` 的待确认项**。建议稿只写 `resolution`；`confirmation` 字段（放行唯一依据）只经 `resolve-question.js` 在用户答复后写入，`resolved` 字段已废弃。
 - 🚫 **Phase ≠ 2 时不要编辑 `src/`**，Hook 守卫会直接拒绝。
+- 🚫 **不手写 `bug-list.json` 的 `writeback` 字段**。回写凭证（`commentedAt` / `commentKind`）只由
+  `tapd-writeback.js --record` 写入，它是跨轮去重的唯一依据；手写等于伪造「已回写」。
 
 ### 3. Figma 使用
 
@@ -330,16 +350,43 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 ### 4. run vs fixbugs 模式选择
 
-- **新功能 / 页面级改造** → `run`（有原型/Figma 门控、featurePoints 功能点枚举）
-- **缺陷修复** → `fixbugs`（免原型文档、Phase 0 产出 Bug 分析报告、后端类 Bug 自动转 open-questions）
-- 选错模式的后果：`fixbugs` 漏加 `--mode=fixbugs` 会退回 run，重新要求原型文档且不做 Bug 报告门控。
+判据只有一条：**这件事有没有新增能力？**
 
-### 5. 修复回路（fix-loop）
+- **让已有的东西按原本该有的样子工作** → `fixbugs`（免原型文档、Phase 0 产出 Bug 报告与 `bug-list.json`）
+- **用户能做的事变多了** → `run`（有原型/Figma 门控、featurePoints 功能点枚举）
+- 信号冲突时按顺序判：**有缺陷载体（TAPD 链接）→ fixbugs；有新增载体（原型/Figma）→ run；只有自然语言 → 看动词**
+
+**判错的代价不对称**，所以拿不准就往 `run` 靠：
+
+| 误判方向 | 后果 |
+|---------|------|
+| 误判成 `run` | Phase 0 门控**显性阻塞**（要求原型分析 / featurePoints），一眼可见、一步可改 |
+| 误判成 `fixbugs` | **静默**关闭 Figma 硬门控与功能点枚举，UI 没有 frame 校验、功能缺失也无人发现 |
+
+**同一条消息里既报错又要新功能**（如「这页报错，顺便把新加的导出做了」）时不合并：
+问清先后，只建一个 Story，另一件另开一轮。
+
+### 5. storyId 与重复建流
+
+> 🚫 **默认动作是「复用」，不是「新建」。** 重复建 Story 会让已有的分析、状态、产物全部作废。
+
+按顺序判定，命中即停：
+
+1. 用户消息里给了 storyId → **直接用它**
+2. 给了 TAPD 需求 id → 先查是否已有 Story 覆盖同一需求（`story-input.json` 的 `sources.storyIdInTapd`）
+3. `.codebuddy/plans/` 下有同主题 Story → **列给用户选**「复用还是新建」
+4. 当前有激活的 Story → 脚本会提示先 `/end`，按提示处理，不要绕过
+5. 确实全新 → 才新建，且**自己定 id**，不要省略让脚本自动生成
+
+**复用已有 Story 不要调 `start`** —— `createWorkflow` 对已存在的 storyId 会报「工作流已存在」并拒绝
+（这是防覆盖保护）。看到该提示的正确反应是回到三步循环接着跑，不是换个 id 重来。
+
+### 6. 修复回路（fix-loop）
 
 - 代码审查发现 BLOCKER（含 AC 未通过）时，工作流自动回退到 Phase 2 修复，重新签发 dev-pass。
 - **默认最多 2 轮**，超出后转人工介入。不要让 AI 无限重试空转。
 
-### 6. 知识库（KB）
+### 7. 知识库（KB）
 
 - 新项目先 `kb-init` 初始化知识库骨架（自动推断项目画像与业务域，前端项目带 `frontend/` 端层）。
 - 初始化后用 `gen-project-docs --all` 首次全量生成文档内容；后续单域改动可 `gen-project-docs <domain_id>` 重生成。
@@ -347,7 +394,7 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 - 任务完成后 `kb-update` 增量同步（基于 git diff 定位受影响域，AI 直接扫变更文件更新），保留手工批注，避免每次全量重写。
 - 生成归 `gen-project-docs`，增量归 `kb-update`——两者职责不重叠，触发词也不重叠。
 
-### 7. 多项目协作
+### 8. 多项目协作
 
 - 涉及多仓库时，需求分析师在 Phase 0 写入 story 级 `repos.json`（`primary` + `repos` 映射）。
 - 跨项目 task 的 `description` 必须含行号引用，便于开发工程师定位改动点。

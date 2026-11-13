@@ -790,6 +790,13 @@ function buildAgentPrompt (opts) {
   if (targetPhase === 0 && storyMode === 'fixbugs') {
     expectedOutputs.unshift('*bug分析报告.md')
     expectedDescriptions.unshift('{需求标题}_bug分析报告.md — Bug 事实记录（问题复述 + 复现步骤 + 代码定位 + 根因 + 责任方分类，不含修复方案）')
+    // bug-list.json 在 PHASE_ARTIFACTS 里是 optional（run 模式不产出），但 fixbugs 模式下必须产 ——
+    // 它是 bug 级状态的唯一结构化信源，Phase 0→1 门控按 mode 硬校验其存在性与内容完整性
+    expectedOutputs.unshift('bug-list.json')
+    expectedDescriptions.unshift(
+      'bug-list.json — 缺陷清单契约（每个 bug 的 bugId/title/status/category/commentCount/commentDigest；' +
+      'category=backend|collab 仅登记不排进开发任务）'
+    )
   }
 
   // A-4: 本 Phase 已有产出物 = 这不是首轮，而是门控未过后的返工/重试。

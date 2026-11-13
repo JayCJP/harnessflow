@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Bug List Schema",
+  "description": "fixbugs 模式的缺陷清单。Phase 0 产出，是 bug 级状态的唯一结构化信源。",
+  "type": "object",
+  "required": ["bugs"],
+  "properties": {
+    "bugs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["bugId", "title", "status", "category"],
+        "properties": {
+          "bugId": { "type": "string", "minLength": 1, "description": "TAPD 缺陷 ID" },
+          "title": { "type": "string", "minLength": 1, "description": "缺陷标题，原样照抄" },
+          "status": { "type": "string", "description": "TAPD 原始状态 key，不是本地进度" },
+          "category": {
+            "type": "string",
+            "enum": ["frontend", "backend", "collab"],
+            "description": "分诊结论；backend/collab 只写评论不改状态"
+          },
+          "commentCount": { "type": "integer", "minimum": 0, "description": "本次读到的评论条数" },
+          "commentDigest": { "type": "string", "description": "评论要点一句话（已读评论的证据）" },
+          "writeback": {
+            "type": "object",
+            "description": "回写凭证（只由 tapd-writeback.js 写，Agent 不得手写），用于跨轮去重",
+            "required": ["commentedAt", "commentKind"],
+            "properties": {
+              "commentedAt": { "type": "string" },
+              "statusChangedAt": { "type": "string" },
+              "commentKind": { "type": "string", "enum": ["fixed", "to_backend", "to_collab", "manual"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

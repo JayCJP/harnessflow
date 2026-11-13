@@ -21,6 +21,24 @@ Agent 内部需调用 `use_skill("kb-query")` 检索项目知识库。
 | `open-questions.json` | ✅ | 必需 |
 | `prototype-analysis.md` | — | 仅当 `gateChecks.prototypeRequired=true` |
 | `{标题}_bug分析报告.md` | — | 仅 `mode=fixbugs`；**prompt 级要求，非门控项**（见下） |
+| `bug-list.json` | ✅ | 仅 `mode=fixbugs`；**门控项**，见「缺陷清单契约」 |
+
+### 缺陷清单契约 `bug-list.json`（fixbugs 模式）
+
+Phase 0 的 bug 级状态唯一结构化信源。人读的 `*_bug分析报告.md` 是它的投影 ——
+报告文件名含动态标题，程序读不了，所以「分析了哪几个 bug / 各自该谁修 / 是否读过评论」
+必须落到这个固定文件名上。
+
+| 字段 | 含义 |
+|------|------|
+| `bugId` / `title` / `status` | TAPD 原样搬运，`status` 是 TAPD 原始 key 不是本地进度 |
+| `category` | `frontend` / `backend` / `collab`，决定进不进开发任务 |
+| `commentCount` / `commentDigest` / `lastCommentAt` | 评论读取证据（**每个缺陷必读评论**，不看状态） |
+| `fingerprint` | 标题 40 字 + 描述 200 字的 hash，用于识别同一缺陷是否变化 |
+| `linked` | 是否排进本次修复范围，backend / collab 通常 `false` |
+| `writeback` | 回写凭证，**只由 `tapd-writeback.js --record` 写，Agent 不得手写** |
+
+Schema 见 `scripts/schemas/bug-list.schema.json`，产出方式见 `tapd-bug-analyzer` 的 5.2 节。
 
 `prototypeRequired` 由 `state.js:isPrototypeRequired()` 判定：fixbugs 恒 false；
 run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
@@ -45,6 +63,10 @@ run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
 | **run 模式** 功能点 `coverage:"deferred"` 却没写 `deferredReason` | BLOCKER (2) | `prd_coverage_missing` |
 | **run 模式** 功能点 `covered` 却 `acIds` 为空，或引用了不存在的 AC | BLOCKER (2) | `prd_coverage_missing` |
 | **fixbugs 模式** Bug 分析报告含修复方案类章节（修复建议/解决方案/测试验证等标题行） | WARNING | — |
+| **fixbugs 模式** `bug-list.json` 不存在 | BLOCKER (2) | `bug_list_missing` |
+| **fixbugs 模式** `bug-list.json` 的 `bugs` 数组为空 | BLOCKER (2) | `bug_list_empty` |
+| **fixbugs 模式** 某缺陷缺 `category` | BLOCKER (2) | `bug_list_missing_category` |
+| **fixbugs 模式** 某缺陷既无 `commentCount` 也无 `commentDigest`（疑似未读评论） | WARNING | — |
 
 ⚠️ `featurePoints` 是 run 模式的硬要求，`fixbugs` 不要求（Bug 修复没有 PRD 功能点可枚举）。
 它的存在理由：门控原先只能校验「已写下的 AC 是否格式合规」，发现不了「整条功能压根没进 AC」。
@@ -67,6 +89,22 @@ Figma frame-inventory **不在本门控校验** —— 由 Phase 1 任务规划�
 `open-questions.json`（schema: `scripts/schemas/open-questions.schema.json`）：
 `resolved` 字段已废弃（门控不读）；每条 question 须含建议稿 `resolution` + `resolutionSource`；
 **确认的唯一载体是 `confirmation` 字段**，约定由 `resolve-question.js` 在用户答复后写入，AI 不得自行填写。
+
+## 分类后立即回写 TAPD（fixbugs 模式）
+
+分类为 `backend` / `collab` 的缺陷，**分析完就写评论告知相关方**，不要等修复流程走完：
+
+```bash
+# 1. 首次校验状态映射（本轮只需一次）
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --check-status-map '<get_workflows_status_map 返回 JSON>'
+# 2. 用 create_comments 发出评论（正文由 tapd-writeback.buildComment 生成，勿自行措辞）
+# 3. 登记回写凭证（跨轮去重依据）
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind to_backend
+```
+
+- `frontend` 缺陷**此时不写评论** —— 等 Phase 3 验收通过后统一写，避免先写「已修复」又被打回
+- 评论只写「现象 + 结论 + 需要谁做什么」，不贴代码 / diff / 文件路径 / 函数名，总长 ≤ 120 字
+- `backend` / `collab` **不改 TAPD 状态**，流转权归对方
 
 ## 常见失败与对策
 

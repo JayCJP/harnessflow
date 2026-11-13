@@ -135,12 +135,20 @@ get_bug_count → get_bug(current_owner + 状态筛选，分页拉取)
 
 对每个过滤后的 bug 调用：
 
-| MCP 工具 | 用途 |
-|----------|------|
-| `get_comments` | 读取评论（开发讨论、处理记录，常含复现条件） |
-| `get_entity_attachments` | 获取附件（日志、截图文件） |
-| `get_image` | 获取截图（如有图片引用） |
-| `get_entity_custom_fields` | 自定义字段（如终端类型、严重级别） |
+| MCP 工具 | 必做 | 落进 bug-list.json 的字段 |
+|----------|:---:|--------------------------|
+| `get_bug` | ✅ | `status` / `title` / `description` |
+| `get_comments` | ✅ **无条件** | `commentCount` / `lastCommentAt` / `commentDigest` |
+| `get_entity_attachments` | 有则读 | 截图/日志要点写进报告正文 |
+| `get_image` | 有则读 | 同上 |
+| `get_entity_custom_fields` | 有则读 | 终端类型 / 严重级别 |
+
+> **评论必须读，不看状态**。不论 `new` 还是 `reopened`，进 Phase 0 就要读评论：
+> 测试往往只改状态、把复现信息（环境域名、版本号、录屏）写在评论里，`description` 里没有。
+> 按状态决定读不读，会让「new 但有补充评论」的缺陷漏掉全部新信息。
+>
+> `commentDigest` 写一句话要点；确实没评论时写 `commentCount: 0` 并留空 digest ——
+> **留空可以，不读不行**（Phase 0→1 门控会对此记 warning）。
 
 ### Step 4：逐条采集事实
 
@@ -223,14 +231,61 @@ kb-query ∥ graphify  →  交叉验证  →  search_content 兜底
 
 > 分类只判断「该谁改」，不判断「怎么改」。后端类问题标注清楚后，需求分析师会把它转成 `open-questions.json` 的待确认项，而不是排进前端开发任务。
 
-#### 5.2 输出路径
+#### 5.2 输出路径（两个文件，缺一不可）
 
 ```
-${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告.md
+${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告.md   ← 人读，事实记录
+${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/bug-list.json                 ← 程序读，唯一结构化信源
 ```
 
-> 文件名使用 `get_stories_or_tasks` 返回的需求标题，非法字符替换为 `_`。
+> 报告文件名使用 `get_stories_or_tasks` 返回的需求标题，非法字符替换为 `_`。
 > 后缀必须是 `_bug分析报告.md` —— `prompt-builder.js` 与门控校验都按此后缀自动发现该文件。
+>
+> `bug-list.json` 是 **fixbugs 模式的必需产出物**（Phase 0→1 门控硬校验），格式见
+> `scripts/schemas/bug-list.schema.json`。职责切分：报告给人看（复现步骤、数据流、代码定位），
+> 清单给程序读（状态、分类、评论证据、回写凭证）。**两边信息不能互相缺失**：报告里有的
+> 缺陷必须在清单里有一条，清单里的 `category` 必须与报告的分类章节一致。
+
+`bug-list.json` 最小样例：
+
+```json
+{
+  "syncedAt": "2026-11-13T10:20:00+08:00",
+  "bugs": [
+    {
+      "bugId": "1218765",
+      "title": "会话窗口缺少工单草稿标识",
+      "status": "new",
+      "category": "frontend",
+      "fingerprint": "a1b2c3d4",
+      "commentCount": 3,
+      "commentDigest": "测试补充：仅在 PC 端复现，H5 正常",
+      "lastCommentAt": "2026-11-12T15:30:00+08:00",
+      "linked": true
+    },
+    {
+      "bugId": "1218790",
+      "title": "工单列表不显示草稿状态",
+      "status": "new",
+      "category": "backend",
+      "commentCount": 0,
+      "linked": false
+    }
+  ]
+}
+```
+
+字段口径：
+
+| 字段 | 含义 | 注意 |
+|------|------|------|
+| `status` | TAPD **原始状态**（new / reopened / in_progress…） | 不是本地修复进度 |
+| `category` | 分诊结论 frontend / backend / collab | 与 5.1 的分类对应关系见下 |
+| `linked` | 是否排进本次修复范围 | backend / collab 通常 `false` |
+| `writeback` | 回写凭证（由 `tapd-writeback.js --record` 写） | **需求分析师不要手写此字段** |
+
+分类映射（5.1 → `category`）：`前端-Bug` / `前端-体验` → `frontend`；
+`后端-Bug` / `后端-缺失` → `backend`；`协作-联调` → `collab`。
 
 #### 5.3 报告文件结构
 
@@ -281,6 +336,35 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 > 🚫 报告中不得出现 `#### 修复建议`、`#### 解决方案`、`#### 测试验证` 等章节。
 > Phase 0→1 门控（`policy.js`）会扫描标题行，命中时输出 warning。
 
+#### 5.4 TAPD 回写（分类后立即做，只对 backend / collab）
+
+需求分析师产出清单后，**本轮不修的前端之外缺陷要立刻告知相关方**，不要等修复流程走完。
+
+| 分类 | 动作 |
+|------|------|
+| `backend` | `create_comments` 写「转后端」评论，**不改状态** |
+| `collab` | `create_comments` 写「待联调」评论，**不改状态** |
+| `frontend` | **此处不写评论** —— 等 Phase 3 验收通过后统一写（避免先写「已修复」又被打回） |
+
+评论正文由脚本生成，**不要自己组织措辞**：
+
+```bash
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --check-status-map '<get_workflows_status_map 的返回 JSON>'
+```
+
+拿到脚本的 `buildComment` 编号后按模板填三个字段（现象 / 前端已排除 / 需要后端），
+再用 `create_comments` 发出，最后登记凭证：
+
+```bash
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind to_backend
+```
+
+评论硬约束（脚本注释里也有）：
+
+- **不贴代码、不贴 diff、不列文件路径、不写函数名** —— 后端要的是「现象 + 需要改什么」
+- 每段一句话，总长 ≤ 120 字
+- 同一 bug 同一结论只写一次；`--record` 落的 `writeback.commentedAt` 就是去重凭证
+
 ---
 
 ## 工具参考
@@ -293,7 +377,10 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/{storyTitle}_bug分析报告
 | `get_bug_count` | 统计缺陷数量 |
 | `get_related_bugs` | 查询需求关联的 bug_id 列表 |
 | `get_stories_or_tasks` | 查询需求详情（获取标题） |
-| `get_comments` | 读取缺陷评论 |
+| `get_comments` | 读取缺陷评论（**每个缺陷必读**，也是写评论前的去重依据） |
+| `create_comments` | 写评论（转后端 / 待联调场景） |
+| `update_bug` | 改状态（**仅前端缺陷且验收通过**时置 `in_progress`） |
+| `get_workflows_status_map` | 校验状态 key 与中文名是否匹配（首次调用一次） |
 | `get_entity_attachments` | 获取附件列表 |
 | `get_image` | 获取截图/图片 |
 | `get_entity_custom_fields` | 自定义字段配置 |

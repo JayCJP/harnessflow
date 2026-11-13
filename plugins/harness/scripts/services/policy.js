@@ -134,6 +134,30 @@ const RECOVERY_SUGGESTIONS = {
     action: '验收标准 ID 必须唯一，请检查并修正重复 ID',
     autoFixable: false
   },
+  // Phase 0→1（fixbugs）: 缺陷清单缺失
+  bug_list_missing: {
+    level: 2,
+    action: 'fixbugs 模式必须在 Phase 0 产出 bug-list.json（缺陷清单唯一结构化信源）—— 由需求分析师写入，格式见 schemas/bug-list.schema.json',
+    autoFixable: false
+  },
+  // Phase 0→1（fixbugs）: 缺陷清单为空
+  bug_list_empty: {
+    level: 2,
+    action: 'bug-list.json 的 bugs 数组为空 —— 查到的每个缺陷都要登记；确实 0 条时写空数组并说明，不要留空文件',
+    autoFixable: false
+  },
+  // Phase 0→1（fixbugs）: 缺陷未分诊
+  bug_list_missing_category: {
+    level: 2,
+    action: '为 bug-list.json 中每个缺陷补 category（frontend / backend / collab）。推断不出时归 collab，不允许凭感觉归 backend',
+    autoFixable: false
+  },
+  // Phase 1→2（fixbugs）: 前端缺陷未排进 task-dag
+  bug_not_scheduled: {
+    level: 2,
+    action: '为未承接的缺陷在 task-dag.json 补 task（带 bugId 字段，或在 title/description 中写缺陷编号）；判定本轮不修的，改 bug-list.json 的 linked=false 并写明原因',
+    autoFixable: false
+  },
   // Phase 1→2: Figma frame 缺少 id/name/link/type
   figma_frame_incomplete: {
     level: 2,
@@ -508,6 +532,76 @@ function checkPhase0Gate (storyId, state, result) {
 
   // Bug 分析报告越界章节扫描（fixbugs 模式，warning 级；存在性不设门控）
   checkBugReportScope(storyId, result)
+
+  // 缺陷清单契约（fixbugs 模式，BLOCKER 级）—— bug 级状态的唯一结构化信源
+  checkBugList(storyId, result)
+}
+
+/**
+ * Phase 0→1（fixbugs 模式）: 缺陷清单契约校验
+ *
+ * 为什么必须有: 人读的 *_bug分析报告.md 文件名含动态标题，程序读不了，导致
+ *   「分析了哪几个 bug / 各自该谁修 / 是否读过评论」只存在于 LLM 的散文里。
+ *   bug-list.json 把这三件事变成可校验的结构化事实。
+ *
+ * 设计取舍:
+ *   - 只校验结构与分诊结论，不校验 TAPD 数据真实性（那只有 TAPD 说了算）
+ *   - commentCount=0 且无 commentDigest 只记 warning：该缺陷可能确实无评论，
+ *     不能因为「没人评论」卡住流程
+ *   - run 模式完全跳过本检查（bug-list 是 fixbugs 专有产出物）
+ *
+ * @param {string} storyId - Story ID
+ * @param {Object} result - runGateCheck 的累积结果
+ * @returns {void}
+ */
+function checkBugList (storyId, result) {
+  if (getStoryMode(storyId) !== 'fixbugs') return
+
+  const list = readJsonArtifact(storyId, ARTIFACT.BUG_LIST)
+  if (!list) {
+    result.blockers.push(structuredError(
+      'bug_list_missing',
+      'fixbugs 模式缺少 bug-list.json：缺陷清单是 bug 级状态的唯一结构化信源',
+      2,
+      '由需求分析师在 Phase 0 产出 bug-list.json，每项含 bugId/title/status/category/commentCount/commentDigest，格式见 schemas/bug-list.schema.json'
+    ))
+    result.passed = false
+    return
+  }
+  if (list._parseError) return // 解析失败由 schema 校验产出 json_parse_error
+
+  const bugs = Array.isArray(list.bugs) ? list.bugs : []
+  if (bugs.length === 0) {
+    result.blockers.push(structuredError(
+      'bug_list_empty',
+      'bug-list.json 的 bugs 数组为空：fixbugs 模式进入 Phase 0 时必然已命中缺陷，空清单说明清单没写',
+      2,
+      '补写命中集合（每个缺陷一条）；若确实一条都没命中，说明不该以 fixbugs 模式建流，应由主 Agent 确认后结束工作流'
+    ))
+    result.passed = false
+    return
+  }
+
+  const noCategory = bugs.filter(b => !b.category).map(b => b.bugId || '?')
+  if (noCategory.length > 0) {
+    result.blockers.push(structuredError(
+      'bug_list_missing_category',
+      `bug-list.json 有 ${noCategory.length} 个缺陷未分诊（缺 category）: ${noCategory.slice(0, 5).join(', ')}`,
+      2,
+      '为每个缺陷补 category（frontend / backend / collab）。分诊是事实判断，推断不出时归 collab，不要凭感觉甩给后端'
+    ))
+    result.passed = false
+  }
+
+  // 评论读取证据：需求分析师必须读过评论（Phase 0 无条件读）
+  const noCommentTrace = bugs.filter(b => !(b.commentCount > 0) && !b.commentDigest)
+  if (noCommentTrace.length > 0) {
+    result.warnings.push(
+      `bug-list.json 有 ${noCommentTrace.length} 个缺陷既无评论条数也无评论摘要: ` +
+      noCommentTrace.map(b => b.bugId || '?').slice(0, 5).join(', ') +
+      ' —— 若确无评论可忽略；否则说明 Phase 0 未读 get_comments（每个缺陷都必须读一次评论）'
+    )
+  }
 }
 
 /**
@@ -696,6 +790,62 @@ function checkPhase1Gate (storyId, state, result) {
         figmaRef.unmatched.map(u => `${u.taskId}(${u.title})`).join(', ')
       )
     }
+  }
+
+  // 前端缺陷排期覆盖（fixbugs 模式）
+  checkBugScheduling(storyId, result)
+}
+
+/**
+ * Phase 1→2（fixbugs 模式）: 前端缺陷是否都排进了开发任务
+ *
+ * 历史缺陷形态: bug 分析报告里列了 5 个前端缺陷，task-dag 只排了 3 个，
+ *   剩下 2 个静默消失在报告里 —— 报告是散文，没有任何程序能发现漏排。
+ *
+ * 判定方式: bug-list.json 中 category=frontend 的每个 bugId，必须被至少一个
+ *   task（task-dag.json 的 tasks[].bugId 或 title/description 中出现该 id）承接。
+ *   不要求 task 结构新增必填字段（存量 task-dag 不受影响），只要求「能被找到」。
+ *
+ * @param {string} storyId - Story ID
+ * @param {Object} result - runGateCheck 的累积结果
+ * @returns {void}
+ */
+function checkBugScheduling (storyId, result) {
+  if (getStoryMode(storyId) !== 'fixbugs') return
+
+  const list = readJsonArtifact(storyId, ARTIFACT.BUG_LIST)
+  if (!list || list._parseError || !Array.isArray(list.bugs)) return
+
+  const frontendBugs = list.bugs.filter(b => b.category === 'frontend' && b.bugId)
+  if (frontendBugs.length === 0) return
+
+  const dag = readJsonArtifact(storyId, ARTIFACT.TASK_DAG_JSON)
+  if (!dag || dag._parseError || !Array.isArray(dag.tasks)) return // 缺失由 artifact_missing 覆盖
+
+  const haystack = dag.tasks.map(t => [
+    t.bugId || '',
+    t.id || '',
+    t.title || '',
+    t.description || ''
+  ].join(' ')).join('\n')
+
+  // 边界匹配而非子串包含: includes('1218765') 会把 '12187651' 误判成已排期，
+  // 导致漏排的缺陷静默通过。要求左右都不是数字才算命中。
+  const isScheduled = (bugId) => new RegExp(`(?<!\\d)${String(bugId)}(?!\\d)`).test(haystack)
+
+  const notScheduled = frontendBugs
+    .filter(b => !isScheduled(b.bugId))
+    .map(b => b.bugId)
+
+  if (notScheduled.length > 0) {
+    result.blockers.push(structuredError(
+      'bug_not_scheduled',
+      `${notScheduled.length} 个前端缺陷未被任何 task 承接: ${notScheduled.slice(0, 5).join(', ')}`,
+      2,
+      '在 task-dag.json 的对应 task 上补 bugId 字段，或在该 task 的 title/description 中带上缺陷编号；' +
+      '若判定该缺陷本轮不修，改 bug-list.json 的 category 或 linked=false 并说明原因'
+    ))
+    result.passed = false
   }
 }
 

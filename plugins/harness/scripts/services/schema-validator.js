@@ -57,7 +57,10 @@ const SCHEMA_MAP = {
   'fix-verification.schema.json': 'fix-verification.json',
   // story-input.json 不是 Phase 产出物，不进 getPhaseArtifacts，因此注册它不改变任何门控行为；
   // 注册的目的是让 create-workflow.js 的 --input ingest 能在建流前用 validateFile 校验它。
-  'story-input.schema.json': 'story-input.json'
+  'story-input.schema.json': 'story-input.json',
+  // bug-list.json 只在 fixbugs 模式的 Phase 0 需要，条件性不做存在性强校验，
+  // 由 policy.js 的 checkBugList 按 story mode 判定；注册它让格式能走统一 schema 校验。
+  'bug-list.schema.json': 'bug-list.json'
 }
 
 /** 缓存已编译的 schema 校验器 */
@@ -249,7 +252,7 @@ function validateArtifacts (storyId, artifactFileNames) {
  */
 function getPhaseArtifacts (phaseNum) {
   const phaseArtifacts = {
-    0: ['acceptance-criteria.json', 'open-questions.json'],
+    0: ['acceptance-criteria.json', 'open-questions.json', 'bug-list.json'],
     1: ['task-dag.json'],
     2: [],
     3: ['code-review.json'],
