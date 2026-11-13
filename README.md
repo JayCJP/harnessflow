@@ -93,7 +93,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Start(["/harness start"])
+    Start(["/start"])
     Input["写 story-input.json"]
     Refresh["create-workflow --refresh-input<br/>回填原型 / Figma 判定"]
     Dispatch{"dispatch.js<br/>读状态 + 判门控"}
@@ -161,12 +161,12 @@ AI 修改 `src/` 代码受 dev-pass 通行证约束，仅在开发阶段由脚�
 
 四个 skill 按职责边界划分，覆盖知识库全生命周期：
 
-| Skill | 职责 | 何时用 |
-|-------|------|--------|
-| `kb-init` | 初始化骨架——自动推断项目画像与业务域，创建目录结构 + meta.yaml + 编码规范骨架 | 新项目首次初始化 |
-| `gen-project-docs` | 全量/单域**生成**文档——扫描源码生成 overview/architecture/api 等内容 | kb-init 后首次填充、手动重建某域、新鲜度检测 |
-| `kb-query` | 分层检索——L1 overview 关键词 → L2 meta.yaml → L3 域文档 | 需求分析/改代码前自动注入历史教训 |
-| `kb-update` | **增量**更新——基于 git diff 定位受影响域，AI 直接扫变更文件更新 | 任务完成后自动同步，保留手工批注 |
+| Skill | 调用 | 职责 | 何时用 |
+|-------|------|------|--------|
+| `kb-init` | `/kb-init` | 初始化骨架——自动推断项目画像与业务域，创建目录结构 + meta.yaml + 编码规范骨架 | 新项目首次初始化 |
+| `gen-project-docs` | `/gen-project-docs` | 全量/单域**生成**文档——扫描源码生成 overview/architecture/api 等内容 | kb-init 后首次填充、手动重建某域、新鲜度检测 |
+| `kb-query` | `/kb-query` | 分层检索——L1 overview 关键词 → L2 meta.yaml → L3 域文档 | 需求分析/改代码前自动注入历史教训 |
+| `kb-update` | `/kb-update` | **增量**更新——基于 git diff 定位受影响域，AI 直接扫变更文件更新 | 任务完成后自动同步，保留手工批注 |
 
 **布局策略**：前端项目默认带 `frontend/` 端层布局（`.docs/llm-knowledge/frontend/`，参照真实多端项目标杆，可扩展 `h5/`、`miniprogram/` 端层）；插件/后端/库为扁平布局（`.docs/llm-knowledge/`）。`kb-init.cjs` 按 `project_type` 自动决定，`gen-docs.cjs` / `kb-update.cjs` 自动探测 KB 根。
 
@@ -260,7 +260,7 @@ playwright-cli --version    # 需 ≥ 0.1.17
 ### 场景 A：新功能开发
 
 ```bash
-/harness start STORY-001 "1v1客服等级分配模式"
+/start STORY-001 "1v1客服等级分配模式"
 ```
 
 然后在 `.codebuddy/plans/STORY-001/story-input.json` 写入原始输入：
@@ -290,7 +290,7 @@ node <插件安装路径>/plugins/harness/scripts/commands/create-workflow.js ST
 ### 场景 B：Bug 修复
 
 ```bash
-/harness fixbugs <storyId> "<标题>"
+/start <storyId> "<标题>"   # 模式由输入内容判定（缺陷 → fixbugs）
 ```
 
 Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 TAPD 缺陷并产出两份产物：
@@ -319,10 +319,10 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 
 | 命令 | 说明 |
 | --- | --- |
-| `/harness run` | 执行端到端开发工作流（7 Phase 全流程） |
-| `/harness fixbugs` | 针对缺陷做根因分析并自动修复（免原型文档） |
-| `/harness evolve` | 触发插件自进化体检（audit → 度量 → 诊断 → 治疗 → 验证） |
-| `/harness archive` | 归档已完成的迭代 / 任务 |
+| `/start` | 启动 / 推进工作流；新功能与 Bug 修复同一个入口，模式按输入判定 |
+| `/end` | 结束当前工作流（解除 src/ 编辑限制） |
+| `/evolve` | 触发插件自进化体检（audit → 度量 → 诊断 → 治疗 → 验证） |
+| `/archive` | 归档已完成的迭代 / 任务 |
 
 > 定时巡检缺陷不用命令，直接说「给这个需求建个定时修复 bug 的任务」并给出 TAPD 链接，
 > 见下方[定时任务](#定时任务tapd-缺陷巡检)章节。
@@ -336,7 +336,7 @@ Bug 修复模式免原型文档要求，Phase 0 需求分析师会自动拉取 T
 | 模式 | 做什么 | 副作用 |
 |------|--------|--------|
 | **只查** | 查询并输出缺陷清单 | 无（全程只读） |
-| **自动修复** | 命中后交给 `/start fixbugs` 走完整 7 Phase 流水线 | 改代码 + 写 TAPD 评论 + 改状态 |
+| **自动修复** | 命中后交给 `/start` 走完整 7 Phase 流水线 | 改代码 + 写 TAPD 评论 + 改状态 |
 
 **自动修复模式不自己实现修复** —— 分析、门控、dev-pass、验收、TAPD 回写全部由 harness 负责，
 定时任务只决定「何时触发」。
@@ -443,10 +443,10 @@ TAPD 只说「现在是 reopened」，不说「是不是我修出来的」。判
 
 ### 7. 知识库（KB）
 
-- 新项目先 `kb-init` 初始化知识库骨架（自动推断项目画像与业务域，前端项目带 `frontend/` 端层）。
-- 初始化后用 `gen-project-docs --all` 首次全量生成文档内容；后续单域改动可 `gen-project-docs <domain_id>` 重生成。
-- 需求分析/改代码前用 `kb-query` 分层检索，历史教训会自动注入各 Phase 的 prompt。
-- 任务完成后 `kb-update` 增量同步（基于 git diff 定位受影响域，AI 直接扫变更文件更新），保留手工批注，避免每次全量重写。
+- 新项目先 `/kb-init` 初始化知识库骨架（自动推断项目画像与业务域，前端项目带 `frontend/` 端层）。
+- 初始化后用 `/gen-project-docs --all` 首次全量生成文档内容；后续单域改动可 `/gen-project-docs <domain_id>` 重生成。
+- 需求分析/改代码前用 `/kb-query` 分层检索，历史教训会自动注入各 Phase 的 prompt。
+- 任务完成后 `/kb-update` 增量同步（基于 git diff 定位受影响域，AI 直接扫变更文件更新），保留手工批注，避免每次全量重写。
 - 生成归 `gen-project-docs`，增量归 `kb-update`——两者职责不重叠，触发词也不重叠。
 
 ### 8. 多项目协作
