@@ -198,4 +198,3 @@ ok('回写凭证可被回读', JSON.parse(fsx.readFileSync(wbPath, 'utf-8')).bug
 
 // ════════════════════════════════════════════════════════════
 summarize(sandbox)
-
