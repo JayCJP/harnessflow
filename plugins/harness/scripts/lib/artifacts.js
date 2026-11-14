@@ -54,6 +54,9 @@ const ARTIFACT = {
   E2E_STATE: 'e2e-state.json',
   REPOS: 'repos.json',
   DEV_PASS: 'dev-pass.json',
+  // Story 身份卡：建流时写入，归档时**不移动**（保留 storyId / TAPD 需求 / 工作区等信息，
+  // 归档后 root 只剩它和 archive/）。不受 archive-story.js 的 root 清空影响。
+  STORY_INFO: 'story-info.json',
   // 范围外改动清单：由 policy.js 在 Phase 2→3 门控生成，交 Phase 3 审查核对
   SCOPE_AMENDMENTS: 'scope-amendments.json',
 

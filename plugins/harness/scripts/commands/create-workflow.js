@@ -73,6 +73,7 @@ const {
 } = require('../lib/state')
 const { validateFile } = require('../services/schema-validator')
 const debugLog = require('../lib/debug-log')
+const { ensureStoryInfo, refreshStoryInfoSources, getStoryInfoPath } = require('../lib/story-info')
 
 /**
  * 摘取 `--flag=<value>` / `--flag <value>` 两种形式的 flag 值
@@ -340,6 +341,22 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode, opts = {}) {
   writeStateFile(storyId, state)
   const stateFilePath = path.join(PLANS_DIR, storyId, 'e2e-state.json')
 
+  // 5b. 写入 Story 身份卡（归档时不被移动，用于归档后查询 TAPD 需求 / 工作区 / 仓库）
+  //     sources 来自刚刚摄入的 story-input.json；若走旧通道（之后才写 story-input.json），
+  //     sources 先留空，由 --refresh-input 补全
+  let storyInput = null
+  if (storyInputFile) {
+    try {
+      storyInput = JSON.parse(fs.readFileSync(storyInputFile, 'utf-8'))
+    } catch (e) { storyInput = null } // 已过 schema 校验，读失败只会是 IO 抖动，身份卡留空由 --refresh-input 补
+  }
+  ensureStoryInfo(storyId, {
+    title,
+    mode: workflowMode,
+    phase: initialPhase,
+    sources: storyInput ? storyInput.sources : null
+  })
+
   // 6. bypass 模式下签发 dev-pass
   if (bypass) {
     issueDevPass(storyId)
@@ -355,6 +372,7 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode, opts = {}) {
     prototypeRequired: protoRequired.required,
     hasFigmaDesign: figma.enabled,
     stateFile: stateFilePath,
+    storyInfoFile: getStoryInfoPath(storyId),
     storyInputFile,
     message: bypass
       ? '✅ 工作流已创建（bypass 模式），直接进入 Phase 2 (代码开发)，dev-pass 已签发'
@@ -412,12 +430,26 @@ function refreshStoryInput (storyId, hasFigmaFlag = false) {
   state.updatedAt = new Date().toISOString()
   writeStateFile(storyId, state)
 
+  // 同步身份卡: 旧通道下 story-input.json 在 createWorkflow 之后才写入，
+  // 此时身份卡的 sources 为空，这里把 TAPD 需求 / 工作区 / 设计稿链接补进去
+  let storyInfoUpdated = false
+  try {
+    const inputPath = path.join(PLANS_DIR, storyId, STORY_INPUT_FILE)
+    if (fs.existsSync(inputPath)) {
+      const input = JSON.parse(fs.readFileSync(inputPath, 'utf-8'))
+      storyInfoUpdated = refreshStoryInfoSources(storyId, input.sources).updated
+    }
+  } catch (e) {
+    // 身份卡补全失败不阻断判定回填 —— 身份卡只是长期信息，不是门控输入
+  }
+
   const changed = before.proto !== protoRequired.required || before.figma !== figma.enabled
   return {
     success: true,
     storyId,
     prototypeRequired: protoRequired.required,
     hasFigmaDesign: figma.enabled,
+    storyInfoUpdated,
     message: `${changed ? '✅ 判定已更新' : 'ℹ️ 判定无变化'}（mode=${workflowMode}）` +
       `\n   原型文档: ${protoRequired.required ? '必需' : '免除'} — ${protoRequired.reason}` +
       `\n   Figma 门控: ${figma.enabled ? '开启' : '关闭'} — ${figma.reason}`

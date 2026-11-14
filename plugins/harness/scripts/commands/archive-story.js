@@ -3,7 +3,8 @@
  * archive-story.js — Story 归档（清空 root）与复档（复原 root）
  *
  * 职责:
- *   - archive: 把 Story 根目录所有文件移入 archive/round-{N}/，清空 root 目录
+ *   - archive: 把 Story 根目录除保留文件（story-info.json / debug.jsonl）外的全部文件
+ *     移入 archive/round-{N}/；保留文件原地不动，归档后 root 只剩它们
  *   - restore: 把指定轮次的归档文件恢复到 Story 根目录
  *   - list: 列出所有归档轮次（文件数、体积、当时到达的 Phase）
  *   - status: 查询当前是否处于归档状态及归档轮次信息
@@ -35,7 +36,11 @@
  * 说明:
  *   - 归档后 root 目录清空，所有文件（含 e2e-state.json / trace.jsonl / repos.json）都进入
  *     archive/round-{N}/；dev-pass.json 属于残留文件，不进入归档而是直接删除。
- *   - 防重复归档：root 无文件即判定为已归档，拒绝再次 archive，需先执行 restore。
+ *   - 防重复归档：root 除 story-info.json / debug.jsonl 外无文件即判定为已归档，
+ *     拒绝再次 archive，需先执行 restore。
+ *   - Story 身份卡 story-info.json 不参与归档：它是归档后查询 storyId / TAPD 需求与工作区 /
+ *     仓库的唯一入口，搬进 round 目录等于让它失效。archive / restore 会就地更新它的
+ *     归档时间线与状态。
  *   - 终态检查：phase < 8 时默认拒绝归档，需 --force；归档会写入 state.status='archived'
  *     以及 archivedAt / archiveRound / archiveDir。
  *   - restore 默认移动（归档目录随之清空），--keep-archive 改为复制以保留归档副本；
@@ -55,6 +60,8 @@ const {
 } = require('../lib/state')
 const trace = require('../lib/trace')
 const debugLog = require('../lib/debug-log')
+const { ARTIFACT } = require('../lib/artifacts')
+const { markArchived, markRestored, readStoryInfo } = require('../lib/story-info')
 
 /**
  * 统一输出口：console.log JSON + debug 载荷层留痕（归档/复档结果供流程回顾）。
@@ -77,6 +84,33 @@ const DELETE_FILES = ['dev-pass.json']
 
 /** archive/ 目录内的子目录（不参与递归扫描的顶层目录） */
 const ARCHIVE_DIR = 'archive'
+
+/**
+ * 归档时**原地保留、不移动**的文件。
+ *
+ * - story-info.json: Story 身份卡（storyId / 标题 / TAPD 需求与工作区 / 仓库 / 时间线），
+ *   存在意义就是「归档后仍可查这个 Story 做过什么」。若随归档搬进 archive/round-N/，
+ *   查它就得先知道归档轮次或先 restore，等于没有。
+ * - debug.jsonl: 运行时日志，归档过程自身会持续追加——归档收尾时重建一份新的，
+ *   内容与归档里那份不同。留在 root 才有价值（记录归档之后发生了什么）。
+ *
+ * 两者都不参与「是否已归档」的判据。
+ */
+const PRESERVE_FILES = [ARTIFACT.STORY_INFO, ARTIFACT.DEBUG]
+
+/**
+ * 判断 Story 是否已归档：root 除保留文件（story-info.json / debug.jsonl）外无任何文件
+ * @param {string} storyDir - Story 目录绝对路径
+ * @returns {boolean} 已归档返回 true
+ */
+function isArchivedRoot (storyDir) {
+  try {
+    const entries = fs.readdirSync(storyDir, { withFileTypes: true })
+    return !entries.some(e => e.isFile() && !PRESERVE_FILES.includes(e.name))
+  } catch {
+    return false
+  }
+}
 
 // ─── 工具函数 ──────────────────────────────────────────────────
 
@@ -188,28 +222,28 @@ function ensureDir (dirPath) {
  * @param {{ dryRun: boolean, round: number|null, force: boolean }} opts - 选项
  */
 function cmdArchive (storyId, opts) {
-  // 1. 读取当前状态（归档前必须）
+  const storyDir = getStoryDir(storyId)
+
+  // 1. 防重复归档必须先于状态读取判定:
+  //    归档后 e2e-state.json 已进 archive/round-N/，readStateFile 必然拿到 null。
+  //    若先读状态，重复归档会报「e2e-state.json 不存在」而不是「已归档」，
+  //    把用户的下一步（restore）指到错误方向。
+  //    story-info.json 是保留文件，不参与判据 —— 归档后 root「只剩它」，仍须判为已归档。
+  if (isArchivedRoot(storyDir)) {
+    emit(storyId, {
+      error: 'Story 已归档（root 除 story-info.json 外无文件），禁止重复归档',
+      hint: '如需重新归档，请先执行 restore 复档'
+    })
+    return 1
+  }
+
+  // 2. 读取当前状态（归档前必须）
   const state = readStateFile(storyId)
   if (!state || state._parseError) {
     emit(storyId, {
       error: 'e2e-state.json 不存在或解析失败',
       storyId,
       detail: state ? state._parseError : null
-    })
-    return 1
-  }
-
-  const storyDir = getStoryDir(storyId)
-
-  // 2. 防重复归档：root 为空即已归档
-  // rootFiles 仅含文件（readdirSync + isFile 过滤），archive/ 是目录，天然不在其中，
-  // 无需再排除——真正排除 archive/ 目录的递归扫描在下文 scanAllFiles(storyDir, [ARCHIVE_DIR]) 完成。
-  const rootFiles = fs.readdirSync(storyDir, { withFileTypes: true })
-    .filter(e => e.isFile())
-  if (rootFiles.length === 0) {
-    emit(storyId, {
-      error: 'Story 已归档（root 目录无文件），禁止重复归档',
-      hint: '如需重新归档，请先执行 restore 复档'
     })
     return 1
   }
@@ -237,7 +271,9 @@ function cmdArchive (storyId, opts) {
       round,
       phaseReached: state.phase,
       archiveDir: `${ARCHIVE_DIR}/round-${round}/`,
-      filesToArchive: toArchive.map(f => f.relative),
+      // 保留文件不会进归档，dry-run 清单据此剔除，避免与实际移动结果不符
+      filesToArchive: toArchive.filter(f => !PRESERVE_FILES.includes(f.name)).map(f => f.relative),
+      filesPreserved: toArchive.filter(f => PRESERVE_FILES.includes(f.name)).map(f => f.name),
       filesToDelete: DELETE_FILES.filter(d => toArchive.some(f => f.name === d)),
       summary: {
         totalFiles: toArchive.length
@@ -288,6 +324,8 @@ function cmdArchive (storyId, opts) {
   for (const f of finalFiles) {
     // 跳过已删除的残留文件
     if (DELETE_FILES.includes(f.name)) continue
+    // 身份卡原地保留，不进归档目录
+    if (PRESERVE_FILES.includes(f.name)) continue
     const dest = path.join(roundDir, f.relative)
     ensureDir(path.dirname(dest))
     fs.renameSync(f.src, dest)
@@ -302,6 +340,15 @@ function cmdArchive (storyId, opts) {
     }
   }
 
+  // 13. 就地更新 Story 身份卡（它没被移动，归档信息写回自己）
+  //     身份卡缺失时返回 false，不阻断归档 —— 老 Story 建流时还没有这个文件
+  const storyInfoUpdated = markArchived(storyId, {
+    archivedAt: now,
+    archiveRound: round,
+    archiveDir: state.archiveDir,
+    phaseReached: state.phase
+  })
+
   emit(storyId, {
     success: true,
     action: 'archive',
@@ -313,7 +360,8 @@ function cmdArchive (storyId, opts) {
     archiveDir: state.archiveDir,
     archivedFiles: movedCount,
     deletedFiles,
-    hint: 'root 目录已清空，所有文件（含 e2e-state.json / trace.jsonl / repos.json）均归档到 archive/round-' + round + '/'
+    storyInfoUpdated,
+    hint: 'root 仅保留 story-info.json（身份卡），其余文件（含 e2e-state.json / trace.jsonl / repos.json）均归档到 archive/round-' + round + '/'
   }, { round })
   return 0
 }
@@ -437,12 +485,16 @@ function cmdRestore (storyId, opts) {
     })
   }
 
+  // 8. 身份卡就地更新为 running（它一直在 root，未被归档移动）
+  const storyInfoUpdated = markRestored(storyId, { restoredAt: now, restoredFromRound: round })
+
   emit(storyId, {
     success: true,
     action: 'restore',
     storyId,
     round,
     restoredAt: now,
+    storyInfoUpdated,
     restoredFiles: restored.length,
     keepArchive: opts.keepArchive,
     archiveCleaned,
@@ -524,16 +576,12 @@ function cmdList (storyId) {
   }
   rounds.sort((a, b) => a.round - b.round)
 
-  // 判断当前是否归档状态（root 无文件）
-  let rootHasFiles = false
-  try {
-    const rootEntries = fs.readdirSync(storyDir, { withFileTypes: true })
-    rootHasFiles = rootEntries.some(e => e.isFile())
-  } catch {}
+  // 判断当前是否归档状态（root 除身份卡外无文件）
+  const archivedNow = isArchivedRoot(storyDir)
 
   emit(storyId, {
     storyId,
-    archived: !rootHasFiles,
+    archived: archivedNow,
     totalArchives: rounds.length,
     archives: rounds
   })
@@ -549,20 +597,21 @@ function cmdList (storyId) {
 function cmdStatus (storyId) {
   const storyDir = getStoryDir(storyId)
 
-  // 检查 root 是否有文件（含 e2e-state.json）
+  // 检查 root 是否有文件（身份卡 story-info.json 不计入，它归档后仍在 root）
   let rootHasFiles = false
   let e2eExists = false
   try {
     const rootEntries = fs.readdirSync(storyDir, { withFileTypes: true })
-    rootHasFiles = rootEntries.some(e => e.isFile())
+    rootHasFiles = rootEntries.some(e => e.isFile() && !PRESERVE_FILES.includes(e.name))
     e2eExists = rootEntries.some(e => e.name === 'e2e-state.json' && e.isFile())
   } catch {}
 
   // 尝试读取 e2e-state.json
   const state = readStateFile(storyId)
-  const archivedByState = state && (state.status === 'archived' || state._parseError === undefined)
+  // 仅当 e2e-state 确实在 root（未被归档搬走）且标记为 archived 时才作数
+  const archivedByState = Boolean(state && !state._parseError && state.status === 'archived')
 
-  // 判断是否归档：root 无文件 或 状态标记为 archived
+  // 判断是否归档：root 除身份卡外无文件，或 root 的 e2e-state 标记了 archived
   const archived = !rootHasFiles || archivedByState
 
   // 获取归档轮次信息
@@ -588,20 +637,27 @@ function cmdStatus (storyId) {
     }
   }
 
+  // 身份卡里保存着归档后仍需查询的长期信息（storyId / TAPD 需求与工作区 / 仓库）
+  const info = readStoryInfo(storyId)
+  const storyInfo = info && !info._parseError ? info : null
+
   emit(storyId, {
     storyId,
-    title: state ? state.title : null,
+    title: state ? state.title : (storyInfo ? storyInfo.title : null),
     phase: state ? state.phase : null,
     archived,
     rootHasFiles,
     e2eExists,
+    storyInfoFile: storyInfo ? ARTIFACT.STORY_INFO : null,
+    sources: storyInfo ? storyInfo.sources : null,
+    repos: storyInfo ? storyInfo.repos : null,
     archiveRound: archiveRound || null,
     archiveDir: archiveDir || null,
     archivedAt: archivedAt || null,
     restoredAt: state ? (state.restoredAt || null) : null,
     restoredFromRound: state ? (state.restoredFromRound || null) : null,
     hint: archived
-      ? '已归档（root 目录无文件）。执行 restore 复档可恢复操作能力'
+      ? '已归档（root 仅剩 story-info.json）。执行 restore 复档可恢复操作能力'
       : '未归档。执行 archive 可归档全部文件'
   })
   return 0

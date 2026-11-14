@@ -1,6 +1,6 @@
 ---
 name: archive
-description: 归档 Story 全部文件 / 复档恢复 / 查看归档历史，归档后 root 目录清空
+description: 归档 Story 全部文件 / 复档恢复 / 查看归档历史，归档后仅保留 story-info.json 身份卡
 ---
 
 # /archive — Story 归档与复档
@@ -45,11 +45,17 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> archive [
 3. 终态检查（phase < 8 需 `--force`）
 4. 扫描 root 目录**所有文件**（排除 `archive/` 子目录）
 5. 更新 `e2e-state.json` 状态为 `archived`，追加 trace
-6. 将全部文件移入 `archive/round-{N}/`（含 e2e-state.json / trace.jsonl / repos.json）
+6. 将文件移入 `archive/round-{N}/`（含 e2e-state.json / trace.jsonl / repos.json），
+   **跳过 `story-info.json` 与 `debug.jsonl`**（前者是身份卡，后者是运行时日志）
 7. 删除 `dev-pass.json`（不归档）
 8. 清理 root 空子目录
+9. 就地更新 `story-info.json`：`status=archived`、`archiveRound`、`archivedAt`、`phaseReached`
 
 **建议**：先执行 `--dry-run` 预览确认无误后再正式归档。
+
+> **归档后仍可查的 Story 元信息** —— `story-info.json` 不被归档移动，归档完成后 root 只剩它与
+> `debug.jsonl`。里面保存的是 storyId、标题、模式、**TAPD 需求链接 / 工作区 ID / 需求 ID**、
+> 仓库名与工作区根路径，无需先 restore 就能查到。
 
 ## 复档：restore
 
@@ -98,7 +104,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 归档前                                 归档后
 ───────                               ───────
 .codebuddy/plans/<storyId>/           .codebuddy/plans/<storyId>/
-├── e2e-state.json                    │  (root 完全清空)
+├── story-info.json  ← 身份卡         │  story-info.json   ← 保留，不进归档
+├── e2e-state.json                    │  debug.jsonl       ← 保留，运行时日志
 ├── trace.jsonl                       │
 ├── repos.json                        ├── archive/
 ├── requirement-analysis.md           │   ├── round-1/
@@ -112,8 +119,32 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
                                       │       └── ...（下一轮）
 ```
 
-> 归档后 root 目录完全清空，所有文件（含 `e2e-state.json`、`trace.jsonl`、`repos.json`）均进入 `archive/round-{N}/`。
+> 归档后 root 只剩 `story-info.json`（身份卡）与 `debug.jsonl`（运行时日志），
+> 其余文件（含 `e2e-state.json`、`trace.jsonl`、`repos.json`）均进入 `archive/round-{N}/`。
 > 归档过程中同时清理 `archive/` 中的旧 `.archived` 散落文件。
+
+## Story 身份卡：story-info.json
+
+建流时（`create-workflow.js`）写入，**归档不移走它**，因此归档后无需 restore 即可查到：
+
+| 字段 | 含义 |
+|------|------|
+| `storyId` / `title` | Story 标识与标题 |
+| `mode` | `run` / `fixbugs` |
+| `sources.tapdUrl` | TAPD 需求或缺陷链接 |
+| `sources.workspaceId` | TAPD 项目（工作区）ID |
+| `sources.storyIdInTapd` | TAPD 需求 ID |
+| `sources.owner` | Bug 处理人（fixbugs 模式） |
+| `sources.figmaUrls` / `prototypeUrls` / `docs` | 设计稿、原型、需求文档入口 |
+| `repos` | 主仓库名 + 仓库名列表（不存绝对路径） |
+| `workflowRoot` | 工作区根路径（正斜杠） |
+| `status` / `archivedAt` / `archiveRound` | 归档时间线与轮次 |
+
+`sources` 由 `story-input.json` 的 `sources` 原样投影，不重新解析 URL。
+若走旧通道（建流后才写 `story-input.json`），执行 `create-workflow.js <storyId> --refresh-input`
+会把来源字段补进身份卡。
+
+查询方式：`archive-story.js <storyId> status` 会把 `sources` / `repos` 一并输出。
 
 ## 守卫机制
 
@@ -129,8 +160,8 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 
 ## 安全约束
 
-1. **防重复归档** — root 目录无文件时拒绝再次归档
+1. **防重复归档** — root 除 `story-info.json` / `debug.jsonl` 外无文件时拒绝再次归档
 2. **非终态保护** — `phase < 8` 时警告，需 `--force` 强制归档
 3. **复档冲突保护** — root 存在同名文件时拒绝覆盖（需 `--force`）
 4. **dry-run 优先** — 建议先预览确认无误后正式执行
-5. **全量归档** — 不再保留任何文件在 root，archive 即完整备份
+5. **全量归档** — 除身份卡与运行时日志外全部进 archive，归档即完整备份

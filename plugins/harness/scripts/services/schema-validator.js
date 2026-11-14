@@ -60,7 +60,10 @@ const SCHEMA_MAP = {
   'story-input.schema.json': 'story-input.json',
   // bug-list.json 只在 fixbugs 模式的 Phase 0 需要，条件性不做存在性强校验，
   // 由 policy.js 的 checkBugList 按 story mode 判定；注册它让格式能走统一 schema 校验。
-  'bug-list.schema.json': 'bug-list.json'
+  'bug-list.schema.json': 'bug-list.json',
+  // story-info.json 是 Story 身份卡，建流时写入、归档时保留，不是 Phase 产出物，
+  // 注册它只为让模块写入后的结构可被校验，不改变任何门控行为。
+  'story-info.schema.json': 'story-info.json'
 }
 
 /** 缓存已编译的 schema 校验器 */

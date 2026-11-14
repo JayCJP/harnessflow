@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Story Info Schema",
+  "description": "Story 身份卡（story-info.json）— 建流时写入，归档时不被移动，用于归档后查询 storyId / TAPD 需求与工作区 / 仓库等长期信息",
+  "type": "object",
+  "required": ["version", "storyId", "mode", "createdAt", "sources", "repos", "workflowRoot"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "storyId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "mode": { "type": "string", "enum": ["run", "fixbugs"] },
+    "status": { "type": "string", "enum": ["running", "archived"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "initialPhase": { "type": "integer", "minimum": 0, "maximum": 8 },
+    "phaseReached": { "type": "integer", "minimum": 0, "maximum": 8 },
+    "sources": {
+      "type": "object",
+      "description": "由 story-input.json 的 sources 原样投影，不重新解析，避免双信源",
+      "properties": {
+        "tapdUrl": { "type": "string", "description": "TAPD 需求或缺陷链接" },
+        "workspaceId": { "type": "string", "description": "TAPD 项目 ID" },
+        "storyIdInTapd": { "type": "string", "description": "TAPD 需求 ID" },
+        "owner": { "type": "string" },
+        "statusFilter": { "type": "string" },
+        "terminal": { "type": "string" },
+        "prototypeUrls": { "type": "array", "items": { "type": "string" } },
+        "figmaUrls": { "type": "array", "items": { "type": "string" } },
+        "docs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "repos": {
+      "type": "object",
+      "description": "仅记录仓库名，不记录绝对路径（路径随机器变化）",
+      "required": ["primary", "names"],
+      "properties": {
+        "primary": { "type": "string" },
+        "names": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "workflowRoot": { "type": "string", "description": "工作区根路径（正斜杠）" },
+    "archivedAt": { "type": "string", "format": "date-time" },
+    "archiveRound": { "type": "integer", "minimum": 1 },
+    "archiveDir": { "type": "string" },
+    "restoredAt": { "type": "string", "format": "date-time" },
+    "restoredFromRound": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": true
+}

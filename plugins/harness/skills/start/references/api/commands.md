@@ -118,10 +118,15 @@ node $HARNESS/archive-story.js <storyId> list
 node $HARNESS/archive-story.js <storyId> status
 ```
 
-归档后 root 清空，全部文件（含 `e2e-state.json` / `trace.jsonl` / `repos.json`）进
-`archive/round-{N}/`；`dev-pass.json` 属残留，直接删除不归档。
-`phase < 8` 时默认拒绝归档，需 `--force`。root 无文件即判定已归档，拒绝重复归档。
+归档后 root 仅保留 **`story-info.json`**（Story 身份卡）与 `debug.jsonl`（运行时日志），
+其余文件（含 `e2e-state.json` / `trace.jsonl` / `repos.json`）进 `archive/round-{N}/`；
+`dev-pass.json` 属残留，直接删除不归档。
+`phase < 8` 时默认拒绝归档，需 `--force`。root 除保留文件外无文件即判定已归档，拒绝重复归档。
 `restore` 默认**移动**（归档目录随之清空），`--keep-archive` 改为复制。
+
+> `story-info.json` 由 `create-workflow.js` 建流时写入，归档不移走它 —— 归档后仍可直接
+> 查到 storyId / 标题 / TAPD 需求链接 / 工作区 ID / 仓库等长期信息，无需先 restore。
+> `status` 会把这些字段一并输出。
 
 ⚠️ Story 处于归档状态时，`advance-phase.js` 的 `--rollback` / `--fix-loop` 会被守卫拦截，
 需先 `restore`。
