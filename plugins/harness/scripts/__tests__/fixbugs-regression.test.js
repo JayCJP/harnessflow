@@ -28,7 +28,9 @@ const storyDir = sandbox.storyDir
 const state = require(path.join(SCRIPTS_DIR, 'lib/state'))
 const { buildAgentPrompt } = require(path.join(SCRIPTS_DIR, 'services/prompt-builder'))
 const { createWorkflow } = require(path.join(SCRIPTS_DIR, 'commands/create-workflow'))
-const { runGateCheck } = require(path.join(SCRIPTS_DIR, 'services/policy'))
+const policy = require(path.join(SCRIPTS_DIR, 'services/policy'))
+const { runGateCheck } = policy
+const { dispatch } = require(path.join(SCRIPTS_DIR, 'commands/dispatch'))
 
 function writeInput (id, obj) {
   fs.mkdirSync(storyDir(id), { recursive: true })
@@ -43,6 +45,16 @@ function writeBugList (id, obj) {
   fs.mkdirSync(storyDir(id), { recursive: true })
   fs.writeFileSync(path.join(storyDir(id), 'bug-list.json'), JSON.stringify(obj, null, 2))
 }
+/**
+ * 写一个 Phase 0 的 e2e-state.json（run 模式反例用）
+ * @param {string} id - Story ID
+ */
+function writeState0 (id) {
+  fs.mkdirSync(storyDir(id), { recursive: true })
+  fs.writeFileSync(path.join(storyDir(id), 'e2e-state.json'),
+    JSON.stringify({ storyId: id, phase: 0, status: 'running' }))
+}
+
 function readReport (id) {
   return fs.readFileSync(path.join(storyDir(id), '测试需求_bug分析报告.md'), 'utf-8')
 }
@@ -160,6 +172,46 @@ ok('无评论证据 -> 仅 WARNING 不阻断',
 
 // run 模式不受影响
 ok('run 模式不校验 bug-list', !gate('RUN-1', 0).blockers.some(b => String(b.type || '').startsWith('bug_list')))
+
+// ════════════════════════════════════════════════════════════
+section('2b-2. 本轮无缺陷 -> 结束工作流（dispatch 转 terminal）')
+
+// 场景: fixbugs 建流后 Phase 0 查 TAPD 一条都没命中，分析员按事实写空数组。
+// 门控仍需拦推进（否则会带着 0 条 AC 进 Phase 1），但 dispatch 不派单 —— 直接收工。
+writeBugList('FIX-1', { bugs: [] })
+const gbEmpty = gate('FIX-1', 0)
+ok('空清单仍拦推进（bug_list_empty）', gbEmpty.blockers.some(b => b.type === 'bug_list_empty'))
+ok('isNoBugsOutcome 识别空清单 blocker', gbEmpty.blockers.filter(b => policy.isNoBugsOutcome(b)).length === 1)
+ok('isNoBugsOutcome 不误判其它 blocker',
+  policy.isNoBugsOutcome({ type: 'bug_list_missing_category' }) === false &&
+  policy.isNoBugsOutcome({ type: 'artifact_missing' }) === false)
+
+const dNoBugs = dispatch('FIX-1')
+ok('无缺陷 -> status=terminal', dNoBugs.status === 'terminal', dNoBugs.status)
+ok('无缺陷 -> recovery.type=no_bugs_matched', dNoBugs.recovery && dNoBugs.recovery.type === 'no_bugs_matched',
+  JSON.stringify(dNoBugs.recovery))
+ok('无缺陷 -> 不派单（nextAgent / agentPrompt 为空）',
+  dNoBugs.nextAgent === null && dNoBugs.agentPrompt === null)
+ok('无缺陷 -> 不给推进命令', dNoBugs.advanceCommand === null)
+ok('无缺陷 -> 结束命令是 harness-workflow end',
+  /harness-workflow\.js"?\s+end/.test(String(dNoBugs.recovery.command)), dNoBugs.recovery.command)
+ok('无缺陷 -> 结束命令为绝对路径且正斜杠',
+  /[A-Za-z]:\//.test(String(dNoBugs.recovery.command)) && !String(dNoBugs.recovery.command).includes('\\'),
+  dNoBugs.recovery.command)
+
+// 反例: 清单缺失（分析员压根没写）仍应派单重做，不能被当成「本轮无缺陷」收工
+fs.unlinkSync(path.join(storyDir('FIX-1'), 'bug-list.json'))
+const dMissing = dispatch('FIX-1')
+ok('清单缺失 -> 仍派单 Phase 0（不误判为无缺陷收工）',
+  dMissing.status === 'ready' && dMissing.nextAgent === 'requirement-analyst',
+  dMissing.status + '/' + dMissing.nextAgent)
+
+// 反例: run 模式空清单不触发收工（bug-list 是 fixbugs 专有产出物）
+writeState0('RUN-EMPTY')
+fs.writeFileSync(path.join(storyDir('RUN-EMPTY'), 'story-input.json'), JSON.stringify({ mode: 'run', sources: {} }))
+writeBugList('RUN-EMPTY', { bugs: [] })
+ok('run 模式不受空清单影响', !['terminal'].includes(dispatch('RUN-EMPTY').status) ||
+  dispatch('RUN-EMPTY').recovery.type !== 'no_bugs_matched')
 
 // ════════════════════════════════════════════════════════════
 section('2c. 前端缺陷排期覆盖（Phase 1→2）')

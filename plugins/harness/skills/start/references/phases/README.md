@@ -61,6 +61,16 @@ Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.j
 └── ...                     # 各 Phase 产出物
 ```
 
+## 三个不只是「失败」的门控结论
+
+绝大多数 blocker 意味着「重做当前 Phase」。这三类例外由 dispatch 转成别的 `status`：
+
+| failureType | dispatch 结果 | 含义 |
+|-------------|--------------|------|
+| `bug_list_empty`（fixbugs + Phase 0） | `terminal` / `no_bugs_matched` | 本轮 TAPD 无符合条件的缺陷，结束工作流 |
+| `user_confirmation_required` | `blocked` / `user_confirmation_required` | 建议稿已就位、等用户拍板，重新 Spawn 分析员没有意义 |
+| Phase 3 有 blocker 且 `fixLoopAvailable` | `fix_loop` | 回退 Phase 2 修复 |
+
 ## 恢复级别
 
 blocker 的 `level` 决定恢复策略，由 `policy.js` 判定，主 Agent 不参与选择：

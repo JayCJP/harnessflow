@@ -549,6 +549,9 @@ function checkPhase0Gate (storyId, state, result) {
  *   - commentCount=0 且无 commentDigest 只记 warning：该缺陷可能确实无评论，
  *     不能因为「没人评论」卡住流程
  *   - run 模式完全跳过本检查（bug-list 是 fixbugs 专有产出物）
+ *   - bugs 为空仍是 BLOCKER（程序无法区分「真 0 条」与「没写」），但它不是死路：
+ *     dispatch.js 见到本 type 且清单结构完好时，直接判定「本轮无缺陷 → 结束工作流」，
+ *     不派单、不要求 Agent 重试。判定逻辑见 isNoBugsOutcome()，此处只负责拦截推进。
  *
  * @param {string} storyId - Story ID
  * @param {Object} result - runGateCheck 的累积结果
@@ -574,9 +577,10 @@ function checkBugList (storyId, result) {
   if (bugs.length === 0) {
     result.blockers.push(structuredError(
       'bug_list_empty',
-      'bug-list.json 的 bugs 数组为空：fixbugs 模式进入 Phase 0 时必然已命中缺陷，空清单说明清单没写',
+      'bug-list.json 的 bugs 数组为空 —— 要么 TAPD 一条缺陷都没命中，要么清单没写',
       2,
-      '补写命中集合（每个缺陷一条）；若确实一条都没命中，说明不该以 fixbugs 模式建流，应由主 Agent 确认后结束工作流'
+      '若 TAPD 确实 0 条命中（空数组是事实记录，不是没写），dispatch 会直接给结束工作流的命令，不派单；' +
+      '若其实是没写，补写命中集合（每个缺陷一条）后重试'
     ))
     result.passed = false
     return
@@ -602,6 +606,24 @@ function checkBugList (storyId, result) {
       ' —— 若确无评论可忽略；否则说明 Phase 0 未读 get_comments（每个缺陷都必须读一次评论）'
     )
   }
+}
+
+/**
+ * 判定某个 blocker 是否代表「fixbugs 模式本轮 TAPD 无符合条件缺陷」
+ *
+ * 为什么需要: checkBugList 见到空 bugs 必然报 bug_list_empty（程序分不清「真 0 条」与
+ *   「清单没写」），但 fixbugs 的唯一输入就是 TAPD 查询结果 —— 确实 0 条时不派单、
+ *   不要求 Agent 重试，直接结束工作流才是正确终点。dispatch.js 据此转 terminal，
+ *   避免「分析员反复跑、每轮都卡同一个 blocker」的空转。
+ *
+ * 可靠性来自「清单结构完好」这个前置条件: 只有 bug-list.json 能解析、bugs 是数组且
+ *   为空时才成立；缺文件 / 解析失败 / 字段缺失走别的 failureType，不在此列。
+ *
+ * @param {{ type: string }|string} blocker - 门控 blocker（结构化或字符串）
+ * @returns {boolean} true 表示「本轮无缺陷」，应结束工作流
+ */
+function isNoBugsOutcome (blocker) {
+  return errorToType(blocker) === 'bug_list_empty'
 }
 
 /**
@@ -1288,5 +1310,6 @@ module.exports = {
   checkPhase1Gate,
   checkPhase3Gate,
   checkContractRegression,
-  matchRecoverySuggestion
+  matchRecoverySuggestion,
+  isNoBugsOutcome
 }

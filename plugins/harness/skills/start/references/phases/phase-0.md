@@ -64,9 +64,23 @@ run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
 | **run 模式** 功能点 `covered` 却 `acIds` 为空，或引用了不存在的 AC | BLOCKER (2) | `prd_coverage_missing` |
 | **fixbugs 模式** Bug 分析报告含修复方案类章节（修复建议/解决方案/测试验证等标题行） | WARNING | — |
 | **fixbugs 模式** `bug-list.json` 不存在 | BLOCKER (2) | `bug_list_missing` |
-| **fixbugs 模式** `bug-list.json` 的 `bugs` 数组为空 | BLOCKER (2) | `bug_list_empty` |
+| **fixbugs 模式** `bug-list.json` 的 `bugs` 数组为空 | BLOCKER (2) | `bug_list_empty`（**不派单**：dispatch 见它直接 `terminal`，见下）|
 | **fixbugs 模式** 某缺陷缺 `category` | BLOCKER (2) | `bug_list_missing_category` |
 | **fixbugs 模式** 某缺陷既无 `commentCount` 也无 `commentDigest`（疑似未读评论） | WARNING | — |
+
+### 空清单 = 本轮无缺陷 → 直接结束工作流
+
+`bug_list_empty` 是唯一一个**会转成终态而不是重试**的 blocker：
+
+- 前置条件：`bugs` 是空数组（清单结构完好）。缺文件 / 解析失败 / 缺 `category` 走别的
+  failureType，照常让需求分析师重做。
+- `dispatch.js` 在 Phase 0 + `mode=fixbugs` 见到它 → `status: terminal`，
+  `recovery.type: no_bugs_matched`，命令是 `harness-workflow.js end`。
+  判定函数是 `policy.js:isNoBugsOutcome()`（单一信源）。
+- 为什么不重试：fixbugs 的唯一输入就是 TAPD 查询结果，0 条时没有任何分析可做；
+  Spawn 需求分析师只会重跑同一查询、再落同一个空清单，无限空转。
+- 状态文件**不写**「无缺陷」这类标记（状态机不记录业务结论），判定完全由
+  `bug-list.json` 的空数组 + `dispatch` 的只读推导决定。
 
 ⚠️ `featurePoints` 是 run 模式的硬要求，`fixbugs` 不要求（Bug 修复没有 PRD 功能点可枚举）。
 它的存在理由：门控原先只能校验「已写下的 AC 是否格式合规」，发现不了「整条功能压根没进 AC」。

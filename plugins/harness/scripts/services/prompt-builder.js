@@ -294,6 +294,9 @@ function buildStoryInputSection (storyId, targetPhase) {
       '- Bug 分析报告**只记录事实**: 问题复述、复现步骤、代码定位、根因、责任方分类。',
       '  **不要写修复方案**（不写"应该怎么改"、不给伪代码/diff）—— 修复设计属于开发工程师。',
       '- 产出 `{标题}_bug分析报告.md` 后，再写 `requirement-analysis.md`：只引用 Bug 编号，不复制 Bug 正文。',
+      '- **若 TAPD 查询 0 条命中**（按 owner / statusFilter 过滤后无缺陷）: 仍然写 `bug-list.json`，但 `bugs` 写空数组 `[]`',
+      '  并在报告里写明「本轮无符合条件缺陷」+ 查询条件与命中数。**不要编造缺陷、不要放宽容忍条件去凑数**。',
+      '  此时不产出 AC / open-questions，主 Agent 会直接结束工作流 —— 空清单是这次查询的事实记录，不是失败。',
       ''
     )
   } else {

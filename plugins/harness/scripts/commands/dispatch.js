@@ -262,6 +262,29 @@ function dispatch (storyId) {
   }
   result.warnings.push(...(gate.warnings || []))
 
+  // ── 分支 A-1: fixbugs 本轮无缺陷 → 结束工作流 ────────────────
+  // 触发: Phase 0 的 bug-list.json 结构完好但 bugs 为空（TAPD 一条都没命中）。
+  // 为什么不派单: fixbugs 的唯一输入就是 TAPD 查询结果 —— 0 条时没有任何分析可做，
+  //   再 Spawn 需求分析师只会重跑同样查询、再落同一个空清单，形成无限空转。
+  // 为什么必须在这里: 主 Agent 只按 status 机械分支，不会自行判断「0 条该不该收工」；
+  //   这个判断属于编排，只能在唯一出口给出。
+  // 注: 清单缺失 / 解析失败 / 字段缺失走别的 failureType，照常走分支 A 让 Agent 重做。
+  if (phase === 0 && state.mode === 'fixbugs' && gate.blockers.some(b => policy.isNoBugsOutcome(b))) {
+    result.status = 'terminal'
+    result.nextAgent = null
+    result.agentPrompt = null
+    result.advanceCommand = null
+    result.recovery = {
+      type: 'no_bugs_matched',
+      command: commandPath('harness-workflow.js') + ' end',
+      description:
+        '本轮 TAPD 查询没有符合筛选条件的缺陷（bug-list.json 的 bugs 为空），工作流直接结束，不进入开发。\n' +
+        '操作: 执行 recovery.command 解除 harness 激活状态（幂等），然后告诉用户「本轮无符合条件的缺陷，已结束」。\n' +
+        '不要 Spawn 任何 Agent、不要推进到 Phase 1、不要删除 Story 目录（保留记录备查）。'
+    }
+    return result
+  }
+
   const fixLoop = detectFixLoop(storyId)
 
   // ── 分支 A: 当前 Phase 产出物未就绪 → 该 Phase 的 Agent 干活 ──

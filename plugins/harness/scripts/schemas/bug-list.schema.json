@@ -7,7 +7,7 @@
   "properties": {
     "bugs": {
       "type": "array",
-      "minItems": 1,
+      "description": "命中的缺陷清单。允许为空 —— 空数组是「本轮 TAPD 无符合条件缺陷」的事实记录，此时工作流直接结束、不进入 Phase 1（由 dispatch.js 判定，不写进状态文件）；非空的每一项都必须分诊",
       "items": {
         "type": "object",
         "required": ["bugId", "title", "status", "category"],
