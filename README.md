@@ -7,6 +7,8 @@
 > **兼容 Claude Code 与 CodeBuddy Code**
 > 两款工具使用相同的 `/plugin` 命令体系，安装步骤完全一致。
 > 市场清单分别位于 `.claude-plugin/marketplace.json`（Claude Code）与 `.codebuddy-plugin/marketplace.json`（CodeBuddy Code），内容一致。
+>
+> **GitHub Copilot Agent Plugins 1.0** 使用独立清单 `plugins/harness-copilot/plugin.json`，不改动现有插件格式。
 
 > **安装源（GitHub）**：`https://github.com/JayCJP/harnessflow.git`
 
@@ -496,13 +498,15 @@ harness-marketplace/
 ├── .codebuddy-plugin/marketplace.json   # CodeBuddy Code 市场清单
 ├── .claude-plugin/marketplace.json      # Claude Code 市场清单（内容一致）
 └── plugins/
-    └── harness/                          # Harness 插件本体
-        ├── plugin.json                   # 插件元信息（agents/skills/hooks 入口）
-        ├── agents/                       # 5 个工程角色代理
-        ├── skills/                       # 工作流 / 编排 / 知识库 / 文档 / 接口 / Figma 技能
-        ├── hooks/                        # 阶段钩子（dev-pass / 状态文件守卫）
-        ├── rules/                        # 知识库自动检索规则
-        ├── scripts/                      # audit / services / schemas / commands
-        ├── vendor/ajv.bundle.js          # 内置 ajv 单文件（免 npm install）
-        └── output-styles/
+    ├── harness/                          # Claude Code / CodeBuddy 插件本体
+    │   ├── plugin.json                   # 插件元信息（agents/skills/hooks 入口）
+    │   ├── agents/                       # 5 个工程角色代理
+    │   ├── skills/                       # 工作流 / 编排 / 知识库 / 文档 / 接口 / Figma 技能
+    │   ├── hooks/                        # 阶段钩子（dev-pass / 状态文件守卫）
+    │   ├── rules/                        # 知识库自动检索规则
+    │   ├── scripts/                      # audit / services / schemas / commands
+    │   ├── vendor/ajv.bundle.js          # 内置 ajv 单文件（免 npm install）
+    │   └── output-styles/
+    └── harness-copilot/
+        └── plugin.json                   # GitHub Copilot Agent Plugins 1.0 清单
 ```
