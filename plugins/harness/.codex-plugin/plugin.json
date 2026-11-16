@@ -1,6 +1,6 @@
 {
   "name": "harness",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Harness Engineering end-to-end workflow for requirements, planning, development, review, testing, and delivery.",
   "author": {
     "name": "Harness Team",
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "Harness Engineering",
     "shortDescription": "End-to-end engineering workflow orchestration",
-    "longDescription": "Orchestrates requirements analysis, task planning, implementation, code review, testing, and delivery through a gated engineering workflow.",
+    "longDescription": "Orchestrates requirements analysis, task planning, implementation, code review, knowledge-base update, and Git/MR delivery through a gated engineering workflow (cloud deployment optional).",
     "developerName": "Harness Team",
     "category": "Developer Tools",
     "capabilities": [

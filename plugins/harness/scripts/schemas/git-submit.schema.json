@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Git Submit Schema",
+  "description": "Git 提交与 MR 契约（git-submit.json）— 「Git 提交」阶段由发布助手产出。它是「代码已 push、MR 已创建」的唯一可验证事实，归档门槛与主流程完成判定都以它为依据。",
+  "type": "object",
+  "required": ["storyId", "commitHash", "branch", "mrUrl", "targetBranch"],
+  "properties": {
+    "storyId": { "type": "string", "minLength": 1 },
+    "commitHash": {
+      "type": "string",
+      "minLength": 7,
+      "description": "本次提交的完整或短 hash"
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "已推送的开发分支名（source branch）"
+    },
+    "mrUrl": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MR 链接；为空说明 MR 未创建，门控会拦截"
+    },
+    "targetBranch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MR 目标分支，默认 dev"
+    },
+    "remote": { "type": "string", "description": "推送到的 remote 名（如 origin）" },
+    "commitMessage": { "type": "string" },
+    "submittedAt": { "type": "string", "format": "date-time" },
+    "notes": { "type": "string", "description": "未验证项 / 遗留风险说明" }
+  },
+  "additionalProperties": true
+}

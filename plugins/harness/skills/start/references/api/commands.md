@@ -24,6 +24,7 @@ node $HARNESS/dispatch.js <storyId>
 | `advanceCommand` | string\|null | 已算好 targetPhase 的推进命令（**绝对路径**，运行时动态解析插件根，任何 cwd/shell 可直接执行），不要手写 |
 | `readyToAdvance` | boolean | **条件性**：仅 status=ready 且门控已通过（该推进）时输出 |
 | `instruction` | string\|null | **条件性**：人类可读的下一步说明（推进/fix_loop 分支输出） |
+| `optionalNext` | object\|null | **条件性**：仅「主流程已完成」终态下输出，形如 `{ phase, phaseName, optional: true, command, description }`。云端部署是可选阶段，**不是第五种 status** —— 只在用户明确要求时转述并按其中的命令推进，不得自行执行 |
 | `expectedOutputs` | string[] | **条件性**：本 Phase 应产出文件清单，主 Agent 据此校验子 Agent 汇报 |
 | `pendingBlockers` | Array | **条件性**：门控预检未通过时的 blocker 列表 `[{ type, message }]`，`type` 为结构化 failureType（P2-2 起跨仓 task 校验错误不再为 unknown） |
 | `fixLoopContext` | object | **条件性**：修复回路上下文（round / maxRounds / sourcePhase / affectedFiles 等） |
@@ -32,7 +33,7 @@ node $HARNESS/dispatch.js <storyId>
 | `recovery` | object\|null | `{ type, command, description }`；`command` 为 null 表示转人工 |
 
 **四态含义**：`ready` 干活或推进 / `fix_loop` Phase 3-4 有 BLOCKER，执行 `recovery.command`
-回退修复 / `blocked` 状态异常 / `terminal` 未建流、已归档、已完成。
+回退修复 / `blocked` 状态异常 / `terminal` 未建流、已归档、主流程已完成。
 
 门控预检只是「预读」，裁定权在 `advance-phase.js` —— dispatch 绝不写状态。
 唯一例外（P2-1，2026-09）：预检报出 blocker 时落盘诊断类文件 `.dispatch-precheck.json`
@@ -121,7 +122,7 @@ node $HARNESS/archive-story.js <storyId> status
 归档后 root 仅保留 **`story-info.json`**（Story 身份卡）与 `debug.jsonl`（运行时日志），
 其余文件（含 `e2e-state.json` / `trace.jsonl` / `repos.json`）进 `archive/round-{N}/`；
 `dev-pass.json` 属残留，直接删除不归档。
-`phase < 8` 时默认拒绝归档，需 `--force`。root 除保留文件外无文件即判定已归档，拒绝重复归档。
+主流程未走到 Git 提交 + MR（`status` 未 `completed`）时默认拒绝归档，需 `--force`。root 除保留文件外无文件即判定已归档，拒绝重复归档。
 `restore` 默认**移动**（归档目录随之清空），`--keep-archive` 改为复制。
 
 > `story-info.json` 由 `create-workflow.js` 建流时写入，归档不移走它 —— 归档后仍可直接
@@ -143,7 +144,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/audit/debug-replay.js <storyId> [--phase N] [
 ```
 
 `harness-audit.js` 检查 `settings.json` / `e2e-state` / 产出物完整性 —— 排查「流程行为不符预期」
-时先跑它。`metrics-aggregator.js` 在 Phase 7 完成时由 `advance-phase.js` 自动触发一次，
+时先跑它。`metrics-aggregator.js` 在主流程走完（Git 提交阶段完成、推进到可选部署阶段）时由 `advance-phase.js` 自动触发一次，
 也可手动执行做跨 Story 统计。`debug-replay.js` 回放一次 Story 运行的全量输出
 （每步 dispatch/advance 输出、门控 blockers 原文、hook 拒绝详情、agentPrompt 全文），
 按 state_change 自动分段；`--card` 重建任意历史时刻的状态摘要。

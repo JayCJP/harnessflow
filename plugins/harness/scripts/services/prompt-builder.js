@@ -32,12 +32,11 @@
  *   - v3 token 优化（2026-09）: v2 把成本从 prompt 挪到了工具调用，于是「让谁去读什么」
  *     成了新的成本项。三处收敛，判据都是「这个 Phase 到底用不用得上」:
  *       1. Story 背景资料（bug 分析报告，实测真实项目 10.5~27.5 KB）只在 Phase 0-1 注入。
- *          原实现无 Phase 过滤，Phase 5/6/7 的发布助手也被要求去读它 —— 做 git commit /
+ *          原实现无 Phase 过滤，全部发布阶段（知识库 / Git / 部署）的发布助手也被要求去读它 —— 做 git commit /
  *          知识库更新 / 云端部署根本用不上。报告在 Phase 0-1 已消化进契约文件。
  *       2. AGENT_CONSTRAINTS 从 5 条减到 2 条，删掉的 3 条已在 6/6 个 agent .md 里写明
  *          （agent .md 是子 Agent 的 system prompt，重复一遍不会更被遵守，只是重复计费）。
- *          后又补回 2 条（P3-2 检索失败上报、Bash 失败交代），因这两条是运行时失效兜底、
- *          agent .md 里没有对应表述 —— 现 4 条，见 AGENT_CONSTRAINTS 定义处注释。
+ *          最终固定为 2 条，见 AGENT_CONSTRAINTS 定义处的逐条核对表。
  *       3. 契约文件路径只打一次（原来相对 + 绝对各打一遍）。
  *     实测口径: agentPrompt 本身只占单次 spawn payload 的 7~17%（agent .md 是它的 6~13 倍），
  *     所以真正的收益来自「少一次大文件读」，不是「prompt 少几个字」。
@@ -138,7 +137,7 @@ function readContractContents (storyId, contractFiles) {
  *
  * v3：**只在 Phase 0-1 注入**。原实现无 Phase 过滤，Phase 1~7 全都被要求去读同一份
  * 报告 —— 实测真实项目里 bug 分析报告 10.5~27.5 KB（约 3.5~9.2K token），
- * 而 Phase 5/6/7 的发布助手在做 git commit / 知识库更新 / 云端部署，压根用不上它。
+ * 而知识库 / Git / 部署阶段的发布助手在做 update / commit / deploy，压根用不上它。
  * 报告的价值在 Phase 0（产出事实）与 Phase 1（据此拆 task）就已经被消化进
  * requirement-analysis.md / acceptance-criteria.json / task-dag.json，
  * 后续 Phase 读这些产出物即可，不必回头读原始报告。

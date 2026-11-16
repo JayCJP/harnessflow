@@ -23,7 +23,7 @@
  *   - 实现 Claude Code Level 4 Autocompact 的简化版: 只保存关键决策 + 契约路径 + 待办，不保存完整对话
  *   - 设计原则 (来自 Harness Engineering 指南): 对话历史占 60-80% context，是压缩核心；
  *     渐进式压缩（先轻量摘要，必要时升级）；预算跟踪需跨压缩边界
- *   - 无落盘产出物的 Phase（2/5/6/7）改从运行时真相源取证（getRuntimeEvidence），否则产出物段落为空
+ *   - 无落盘产出物的 Phase（2/4/6）改从运行时真相源取证（getRuntimeEvidence），否则产出物段落为空
  *   - mustCheck 注入是「声明-消费一致性」在教训维度的落地：教训结构化写入，检查层确定性验证
  *
  * @module context-refresh
@@ -386,7 +386,7 @@ function evidenceCodeChanges (storyId) {
 }
 
 /**
- * Phase 5 取证：从 trace 读 commit 事件，空则回退 git log -1
+ * Git 提交阶段取证：从 trace 读 commit 事件，空则回退 git log -1
  * @param {string} storyId - Story ID
  * @returns {string[]} summary 段落行
  */
@@ -434,8 +434,9 @@ function parseMetaHash (content) {
 }
 
 /**
- * Phase 6 取证：陈述式比对 meta.yaml 记录 hash vs 当前 HEAD
- * 只陈述事实，不把 hash 不一致断言为失败（Phase 6 时序陷阱）。
+ * 知识库更新阶段取证：陈述式比对 meta.yaml 记录 hash vs 当前 HEAD
+ * 只陈述事实，不把 hash 不一致断言为失败 —— 知识库更新发生在提交之前，
+ * 记录 hash 与 HEAD 不一致是常态（反映的是评审时点，不是提交时点）。
  * @param {string} storyId - Story ID
  * @returns {string[]} summary 段落行
  */
@@ -474,7 +475,7 @@ function evidenceKbRefresh (storyId) {
 }
 
 /**
- * Phase 7 取证：从 trace 读部署事件，无则显式声明缺失
+ * 可选阶段（云端部署）取证：从 trace 读部署事件，无则显式声明缺失
  * @param {string} storyId - Story ID
  * @returns {string[]} summary 段落行
  */
@@ -500,15 +501,16 @@ function evidenceDeploy (storyId) {
 /**
  * 按 Phase 分发运行时取证，返回 summary 段落行
  * @param {string} storyId - Story ID
- * @param {number} phase - Phase 编号（2/5/6/7）
+ * @param {number} phase - Phase 编号（2/4/5/6）
  * @returns {string[]} summary 段落行
  */
 function getRuntimeEvidence (storyId, phase) {
+  // 2.3.1 起：4=知识库更新、5=Git 提交、6=云端部署（可选）
   switch (phase) {
     case 2: return evidenceCodeChanges(storyId)
+    case 4: return evidenceKbRefresh(storyId)
     case 5: return evidenceGitCommits(storyId)
-    case 6: return evidenceKbRefresh(storyId)
-    case 7: return evidenceDeploy(storyId)
+    case 6: return evidenceDeploy(storyId)
     default: return []
   }
 }

@@ -1,4 +1,4 @@
-# 8 Phase 流水线索引（按需读取）
+# 7 Phase 流水线索引（按需读取）
 
 > 本目录从 `start/SKILL.md` 与已归档的旧 skill 附录 A/B/D 外移。
 > **不要整目录通读**：`advance-phase.js` 在 Phase N→N+1 报门控失败时，只读 `phase-N.md`。
@@ -11,13 +11,17 @@
 | 1 | 任务规划 | `task-planner` | `task-dag.md` `task-dag.json` （+`figma-frame-inventory.json` 条件性） | `checkPhase1Gate` |
 | 2 | 代码开发 | `frontend-developer` | 代码变更（git diff） | `checkPhase2Gate` |
 | 3 | 代码审查 | `code-reviewer` | `code-review.json`（AC 核对结论并入 issues[]） | `checkPhase3Gate` |
-| 4 | Git 提交 | `release-assistant` | commit + push + MR | **无门控**（见下方说明） |
-| 5 | 知识库更新 | `release-assistant` | meta.yaml 刷新 | **无门控**（见下方说明） |
-| 6 | 云端部署 | `release-assistant` | 部署 URL + 构建号 | **无门控**（见下方说明） |
+| 4 | 知识库更新（主流程） | `release-assistant` | meta.yaml 刷新 | `checkPhase4Gate`（仅 WARN） |
+| 5 | Git 提交 + MR（主流程终点） | `release-assistant` | `git-submit.json`（commitHash / branch / mrUrl / targetBranch） | 通用三道（契约存在性 + schema） |
+| 6 | 云端部署（**可选**） | `release-assistant` | 部署 URL + 构建号 | `checkPhase6Gate`（仅 WARN） |
 | 7 | —（终态） | — | 流程结束 | — |
 
-产出物清单唯一信源：`lib/state.js` 的 `PHASE_ARTIFACTS`。
-Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.js` 以 `nextAgent` 输出。
+> **主流程 = 0 → 1 → 2 → 3 → 4 → 5**。走完 Git 提交（已 push、MR 已创建）即写
+> `status: 'completed'`，`isWorkflowTerminal` 随之恒真，自动 end 与归档解锁。
+> 其后的云端部署是**可选阶段**：做与不做都算结束，`dispatch` 在终态下以 `optionalNext` 给出提示。
+
+产出物清单唯一信源：`lib/phases.js` 的 `PHASE_ARTIFACTS`。
+Phase→Agent 唯一信源：`lib/phases.js` 的 `PHASE_AGENTS`，由 `dispatch.js` 以 `nextAgent` 输出。
 **Spawn 必须用注册名**（表中反引号内的英文），传中文 label 无法解析到 Agent。
 
 ## 每个 Phase 都会跑的三道通用检查
@@ -31,14 +35,18 @@ Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.j
 3. **资源完整性** `checkResourceIntegrity` — 只在 phaseNum=3 时执行：
    开发阶段 kb-query / graphify 调用为 0 → WARNING（记 debt，不阻断）。
 
-> ⚠️ **Phase 5/6/7 三道检查全部空转**，`runGateCheck` 恒返回 `passed: true`。
-> 原因：`PHASE_ARTIFACTS[5/6/7]` 的产出物是 `fileName: null`（commit / 知识库 / 部署），
+> **Phase 4 / 6 / 7 的通用三道检查空转**，只剩各自的专属检查：
+> `PHASE_ARTIFACTS[4|6|7]` 的产出物是 `fileName: null`（知识库 / 部署 / 终态），
 > ① 存在性检查里 `if (!a.fileName) return false` 把它们过滤掉；
-> ② `getPhaseArtifacts(5/6/7)` 返回 `[]`；③ `policy.js` 的 Phase 专属分支只到 4。
+> ② `getPhaseArtifacts(4|6)` 返回 `[]`。
 >
-> 也就是说，**Git push、创建 MR、触发云端部署这三个不可逆动作没有任何程序拦截**。
-> 「禁止 `--no-verify`」「不推 main 分支」等约束只存在于 `phase-5.md` 与 Agent 指令文本中，
-> 靠 Agent 自觉遵守，门控看不见。
+> **Phase 5（Git 提交）有实质门控**：`git-submit.json` 是契约文件，
+> 缺文件 → `artifact_missing`，缺 `mrUrl` / `branch` 等字段 → `schema_validation_failed`，
+> 两者都是 BLOCKER。它也是归档门槛与「主流程已完成」的事实依据。
+>
+> 仍靠 Agent 自觉的约束：「禁止 `--no-verify`」「不推 main 分支」「不 `git add .`」
+> 以及部署的「MR 已合并」确认 —— 这些是不可逆且依赖外部状态的动作，
+> 用 BLOCKER 反而会把可选阶段卡死（详见 `phase-5.md` / `phase-6.md`）。
 >
 > `advance-phase.js` 写入 `state.gateChecks` 时会带 `gateImplemented: false` 标记，
 > 让上下文摘要与度量统计能区分「检查通过」与「压根没查」。
@@ -52,6 +60,7 @@ Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.j
 ├── repos.json              # 仓库注册表（story 级独立）
 ├── trace.jsonl             # 全链路审计
 ├── dev-pass.json           # 开发通行证（仅 Phase 2 存在，脚本自动管理）
+├── git-submit.json         # Git 提交 + MR 契约（Phase 5 产出，归档门槛依据）
 ├── phase-N-summary.md      # Phase 上下文摘要（脚本自动生成）
 ├── fix-request.json        # 修复回路请求（--fix-loop 生成）
 ├── fix-context.md          # 修复回路上下文（--fix-loop 生成）
@@ -70,6 +79,9 @@ Phase→Agent 唯一信源：`lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.j
 | `bug_list_empty`（fixbugs + Phase 0） | `terminal` / `no_bugs_matched` | 本轮 TAPD 无符合条件的缺陷，结束工作流 |
 | `user_confirmation_required` | `blocked` / `user_confirmation_required` | 建议稿已就位、等用户拍板，重新 Spawn 分析员没有意义 |
 | Phase 3 有 blocker 且 `fixLoopAvailable` | `fix_loop` | 回退 Phase 2 修复 |
+
+另有终态下的 `optionalNext`（云端部署提示）：它不是第五种 status，
+只是「还能做什么」的提示，主 Agent 仅在用户明确要求时转述并按其中命令推进。
 
 ## 恢复级别
 

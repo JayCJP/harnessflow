@@ -24,6 +24,8 @@
  *     回退到更早 Phase：归档中间产出物；targetPhase <= 2 时重置修复预算
  *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 2 --fix-loop
  *     修复回路：提取 BLOCKER → 回退 Phase 2 → 重签 dev-pass → 输出 spawnPrompt
+ *   node plugins/harness/scripts/commands/advance-phase.js <storyId> 6 --skip-completion
+ *     推进到可选阶段但不写 status='completed'（仅手动救场；正常流程不需要）
  *   参数解析：第一个纯数字视为 storyId，最后一个纯数字视为 targetPhase；
  *   非数字参数（可带 plans/ 或 .codebuddy/plans/ 前缀）优先作为 storyId。
  *
@@ -46,7 +48,7 @@
  *   - Phase 2 开发未完成但 dev-pass 已过期时，用 --renew-pass 续签，避免回退重来
  *   - 发现前一 Phase 方向错误（如任务拆解不合理）需要重做时，用 --rollback 归档中间产物并回退
  *   - 门控失败时无自动恢复通道：RECOVERY_SUGGESTIONS 里没有 autoFixable 条目，
- *     所有 blockers 都需 Agent 按 resolution 修好后重试（或 Phase 3/4 走 --fix-loop）
+ *     所有 blockers 都需 Agent 按 resolution 修好后重试（或 Phase 3 走 --fix-loop）
  *
  * 说明:
  *   - --renew-pass / --rollback / --fix-loop 三条分支的实现下沉在 phase-ops/ 下各自独立文件
@@ -75,7 +77,8 @@
  *   - 命令串（完整性校验失败时的 fixCommand / fixSteps 等）由 lib/paths.js 的 ADVANCE_CMD
  *     统一提供，与 dispatch.js / policy.js 共用同一信源，不在此处二次拼装。
  *     门控失败（最常见的失败路径）不给命令 —— 那是 dispatch.js 的 recovery 职责。
- *   - 推进到终态 Phase 7（Phase 6 云端部署完成）时自动触发 audit/metrics-aggregator.js 聚合度量，并标记工作流为 completed 终态。
+ *   - 主流程走完（Git 提交 + 建 MR 完成，推进到云端部署阶段）时自动触发 audit/metrics-aggregator.js 聚合度量，
+ *     并标记工作流为 completed 终态；此后的云端部署是可选阶段，不参与终态判定。
  *
  * @module advance-phase
  */
@@ -107,7 +110,7 @@ const experience = require('../services/experience')
 const contextRefresh = require('../services/context-refresh')
 // 命令路径与 Phase 常量收敛到 lib 公共出口（此前三处各拼一份 ADVANCE_CMD）
 const { ADVANCE_CMD, commandPath } = require('../lib/paths')
-const { MAX_PHASE } = require('../lib/phases')
+const { MAX_PHASE, MAIN_FLOW_END_PHASE } = require('../lib/phases')
 
 // 三个 --flag 子命令的实现（各自独立、都以 exit 收尾），主文件只做分派与出口
 const { runRenewPass } = require('./phase-ops/renew-pass')
@@ -146,14 +149,15 @@ const ARCHIVE_CMD = commandPath('archive-story.js')
 /**
  * 无门控的 Phase 列表
  *
- * 这些 Phase 的 PHASE_ARTIFACTS 产出物是 `fileName: null`（代码变更 / commit+push / 知识库 / 部署），
+ * 这些 Phase 的 PHASE_ARTIFACTS 产出物是 `fileName: null`（代码变更 / 知识库 / 部署），
  * 导致 runGateCheck 的三道通用检查全部空转：
  *   1. 产出物存在性   — artifacts-check.js 里 `if (!a.fileName) return false`，直接被过滤
- *   2. JSON Schema    — schema-validator.js 的 getPhaseArtifacts(5/6/7) 返回 []
- *   3. Phase 专属契约 — policy.js 的分支只处理 phaseNum 0-4
- * 因此它们恒返回 passed:true。提交/部署的安全性依赖 Agent prompt 指令，不依赖程序拦截。
+ *   2. JSON Schema    — schema-validator.js 的 getPhaseArtifacts(4/6) 返回 []
+ *   3. Phase 专属契约 — policy.js 的分支只处理 phaseNum 0-3 与 4（知识库调用记录）
+ * 因此它们恒返回 passed:true。知识库更新与部署的安全性依赖 Agent prompt 指令，不依赖程序拦截。
+ * 「Git 提交」阶段不在本表内 —— 它有 git-submit.json 契约，走正常的产出物 + schema 校验。
  */
-const NO_GATE_PHASES = [5, 6, 7]
+const NO_GATE_PHASES = [4, 6, 7]
 
 // ========================
 // CLI 参数解析
@@ -166,6 +170,11 @@ let renewFlag = false
 let lintFixFlag = false
 let rollbackFlag = false
 let fixLoopFlag = false
+/**
+ * --skip-completion：跳过「写 status='completed'」与度量聚合（见下方 isMainFlowDone 处说明）。
+ * 仅在 git-submit.json 无法补齐、又必须先收尾时人工使用；正常流程不带此 flag。
+ */
+let skipMainFlowCompletion = false
 
 // 纯数字参数可能同时包含 storyId（TAPD 需求 ID 为纯数字）与 phase 数字。
 // 解析规则：第一个纯数字视为 storyId，最后一个纯数字视为 targetPhase。
@@ -179,6 +188,7 @@ for (let i = 0; i < args.length; i++) {
   else if (arg === '--lint-fix') lintFixFlag = true
   else if (arg === '--rollback') rollbackFlag = true
   else if (arg === '--fix-loop') fixLoopFlag = true
+  else if (arg === '--skip-completion') skipMainFlowCompletion = true
   else if (/^\d+$/.test(arg)) numericArgs.push(arg)
   else nonNumericArgs.push(arg)
 }
@@ -195,8 +205,8 @@ if (numericArgs.length > 0) {
 
 if (!storyId || targetPhase === null) {
   emit({
-    error: '用法: node advance-phase.js <storyId> <phase> [--renew-pass] [--lint-fix] [--rollback] [--fix-loop]',
-    example: '  node advance-phase.js STORY-002 2\n  node advance-phase.js STORY-002 1 --rollback\n  node advance-phase.js STORY-002 2 --fix-loop'
+    error: '用法: node advance-phase.js <storyId> <phase> [--renew-pass] [--lint-fix] [--rollback] [--fix-loop] [--skip-completion]',
+    example: '  node advance-phase.js STORY-002 2\n  node advance-phase.js STORY-002 1 --rollback\n  node advance-phase.js STORY-002 2 --fix-loop\n  node advance-phase.js STORY-002 6 --skip-completion'
   })
   process.exit(1)
 }
@@ -654,7 +664,7 @@ const phaseArtifacts = PHASE_ARTIFACTS
 const completedPhaseArtifacts = phaseArtifacts && phaseArtifacts[currentPhase]
 if (completedPhaseArtifacts && Array.isArray(completedPhaseArtifacts.artifacts)) {
   const allMissing = completedPhaseArtifacts.artifacts.every(art => {
-    // Phase 2/5/6/7 产出物不是文件（git diff / commit / 部署），跳过
+    // Phase 2/4/6/7 产出物不是文件（git diff / 知识库 / 部署 / 终态），跳过
     if (!art.fileName) return false
     try {
       const artPath = path.join(PLANS_DIR, storyId, art.fileName)
@@ -729,25 +739,33 @@ if (targetPhase === 3) {
 }
 
 // ========================
-// Phase 4→5 特殊逻辑: 兜底撤销 dev-pass（双保险）
+// Phase 3→4 特殊逻辑: 兜底撤销 dev-pass（双保险）
 // 正常流程下 Phase 2→3 已撤销，此处防止 fix-loop 重新签发后残留
+// 撤销点跟随阶段重排：主撤销点 Phase 2→3，兜底点「进入知识库更新」——
+// 此前兜底挂在 Git 提交前（旧的 4→5），重排后知识库更新在前，开发窗口须在此关闭。
 // revokeDevPass 幂等，文件不存在时安全跳过
 // ========================
 
-if (targetPhase === 5) {
+if (targetPhase === 4) {
   const devPassPath = path.join(PLANS_DIR, storyId, 'dev-pass.json')
   if (fs.existsSync(devPassPath)) {
     revokeDevPass(storyId)
-    console.error('  ✓ dev-pass 兜底撤销 (Phase 4→5，Git 提交前兜底，开发窗口关闭)')
-    trace.appendTrace(storyId, { type: 'dev_pass', phase: String(targetPhase), result: 'revoked', reason: 'phase_4_to_5_safety_net' })
+    console.error('  ✓ dev-pass 兜底撤销 (Phase 3→4，进入知识库更新前兜底，开发窗口关闭)')
+    trace.appendTrace(storyId, { type: 'dev_pass', phase: String(targetPhase), result: 'revoked', reason: 'phase_3_to_4_safety_net' })
     if (state.devPass) delete state.devPass
   }
-  // 标记 Git 提交阶段开始（后续 git 操作应通过 trace.js CLI 逐条记录）
+}
+
+// ========================
+// Phase 4→5 特殊逻辑: 标记 Git 提交阶段开始
+// ========================
+
+if (targetPhase === MAIN_FLOW_END_PHASE) {
   trace.appendTrace(storyId, {
     type: 'git',
     action: 'phase_start',
     result: 'pending',
-    details: { note: 'Phase 5 Git 提交阶段开始，使用 node trace.js git <storyId> <action> success <details> 逐条记录' }
+    details: { note: 'Git 提交阶段开始，使用 node trace.js git <storyId> <action> success <details> 逐条记录，并产出 git-submit.json' }
   })
 }
 
@@ -833,13 +851,17 @@ if (devPass) {
 // Phase 2 的逐 batch spawn 序列同样只在 dispatch.js 输出（buildBatchSequence）。
 // 推进完成后主 Agent 回 Step 1 重新执行 dispatch.js 取新 Phase 指令。
 
-// 推进到最后一个 Phase 时自动触发度量聚合 + 标记工作流为 completed（终态）
+// 主流程走完时自动触发度量聚合 + 标记工作流为 completed（终态）
 //
-// 阈值取 MAX_PHASE 而非硬编码，且条件必须是「本次推进**到达**终态」：
-// 旧条件 `currentPhase === 7 && targetPhase > 7` 与上方 targetPhase 越界校验
-// （targetPhase <= MAX_PHASE）互斥，永远不成立 —— status='completed' 从未被写下，
-// 依赖它的自动 end 判定随之全部失效。
-if (targetPhase === MAX_PHASE && currentPhase < MAX_PHASE) {
+// 阈值取 MAIN_FLOW_END_PHASE 的下一 Phase（deployment）而非 MAX_PHASE：主流程是
+// 「审查 → 知识库更新 → Git 提交 + 建 MR」，到达 deployment 说明 Git 与 MR 已完成，
+// 其后的部署是可选阶段，做不做都不影响收尾，因此 completed 在这里写、不再等 MAX_PHASE。
+// 条件必须是「本次推进**到达**该 Phase」：旧条件 `currentPhase === 7 && targetPhase > 7`
+// 与越界校验互斥，永远不成立 —— status='completed' 从未被写下，依赖它的自动 end 判定随之失效。
+const isMainFlowDone = targetPhase === MAIN_FLOW_END_PHASE + 1 && currentPhase < MAIN_FLOW_END_PHASE + 1
+// 显式声明后再写回状态：skip_main_flow_completion 仅供手动救场（例如 git-submit.json 无法补齐
+// 又想先收尾），默认不传 —— 它把「主流程完成」从 step 触发改成 flag 触发，不产生第二条判定路径。
+if (isMainFlowDone && !skipMainFlowCompletion) {
   // 度量聚合
   try {
     const { execSync } = require('child_process')
@@ -863,8 +885,8 @@ if (targetPhase === MAX_PHASE && currentPhase < MAX_PHASE) {
   state.completedAt = now.toISOString()
   state.updatedAt = now.toISOString()
   writeStateFile(storyId, state)
-  trace.appendTrace(storyId, { type: 'workflow', action: 'completed', result: 'success' })
-  console.error('  ✓ 工作流已标记为 completed')
+  trace.appendTrace(storyId, { type: 'workflow', action: 'completed', result: 'success', details: { mainFlowEnd: MAIN_FLOW_END_PHASE, note: '主流程（评审 → 知识库 → 提交+建 MR）已完成；云端部署为可选阶段' } })
+  console.error('  ✓ 工作流已标记为 completed（主流程已完成，云端部署为可选阶段）')
 }
 
 emit(result)

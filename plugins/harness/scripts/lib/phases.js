@@ -28,15 +28,22 @@
 
 const { ARTIFACT } = require('./artifacts')
 
-/** Phase slug 映射 (0-8) */
+/**
+ * Phase slug 映射 (0-7)
+ *
+ * 2.3.1 起顺序为「审查 → 知识库更新 → Git 提交（含建 MR）→ 云端部署（可选）」：
+ *   - 知识库更新紧接代码审查，评审通过即沉淀经验，不必等提交与合并
+ *   - Git 提交与「创建 MR 到 dev」合并为同一个 Phase（不拆两个），该 Phase 完成即写 status='completed'
+ *   - 云端部署是**唯一可选阶段**：主流程在其之前已结束，做与不做都不影响收尾
+ */
 const PHASE_SLUGS = [
   'requirement_analysis',    // 0
   'task_planning',           // 1
   'development',             // 2
   'code_review',             // 3
-  'git_submit',              // 4
-  'knowledge_base_update',   // 5
-  'deployment',              // 6
+  'knowledge_base_update',   // 4 — 主流程第四步（评审后沉淀经验）
+  'git_submit',              // 5 — Git 提交 + 创建 MR，完成即终态
+  'deployment',              // 6 — 可选阶段
   'completed'                // 7 — 工作流终态
 ]
 
@@ -48,14 +55,36 @@ const PHASE_SLUGS = [
  */
 const MAX_PHASE = PHASE_SLUGS.length - 1
 
+/**
+ * 主流程终点 Phase —— 工作流「结束」的判定阈值唯一信源
+ *
+ * Git 提交 + 建 MR 完成（推进到本 Phase 的下一 Phase，即 deployment）时写 status='completed'，
+ * 此后 isWorkflowTerminal 恒为真；deployment（云端部署）在其之后，属可选阶段，
+ * 不做也不影响收尾。
+ *
+ * 阈值取「git_submit 的编号」而非 MAX_PHASE：调用方以 `phase >= MAIN_FLOW_END_PHASE` 判终态，
+ * 到达 Git 提交阶段本身就意味着主流程已经走到最后一步。
+ */
+const MAIN_FLOW_END_PHASE = PHASE_SLUGS.indexOf('git_submit')
+
+/**
+ * 可选阶段列表（主流程之后，不阻塞收尾，也不写 status='completed'）
+ *
+ * 「可选」的判定口径：进入该 Phase 意味着主流程已经走完。归档、自动 end、完成率统计
+ * 都只看主流程终点，可选阶段做与不做都算结束 —— 故取自 git_submit 之后的全部 Phase。
+ */
+const OPTIONAL_PHASES = PHASE_SLUGS
+  .map((_, i) => i)
+  .filter(i => i > PHASE_SLUGS.indexOf('git_submit') && i < PHASE_SLUGS.length - 1)
+
 /** Phase 中文名称 */
 const PHASE_NAMES = [
   '需求分析',       // 0
   '任务规划',       // 1
   '代码开发',       // 2
   '代码审查',       // 3
-  'Git提交',        // 4
-  '知识库更新',     // 5
+  '知识库更新',     // 4
+  'Git提交',        // 5
   '云端部署',       // 6
   '工作流完成'      // 7 — 工作流终态
 ]
@@ -94,9 +123,11 @@ const PHASE_ARTIFACTS = {
   // Phase 4（功能测试）已移除：AC 逐条核对并入本 Phase 由 code-reviewer 顺带完成，
   // 未通过的 AC 记入 issues[] 的 BLOCKER —— 因此 code-review.json 是本 Story 唯一的验收对账产物
   3: { artifacts: [{ fileName: ARTIFACT.CODE_REVIEW, description: '代码审查结构化数据(JSON格式，唯一产出物；AC 逐条核对结论一并记入 issues[])', contract: true }] },
-  4: { artifacts: [{ fileName: null, description: 'Git commit + push', contract: false }] },
-  5: { artifacts: [{ fileName: null, description: '知识库文档更新（meta.yaml hash 变化）', contract: false }] },
-  6: { artifacts: [{ fileName: null, description: '部署 URL + 构建号', contract: false }] }
+  4: { artifacts: [{ fileName: null, description: '知识库文档更新（meta.yaml hash 变化）', contract: false }] },
+  // Git 提交阶段是本 Story 里唯一带结构化产出物的发布动作：commitHash / 分支 / MR URL
+  // 必须可验证 —— 归档门槛与「主流程已完成」都以它为事实依据，不能只靠 Agent 汇报。
+  5: { artifacts: [{ fileName: ARTIFACT.GIT_SUBMIT, description: 'Git 提交与 MR 契约（commitHash / branch / mrUrl / targetBranch）', contract: true }] },
+  6: { artifacts: [{ fileName: null, description: '部署 URL + 构建号（可选阶段）', contract: false }] }
 }
 
 /**
@@ -136,17 +167,17 @@ const PHASE_AGENTS = {
   4: {
     agent: 'release-assistant',
     label: '发布助手',
-    instruction: '执行 git add + commit + push，并创建 MR 合并到 dev 分支。禁止使用 --no-verify'
+    instruction: '调用 kb-update Skill 增量更新知识库文档（评审通过即沉淀，不等提交与合并）'
   },
   5: {
     agent: 'release-assistant',
     label: '发布助手',
-    instruction: '调用 kb-update Skill 增量更新知识库文档'
+    instruction: '执行 git add + commit + push 开发分支，创建 MR 到 dev 分支，并产出 git-submit.json 契约（commitHash / branch / mrUrl / targetBranch）。禁止使用 --no-verify。本 Phase 完成后主流程即结束'
   },
   6: {
     agent: 'release-assistant',
     label: '发布助手',
-    instruction: '通过 devops MCP 触发云端构建和部署，回报部署 URL + 构建号'
+    instruction: '可选阶段：确认 MR 已合并进 dev 后，通过 devops MCP 触发云端构建和部署，回报部署 URL + 构建号'
   }
 }
 
@@ -180,6 +211,8 @@ function getPhaseName (phaseNum) {
 module.exports = {
   PHASE_SLUGS,
   MAX_PHASE,
+  MAIN_FLOW_END_PHASE,
+  OPTIONAL_PHASES,
   PHASE_NAMES,
   PHASE_ARTIFACTS,
   PHASE_AGENTS,

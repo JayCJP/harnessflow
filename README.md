@@ -2,7 +2,7 @@
 
 **端到端 AI 开发自动化工作流插件市场。**
 
-通过安装 **Harness** 插件，为你的 AI 编程助手（Claude Code / CodeBuddy Code）接入一条覆盖「Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 代码审查 → Git 提交 → 知识库更新 → 云端部署」全流程的自动化开发流水线，并配套知识库（KB）管理、文档生成、API 生成、Figma 设计稿协作等能力。
+通过安装 **Harness** 插件，为你的 AI 编程助手（Claude Code / CodeBuddy Code）接入一条覆盖「Bug 分析 → 需求分析 → 任务规划 → 代码开发 → 代码审查 → 知识库更新 → Git 提交 + MR（主流程终点）→ 云端部署（可选）」的自动化开发流水线，并配套知识库（KB）管理、文档生成、API 生成、Figma 设计稿协作等能力。
 
 > **兼容 Claude Code 与 CodeBuddy Code**
 > 两款工具使用相同的 `/plugin` 命令体系，安装步骤完全一致。
@@ -40,9 +40,13 @@
 | 1 | 任务规划 | 任务规划师 | task-dag.md / task-dag.json（可并行任务 DAG） |
 | 2 | 代码开发 | 前端开发工程师 | 代码变更（dev-pass 限时写保护） |
 | 3 | 代码审查 | 代码审查师 | code-review.json（AC 逐条核对结论并入 issues[]） |
-| 4 | Git 提交 + MR | 发布助手 | 提交开发分支 + 创建 MR（→ dev）+ 确认已合并 |
-| 5 | 知识库更新 | 发布助手 | 增量知识库文档（kb-update） |
-| 6 | 云端部署 | 发布助手 | dev 分支构建（env=dev, build_other=dev）+ 部署 URL |
+| 4 | 知识库更新 | 发布助手 | 增量知识库文档（kb-update） |
+| 5 | Git 提交 + MR | 发布助手 | 提交开发分支 + 创建 MR（→ dev）+ git-submit.json 契约 |
+| 6 | 云端部署（可选） | 发布助手 | dev 分支构建（env=dev, build_other=dev）+ 部署 URL |
+
+> **主流程 = 0 → 5**：代码审查通过后先沉积知识库（不依赖已提交代码），再提交并创建 MR；
+> **MR 建完即写 `status: completed`**，自动 end 与归档随之解锁。
+> 云端部署（Phase 6）是可选阶段 —— 做与不做都算结束，`dispatch` 在终态下给出 `optionalNext` 提示。
 
 #### 7 Phase 横向流转
 
@@ -59,17 +63,17 @@ flowchart LR
         P3["Phase 3<br/>代码审查<br/><i>代码审查师</i>"]
     end
     subgraph SG4["发布侧"]
-        P4["Phase 4<br/>提交 + MR → dev<br/><i>发布助手</i>"]
-        P5["Phase 5<br/>知识库更新<br/><i>发布助手</i>"]
-        P6["Phase 6<br/>dev 分支构建发布<br/><i>发布助手</i>"]
+        P4["Phase 4<br/>知识库更新<br/><i>发布助手</i>"]
+        P5["Phase 5<br/>提交 + MR → dev<br/><i>发布助手</i>"]
+        P6["Phase 6（可选）<br/>dev 分支构建发布<br/><i>发布助手</i>"]
     end
 
     P0 -->|"门控通过"| P1
     P1 -->|"门控通过<br/>签发 dev-pass"| P2
     P2 -->|"增量 lint + 编译<br/>撤销 dev-pass"| P3
     P3 -->|"无 BLOCKER"| P4
-    P4 -->|"确认 MR 已合并"| P5
-    P5 -->|"kb-update"| P6
+    P4 -->|"kb-update"| P5
+    P5 -->|"主流程结束（completed）"| P6
     P3 -.->|"有 BLOCKER<br/>fix-loop 回退"| P2
 
     classDef analysis fill:#e3f2fd,stroke:#1976d2,color:#0d47a1,stroke-width:1.5px

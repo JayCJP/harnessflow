@@ -238,12 +238,6 @@ const RECOVERY_SUGGESTIONS = {
     action: 'Task 的 figmaNodeId 必须存在于 figma-frame-inventory.json 的 frames 中',
     autoFixable: false
   },
-  // Phase 4→5: code-review 未修复项与验收结论自相矛盾
-  review_acceptance_conflict: {
-    level: 2,
-    action: '修复该审查问题（status→fixed），或把对应 AC 从 passed 改为 failed 并走修复回路 —— 不允许"问题未修 + AC 通过"并存',
-    autoFixable: false
-  },
   // Phase 2→3: 变更文件存在 lint error
   lint_error: {
     level: 2,
@@ -260,13 +254,6 @@ const RECOVERY_SUGGESTIONS = {
   code_review_blocker: {
     level: 2,
     action: '执行修复回路将问题回退给前端开发工程师修复',
-    autoFixable: false,
-    resolution: 'advance-phase.js <storyId> 2 --fix-loop'
-  },
-  // Phase 4→5: AC 验收未通过
-  ac_verification_failed: {
-    level: 2,
-    action: '验收标准未通过，执行修复回路将问题回退给前端开发工程师修复',
     autoFixable: false,
     resolution: 'advance-phase.js <storyId> 2 --fix-loop'
   },
@@ -379,6 +366,8 @@ function runGateCheck (storyId, phaseNum, state) {
     checkPhase2Gate(storyId, state, result)
   } else if (phaseNum === 3) {
     checkPhase3Gate(storyId, result)
+  } else if (phaseNum === 4) {
+    checkPhase4Gate(storyId, result)
   }
 
   // 2.5. 🆕 资源完整性检查（声明了外部依赖但未有效消费）
@@ -419,7 +408,7 @@ function runGateCheck (storyId, phaseNum, state) {
  * 判定依据（v2 证据链）：
  *   - kb-query / graphify 调用为 0 → WARNING（放行但记 debt，Evo Score 扣分）
  *
- * 检查时机：仅在 phaseNum === 3（即 Phase 3→4 门控，代码审查完成、准备进入 Git 提试前）时执行。
+ * 检查时机：仅在 phaseNum === 3（即 Phase 3→4 门控，代码审查完成、准备进入知识库更新前）时执行。
  * 此时 Phase 2 开发阶段已全部结束，trace.jsonl 的开发 tool_call 记录最完整，判定最可靠。
  * 早期阶段（phaseNum < 3）开发尚未完成，trace 不完整；后期阶段（phaseNum > 3）已过代码审查，无需重复。
  *
@@ -876,14 +865,14 @@ function checkBugScheduling (storyId, result) {
  *
  * 历史缺陷: Phase 2 此前无任何专项检查（PHASE_ARTIFACTS[2].fileName 为 null，
  *   产出物存在性检查被跳过），Phase 2→3 等价于无条件通过。结果是 SCSS
- *   `/deep/ ... ::after` 编译错误逃过全部本地门控，直到 Phase 7 云端构建才暴露。
+ *   `/deep/ ... ::after` 编译错误逃过全部本地门控，直到 Phase 6 云端构建才暴露。
  *
  * 设计取舍:
  *   - lint 只跑**本次变更文件**，避免仓库存量问题导致门控永久阻塞
  *   - 编译校验默认关闭: 构建无法增量，大项目/多项目单次耗时不可控（上限 900s），
  *     且 fix-loop 每轮回退 Phase 2 都会再触发一次全量构建，是流程阻塞的主因。
  *     需要时设 `HARNESS_RUN_BUILD=1` 显式启用。
- *   - 代价: 关闭后 SCSS/模板编译错误失去本地拦截，只能到 Phase 7 云端构建暴露
+ *   - 代价: 关闭后 SCSS/模板编译错误失去本地拦截，只能到 Phase 6 云端构建暴露
  *   - 未检测到变更时降级为 warning（可能代码已提交或本 Story 无代码改动），不误阻塞
  */
 function checkPhase2Gate (storyId, state, result) {
@@ -973,9 +962,9 @@ function checkPhase2Gate (storyId, state, result) {
   // 编译校验关闭是全局默认行为，与是否检测到变更无关，故在循环外只提示一次 ——
   // 放在循环内会随仓库数重复出现，淹没真正的 warning。
   // 前提：仓库确实有构建脚本。纯静态 / 无构建步骤的项目（如单个 HTML 页）根本不会触发
-  // 编译错误，对它提示「SCSS/模板编译错误将只能在 Phase 7 暴露」是无差别噪音（2026-09 修正）。
+  // 编译错误，对它提示「SCSS/模板编译错误将只能在 Phase 6 暴露」是无差别噪音（2026-09 修正）。
   if (process.env.HARNESS_RUN_BUILD !== '1' && anyBuildScript) {
-    result.warnings.push('编译校验默认关闭（设 HARNESS_RUN_BUILD=1 启用），SCSS/模板编译错误将只能在 Phase 7 云端构建暴露')
+    result.warnings.push('编译校验默认关闭（设 HARNESS_RUN_BUILD=1 启用），SCSS/模板编译错误将只能在 Phase 6 云端构建暴露')
   }
 }
 
@@ -1049,6 +1038,52 @@ function auditScopeAmendments (storyId, repos, changedByRepo, result) {
     result.warnings.push(
       `检测到 ${outOfScope.length} 个范围外改动文件（未声明在 task-dag.json 的 files[]）: ${list}。` +
       '清单已写入 scope-amendments.json，Phase 3 审查须逐条核对必要性'
+    )
+  }
+}
+
+/**
+ * Phase 4 门控（知识库更新 → Git 提交）: 是否真的调用过 kb-update
+ *
+ * 只产出 WARNING，不产出 blocker —— 事前硬拦在这里没有意义（见文件头「事后审计优于事前硬拦」）：
+ * 知识库更新的价值体现在下一个 Story 的 kb-query 能否查到，而不是本次能否推进。
+ */
+function checkPhase4Gate (storyId, result) {
+  // 知识库更新阶段没有文件型产出物，只能从 trace 判「做没做」：
+  // trace-command.js 会把本 Story 运行时内的 Skill 调用写成 tool_call（含 phase 号），
+  // kb-update 的调用记录就是唯一事实来源。
+  // 只判「有没有调用」，不判调用是否成功 —— 成功与否由发布助手的汇报承担，
+  // 在这里解析脚本输出只会引入第二个判定口径。
+  // 缺失时只给 WARN 不阻断：kb-init 未初始化的项目本就无法更新知识库，
+  // 用 BLOCKER 会把整条流水线卡死在一个与代码质量无关的前置缺失上。
+  const traceFile = path.join(getStoryDir(storyId), ARTIFACT.TRACE)
+  if (!fs.existsSync(traceFile)) {
+    result.warnings.push('知识库更新阶段未找到 trace.jsonl，无法确认是否调用过 kb-update（请人工确认）')
+    return
+  }
+
+  let invoked = false
+  try {
+    const lines = fs.readFileSync(traceFile, 'utf-8').split('\n')
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const e = JSON.parse(line)
+        if (e.type === 'tool_call' && String(e.phase) === '4' && String(e.skill || '').includes('kb-update')) {
+          invoked = true
+          break
+        }
+      } catch (_) { /* 单行损坏，跳过 */ }
+    }
+  } catch (_) {
+    result.warnings.push('trace.jsonl 读取失败，无法确认是否调用过 kb-update（请人工确认）')
+    return
+  }
+
+  if (!invoked) {
+    result.warnings.push(
+      '知识库更新阶段未检测到 kb-update 调用记录。评审通过后应调用 use_skill("kb-update") 增量同步知识库；' +
+      '门控不阻断推进，但知识库若不更新，下一个 Story 的 kb-query 就查不到本次经验'
     )
   }
 }

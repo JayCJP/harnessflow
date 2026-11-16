@@ -3,7 +3,7 @@
  * create-workflow.js — 创建工作流状态文件并判定原型/Figma 门控
  *
  * 职责:
- *   - 创建 .codebuddy/plans/<storyId>/e2e-state.json，初始化 8 个 Phase 的状态与门控默认项
+ *   - 创建 .codebuddy/plans/<storyId>/e2e-state.json，初始化 0-7 共 8 个 Phase 槽位的状态与门控默认项（7 为终态）
  *   - 判定并记录 prototypeRequired（是否要求 prototype-analysis.md）与 hasFigmaDesign（Figma 硬门控开关）
  *   - 确保 story 级 repos.json 存在；--bypass 时直接进入 Phase 2 并立即签发 dev-pass
  *   - --input: 建流前摄入并校验 story-input.json，使上述两项判定一次算准
@@ -70,6 +70,7 @@ const {
   ensureReposJson,
   STORY_INPUT_FILE,
   DEFAULT_MAX_REVIEW_FIX_ROUNDS,
+  PHASE_SLUGS,
 } = require('../lib/state')
 const { validateFile } = require('../services/schema-validator')
 const debugLog = require('../lib/debug-log')
@@ -300,16 +301,8 @@ function createWorkflow (storyId, title, bypass, hasFigma, mode, opts = {}) {
     phases: {}
   }
 
-  // 初始化所有 Phase 的状态
-  const phaseKeys = [
-    '0_requirement_analysis',
-    '1_task_planning',
-    '2_development',
-    '3_code_review',
-    '4_git_submit',
-    '5_knowledge_base_update',
-    '6_deployment'
-  ]
+  // 初始化所有 Phase 的状态（键名由 PHASE_SLUGS 派生，阶段换序时不必手改）
+  const phaseKeys = PHASE_SLUGS.map((slug, i) => `${i}_${slug}`)
 
   for (let i = 0; i < phaseKeys.length; i++) {
     if (bypass && i < initialPhase) {

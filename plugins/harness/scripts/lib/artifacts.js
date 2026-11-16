@@ -37,6 +37,9 @@ const ARTIFACT = {
   TASK_DAG_JSON: 'task-dag.json',
   FIGMA_FRAME_INVENTORY: 'figma-frame-inventory.json',
   CODE_REVIEW: 'code-review.json',
+  // Git 提交与 MR 契约：Phase「Git提交」由发布助手产出（commitHash / branch / mrUrl / targetBranch）。
+  // 门控据此判定「MR 已创建」，归档门槛与主流程完成判定都以它为事实依据。
+  GIT_SUBMIT: 'git-submit.json',
   FIX_REQUEST: 'fix-request.json',
   FIX_VERIFICATION: 'fix-verification.json',
   // bug 清单：fixbugs 模式下 Phase 0 产出的结构化缺陷清单（含 TAPD 原始状态、

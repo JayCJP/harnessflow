@@ -25,7 +25,7 @@
  *   - 用户输入 /start 时主 Agent 执行 start：开启 dev-pass 强制校验（此后编辑 src/ 需持 pass），
  *     同时建好工作流状态文件
  *   - harness skill 入口 A 的两步初始化：先写 story-input.json，再 start --input 一步建流
- *   - 工作流走到 Phase 7 完成、归档收尾后，用户执行 /end，主 Agent 调用 end 删除标记，
+ *   - 主流程完成（Git 提交 + MR，status: completed）、归档收尾后，用户执行 /end，主 Agent 调用 end 删除标记，
  *     解除编辑限制
  *   - 主 Agent 或用户想确认「harness 是否还开着、当前 Story 停在哪一 Phase、涉及哪些仓库」时执行 status
  *   - 已有 Story 未走 /start 激活流程时，可直接用 start 补一次激活；若已激活则拒绝并提示先 end

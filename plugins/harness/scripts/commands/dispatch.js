@@ -14,8 +14,11 @@
  *   输出为纯 JSON，主 Agent 按 status 分支机械执行:
  *     ready     Spawn nextAgent 注入 agentPrompt 干活，或执行 advanceCommand 推进
  *     blocked   状态异常，按 recovery.command / description 修复
- *     fix_loop  Phase 3/4 存在 BLOCKER，执行 recovery.command 回退 Phase 2 修复
- *     terminal  冷启动未建流 / 已归档 / 已完成，recovery 给出创建、复档或归档命令
+ *     fix_loop  Phase 3 存在 BLOCKER，执行 recovery.command 回退 Phase 2 修复
+ *     terminal  冷启动未建流 / 已归档 / 主流程已完成，recovery 给出创建、复档或归档命令
+ *
+ *   终态下若还有可选阶段（云端部署）未做，输出 optionalNext 作为「还能做什么」的提示；
+ *   它不是第五种 status，主 Agent 只在用户明确要求时转述，不据此改分支。
  *
  * 使用场景:
  *   - harness 三步循环的 Step 1 每一次都执行它，主 Agent 只按 status 分支执行，
@@ -78,7 +81,7 @@ const promptBuilder = require('../services/prompt-builder')
 const debugLog = require('../lib/debug-log')
 // 命令路径与 Phase 常量收敛到 lib 公共出口（此前 policy.js / advance-phase.js 各拼一份）
 const { ADVANCE_CMD, commandPath } = require('../lib/paths')
-const { MAX_PHASE } = require('../lib/phases')
+const { MAX_PHASE, MAIN_FLOW_END_PHASE } = require('../lib/phases')
 
 /**
  * 构造调度结果骨架
@@ -98,7 +101,9 @@ function baseResult (storyId, state) {
     agentPrompt: null,
     advanceCommand: null,
     warnings: [],
-    recovery: null
+    recovery: null,
+    // 可选阶段提示（仅终态下可能出现）：{ phase, phaseName, optional, command, description }
+    optionalNext: null
   }
 }
 
@@ -234,15 +239,32 @@ function dispatch (storyId) {
     return result
   }
 
-  // ── 终态: 流程完成 ────────────────────────────────────────
-  // 终态判定走 story-state 的 isWorkflowTerminal（唯一信源），此处不复写条件
+  // ── 终态: 主流程完成 ──────────────────────────────────────
+  // 终态判定走 story-state 的 isWorkflowTerminal（唯一信源），此处不复写条件。
+  // 主流程 = 审查 → 知识库更新 → Git 提交 + 建 MR；云端部署是可选阶段，做没做都算结束。
   if (isWorkflowTerminal(state)) {
     result.status = 'terminal'
-    result.warnings.push('工作流已完成全部 Phase。')
+    result.warnings.push('主流程已完成（代码审查 → 知识库更新 → Git 提交 + 建 MR）。')
     result.recovery = {
       type: 'completed',
       command: commandPath('archive-story.js') + ' ' + storyId + ' archive',
       description: '可执行归档收尾'
+    }
+    // 可选阶段提示：只给「还能做什么」，不进四态分支 —— 主 Agent 仅在用户明确要求时
+    // 才把它转述给用户并按其中的命令推进，不得自行执行（终态下没有「该干活」这回事）。
+    const deploymentPhase = MAX_PHASE - 1
+    const deploymentDone = state.phases?.[`${deploymentPhase}_deployment`]?.status === 'completed'
+    if (Number(state.phase) <= deploymentPhase && !deploymentDone) {
+      result.optionalNext = {
+        phase: deploymentPhase,
+        phaseName: getPhaseName(deploymentPhase),
+        optional: true,
+        command: `${ADVANCE_CMD} ${storyId} ${deploymentPhase}`,
+        description:
+          '云端部署是可选阶段：如需部署，先确认 Git 提交阶段的 MR 已合并进 dev，' +
+          `再执行 command 推进到 Phase ${deploymentPhase}（${getPhaseName(deploymentPhase)}）；` +
+          '不需要部署则直接归档收尾。本提示不构成必须执行的动作。'
+      }
     }
     return result
   }
@@ -324,8 +346,7 @@ function dispatch (storyId) {
     const agentInfo = getPhaseAgent(phase)
 
     // 修复回路已激活且卡在 Phase 3（代码审查）→ 回退开发修复
-    const isReviewOrTest = phase === 3
-    if (isReviewOrTest && gate.blockers.length > 0 && gate._meta && gate._meta.fixLoopAvailable) {
+    if (phase === 3 && gate.blockers.length > 0 && gate._meta && gate._meta.fixLoopAvailable) {
       result.status = 'fix_loop'
       result.recovery = {
         type: 'fix_loop',
@@ -433,8 +454,9 @@ function dispatch (storyId) {
   result.status = 'ready'
   result.advanceCommand = `${ADVANCE_CMD} ${storyId} ${nextPhase}`
   result.readyToAdvance = true
-  result.instruction = nextPhase >= MAX_PHASE
-    ? `执行 advanceCommand 完成工作流（Phase ${nextPhase} 为终态）`
+  result.instruction = nextPhase > MAIN_FLOW_END_PHASE
+    ? `执行 advanceCommand 推进到 Phase ${nextPhase}（${getPhaseName(nextPhase)}）；主流程在此结束，` +
+      '之后云端部署为可选阶段，dispatch 会以 optionalNext 给出提示'
     : `先执行 advanceCommand 推进到 Phase ${nextPhase}，完成后回 Step 1 重新执行 dispatch.js 取新 Phase 指令`
 
   return result

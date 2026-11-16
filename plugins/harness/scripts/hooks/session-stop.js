@@ -3,7 +3,7 @@
  * session-stop.js — Agent 每轮回答结束时的自动收尾
  *
  * 职责:
- *   - 单次扫描所有 Story 目录，产出 session 变更摘要（活跃工作流 / src 变更 / 知识库待办）
+ *   - 单次扫描所有 Story 目录，产出 session 变更摘要（活跃工作流 / src 变更）
  *   - 清理过期 dev-pass，把 trace.jsonl 中的 Hook 拒绝事件沉淀到经验库
  *   - 当前激活 Story 走到终态时自动关闭 Harness 模式（harness end）
  *
@@ -33,8 +33,9 @@
  *       4. 当前激活 Story 走到最后一步时自动结束 Harness 模式（执行 end 子命令）
  *       5. 输出 session 变更摘要
  *   - 各环节独立 try/catch，单点失败不阻塞整体收尾。
- *   - autoEndHarness：终态判定走 isWorkflowTerminal（唯一信源，阈值 = MAX_PHASE），
- *     Phase 表增删自动适配，不硬编码 Phase 编号；命中对激活 Story 执行 `harness end` 本身。
+ *   - autoEndHarness：终态判定走 isWorkflowTerminal（唯一信源，阈值 = MAIN_FLOW_END_PHASE，
+ *     即 Git 提交阶段；云端部署为可选阶段，做没做都算结束），Phase 表增删自动适配，
+ *     不硬编码 Phase 编号；命中对激活 Story 执行 `harness end` 本身。
  *     无激活 Story 时回退到旧逻辑（无活跃工作流才关闭）。
  *   - additionalContext 超过 MAX_CONTEXT_CHARS(8000) 时逐级降级：完整 → 去掉 src 文件清单 → 只保留核心计数。
  *   - 诊断日志走 stderr，不污染 stdout 的 JSON 输出。
@@ -62,9 +63,6 @@ const GIT_TIMEOUT = 5000
 /** end 子命令脚本路径 —— 自动结束复用 end 本身，保证「如何结束」只有一处定义 */
 const WORKFLOW_CMD = path.join(__dirname, '..', 'commands', 'harness-workflow.js')
 const END_TIMEOUT = 5000
-
-/** 非代码文件目录前缀，不计入 src 变更统计 */
-const NON_SRC_PREFIXES = ['node_modules/', 'dist/', '.codebuddy/', '.git/']
 
 /** additionalContext 字符上限（Claude Code 对 hook 输出有截断，留出安全余量） */
 const MAX_CONTEXT_CHARS = 8000
@@ -124,33 +122,6 @@ function getChangedFiles () {
   const untracked = safeGit('ls-files --others --exclude-standard').split('\n').filter(Boolean)
 
   return [...new Set([...staged, ...unstaged, ...untracked])]
-}
-
-/** src/ 下是否有变更 */
-function hasSrcChanges (files) {
-  return files.some(f => {
-    const n = f.replace(/\\/g, '/')
-    return n.startsWith('src/') && !NON_SRC_PREFIXES.some(p => n.startsWith(p))
-  })
-}
-
-// ─── 知识库更新 ──────────────────────────────────────────────────
-
-function checkKbUpdateTasks (activeWorkflows, changedFiles) {
-  if (!hasSrcChanges(changedFiles)) return []
-
-  return activeWorkflows
-    .filter(wf => {
-      const dev = wf.state.phases?.['2_development']
-      return dev?.status === 'completed'
-    })
-    .map(wf => ({
-      storyId: wf.storyId,
-      title: wf.state.title || '',
-      reason: wf.state.phases?.['4_git_submit']?.commitHash
-        ? `可增量更新 (commit: ${wf.state.phases['4_git_submit'].commitHash})`
-        : '开发已完成，知识库未更新'
-    }))
 }
 
 // ─── Dev-Pass 清理 ───────────────────────────────────────────────
@@ -231,7 +202,7 @@ function runHarnessEnd () {
  * Stop Hook 自动结束 Harness 模式（harness end）
  *
  * 触发条件：当前激活的 Story（.harness-active 标记）已走到最后一步。
- * 「最后一步」由 isWorkflowTerminal 判定（唯一信源，阈值 = MAX_PHASE），
+ * 「最后一步」由 isWorkflowTerminal 判定（唯一信源，阈值 = MAIN_FLOW_END_PHASE = Git 提交阶段），
  * Phase 表增删无需改这里 —— 旧实现硬编码 `phase >= 8` 而终态实为 7，
  * 于是自动 end 从未真正触发过。
  *
@@ -286,14 +257,14 @@ function autoEndHarness (activeWorkflows, completedWorkflows) {
   }
 
   if (!isWorkflowTerminal(state)) {
-    return { ended: false, message: `${activeStoryId} 流程未走完最后一步 (phase=${state.phase}, status=${state.status})，保持 Harness 模式` }
+    return { ended: false, message: `${activeStoryId} 主流程未走完 (phase=${state.phase} ${getPhaseName(state.phase)}, status=${state.status})，保持 Harness 模式` }
   }
 
   try {
     runHarnessEnd()
     return {
       ended: true,
-      message: `${activeStoryId} 已走完最后一步 (Phase ${state.phase} ${getPhaseName(state.phase)})，Harness 模式已自动关闭（harness end）`
+      message: `${activeStoryId} 主流程已完成 (Phase ${state.phase} ${getPhaseName(state.phase)})，Harness 模式已自动关闭（harness end）`
     }
   } catch (e) {
     return { ended: false, message: `自动 end 执行失败: ${e.message}` }
@@ -302,7 +273,7 @@ function autoEndHarness (activeWorkflows, completedWorkflows) {
 
 // ─── 摘要构建 ────────────────────────────────────────────────────
 
-function buildSummary (activeWorkflows, completedWorkflows, changedFiles, harnessResult, kbTasks) {
+function buildSummary (activeWorkflows, completedWorkflows, changedFiles, harnessResult) {
   const allSrcFiles = changedFiles
     .filter(f => f.replace(/\\/g, '/').startsWith('src/'))
     .map(f => f.replace(/\\/g, '/'))
@@ -329,8 +300,7 @@ function buildSummary (activeWorkflows, completedWorkflows, changedFiles, harnes
       srcTotal: allSrcFiles.length,
       src: srcFiles,
       ...(srcOmitted > 0 ? { srcOmitted } : {})
-    },
-    kbUpdateTasks: kbTasks
+    }
   }
 }
 
@@ -364,7 +334,6 @@ function serializeSummary (summary) {
     activeWorkflows: summary.activeWorkflows.map(w => ({ storyId: w.storyId, phase: w.phase, status: w.status })),
     harness: summary.harness,
     changedFiles: { total: summary.changedFiles.total, srcTotal: summary.changedFiles.srcTotal, src: [], truncated: true },
-    kbUpdateTasks: summary.kbUpdateTasks.map(t => ({ storyId: t.storyId })),
     truncated: true
   }).slice(0, MAX_CONTEXT_CHARS)
 }
@@ -403,10 +372,8 @@ function main () {
 
   const harnessResult = autoEndHarness(active, completed)
 
-  const kbTasks = checkKbUpdateTasks(active, changedFiles)
-
   // 3. 构建输出
-  const summary = buildSummary(active, completed, changedFiles, harnessResult, kbTasks)
+  const summary = buildSummary(active, completed, changedFiles, harnessResult)
   const additionalContext = serializeSummary(summary)
 
   const output = {

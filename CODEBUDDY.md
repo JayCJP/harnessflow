@@ -13,7 +13,7 @@ Rules:
 ## 项目是什么
 
 Harness Marketplace —— 一个 **AI 编程助手的插件市场仓库**（同时兼容 Claude Code / CodeBuddy Code）。
-仓库本身不产出业务代码，产出的是 **Harness 插件**：一条覆盖「需求分析 → 任务规划 → 代码开发 → 代码审查 → Git 提交 → 知识库更新 → 云端部署」的端到端自动化流水线。
+仓库本身不产出业务代码，产出的是 **Harness 插件**：一条覆盖「需求分析 → 任务规划 → 代码开发 → 代码审查 → 知识库更新 → Git 提交 + MR」的端到端自动化流水线（云端部署为可选阶段）。
 
 - 主文档：[README.md](./README.md)（面向用户） / [INSTALL.md](./INSTALL.md)（面向 AI 代理的安装验证）
 - 插件本体：`plugins/harness/`
@@ -49,7 +49,7 @@ plugins/harness/
 │   ├── services/          # policy.js（门控）、prompt-builder.js、schema-validator.js、context-refresh.js、experience.js
 │   ├── lib/               # 零依赖底座：paths / phases / artifacts / dev-pass / scope / state / contracts / repos
 │   ├── hooks/             # enforce-dev-pass.js、enforce-artifact.js、enforce-state-file.js、session-*.js、trace-command.js
-│   ├── schemas/           # 8 个 JSON Schema（ajv 校验）
+│   ├── schemas/           # 11 个 JSON Schema（ajv 校验）
 │   ├── audit/             # harness-audit.js、metrics-aggregator.js（自进化体检）
 │   ├── experience/        # 失败模式库、指标洞察、改进提案
 │   └── __tests__/         # 9 个 .test.js，run-all.js 串行跑
@@ -87,12 +87,22 @@ node scripts/audit/harness-audit.js --json               # 自进化体检
 
 ## 已知状态
 
-`npm test` 当前并非全绿：55/55 用例通过的测试文件有 7 个，另有 2 个文件存在失败断言，合计 5 条失败 ——
+`npm test` 全绿：14 个测试文件全部通过（含 `terminal-threshold.test.js` 13 条）。
 
-- `fixbugs-regression.test.js`：3 条，断言 `AGENT_CONSTRAINTS` 为 4 条且含「检索失败上报」「Bash 失败交代」
-- `optimization-regression.test.js`：2 条，断言同一批约束已注入 agentPrompt
+`AGENT_CONSTRAINTS` 以代码为准固定为 2 条（v3 token 优化后的最终口径），相关测试与注释均已对齐。
+如需调整，按 `prompt-builder.js` 定义处的逐条核对表（判据是「agent .md 有没有覆盖」，不是「重不重要」）。
 
-而 `prompt-builder.js:102` 当前是 2 条。这是 **token 优化收敛与测试期望之间的未对齐**（`prompt-builder.js` 头部注释里两处说法也自相矛盾：一处写「从 5 条减到 2 条」，一处写「现 4 条」）。修 bug 时先确认是改代码补回约束、还是改测试对齐 2 条，不要默认全绿。
+## Phase 顺序（2.3.1 起重排）
+
+主流程：`需求 → 规划 → 开发 → 审查 → 知识库更新 → Git 提交 + MR`，**走完 Git 提交即写 `status:'completed'`**，
+其后的云端部署（Phase 6）是可选阶段。三点务必记住：
+
+- 终态阈值唯一信源 = `lib/phases.js` 的 `MAIN_FLOW_END_PHASE`（=5），`isWorkflowTerminal` 据此判定；
+  归档门槛、自动 end、度量完成率都走它，**不要再硬编码 Phase 号**
+- 「Git 提交」阶段有契约 `git-submit.json`（commitHash / branch / mrUrl / targetBranch），
+  缺文件或 `mrUrl` 为空即 BLOCKER —— 它是「MR 已创建」的唯一可验证事实
+- 知识库更新在提交之前，`meta.yaml` 的 `git.hash` 反映评审时点，不必对齐 HEAD；
+  `checkPhase4Gate` 只看 trace 里有没有 `kb-update` 调用，缺失只 WARN
 
 ## 分支与交付
 

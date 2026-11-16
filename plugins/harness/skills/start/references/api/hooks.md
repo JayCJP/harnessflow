@@ -23,7 +23,7 @@
 
 **被拦了怎么办**：这两个文件只能由脚本维护。要改 phase 用 `advance-phase.js`；
 要改原型/Figma 判定用 `create-workflow.js --refresh-input`；
-要签发/撤销 dev-pass 什么都不用做，`advance-phase.js` 在 Phase 1→2 / 2→3 / 4→5 自动处理。
+要签发/撤销 dev-pass 什么都不用做，`advance-phase.js` 在 Phase 1→2 / 2→3 / 3→4 自动处理。
 
 ## enforce-dev-pass.js — src/ 编辑保护
 

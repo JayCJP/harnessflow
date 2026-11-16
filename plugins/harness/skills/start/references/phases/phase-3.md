@@ -63,7 +63,8 @@ node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind 
 ```
 
 执行完回 Step 1，`dispatch.js` 会输出带 `fixLoopContext` 的 `agentPrompt`。
-默认 2 轮预算（review 与 test 各自独立计数，见 `state.maxReviewFixRounds`），
+默认 2 轮预算（仅代码审查一个失败源，见 `state.maxReviewFixRounds`；
+原 Phase 4 功能测试的 test 预算已随该阶段一并删除），
 用尽后 `status: blocked` 且 `recovery.command` 为 null → 转人工。
 
 ⚠️ Story 已归档时禁止 `--fix-loop`，需先 `archive-story.js <id> restore` 复档。

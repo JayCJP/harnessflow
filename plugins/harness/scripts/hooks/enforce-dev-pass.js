@@ -40,7 +40,7 @@
  *     替代机制: policy.js 在 Phase 2→3 门控用 git 实际变更比对 task-dag.json 声明范围
  *     （lib/scope.js），产出 scope-amendments.json，由 Phase 3 审查逐条核对必要性。
  *   - 拦截工具: write_to_file / replace_in_file / apply_patch / Write / Edit；非 src/ 目标直接放行。
- *   - dev-pass 撤销双保险: Phase 2→3（主）+ Phase 4→5（兜底）；currentPhase > 2 时即便 dev-pass 文件有效也拒绝。
+ *   - dev-pass 撤销双保险: Phase 2→3（主）+ Phase 3→4（兜底，进入知识库更新前）；currentPhase > 2 时即便 dev-pass 文件有效也拒绝。
  *   - 拒绝事件通过 hookSpecificOutput.recordFailure 携带结构化失败信息（failureType / rootCause / resolution），
  *     供 session-stop.js 从 trace.jsonl 读取并沉淀到经验库。
  *   - recordFailure.failureType 取值: dev_pass_missing / dev_pass_expired。
@@ -89,7 +89,7 @@ runHook('PreToolUse', ctx => {
       phase: '-1',
       recordFailure: {
         ...failure,
-        resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）'
+        resolution: '必须在 Phase 2 通过 advance-phase.js 签发 dev-pass 后才能编辑 src/。dev-pass 撤销点：Phase 2→3（主）+ Phase 3→4（兜底）'
       }
     })
     // debug 载荷层：拒绝详情留痕（storyId 取激活标记，无 dev-pass 可读）
@@ -102,14 +102,14 @@ runHook('PreToolUse', ctx => {
     })
     return {
       decision: 'deny',
-      stopReason: 'HARNESS MODE - no valid dev-pass. Must advance to Phase 2. dev-pass revoked at Phase 2→3 (primary) and Phase 4→5 (safety net).',
+      stopReason: 'HARNESS MODE - no valid dev-pass. Must advance to Phase 2. dev-pass revoked at Phase 2→3 (primary) and Phase 3→4 (safety net).',
       reason: 'No valid dev-pass',
       failure
     }
   }
 
   // 🔴 CCHF v5: 即使 dev-pass 文件有效，也需校验当前 phase 是否仍是 Phase 2
-  // dev-pass 撤销双保险：Phase 2→3（主） + Phase 4→5（兜底）
+  // dev-pass 撤销双保险：Phase 2→3（主） + Phase 3→4（兜底，进入知识库更新前）
   // Phase 3+ 时 dev-pass 应已失效，但防止过期 dev-pass.json 残留导致非法编辑
   let currentPhase = -1
   if (devPass.storyId) {
@@ -123,7 +123,7 @@ runHook('PreToolUse', ctx => {
     const failure = {
       failureType: 'dev_pass_expired',
       rootCause: `Agent 在 Phase ${currentPhase} 试图编辑 src/，dev-pass 仅在 Phase 2 有效`,
-      resolution: 'dev-pass 撤销点：Phase 2→3（主）+ Phase 4→5（兜底）。如需编辑请先回到 Phase 2'
+      resolution: 'dev-pass 撤销点：Phase 2→3（主）+ Phase 3→4（兜底）。如需编辑请先回到 Phase 2'
     }
     trace.appendTrace(devPass.storyId || null, {
       type: 'hook_rejection',
@@ -142,7 +142,7 @@ runHook('PreToolUse', ctx => {
     })
     return {
       decision: 'deny',
-      stopReason: `HARNESS MODE - dev-pass expired (current phase=${currentPhase}, dev-pass only valid in Phase 2). Revoked at Phase 2→3 (primary) + Phase 4→5 (safety net).`,
+      stopReason: `HARNESS MODE - dev-pass expired (current phase=${currentPhase}, dev-pass only valid in Phase 2). Revoked at Phase 2→3 (primary) + Phase 3→4 (safety net).`,
       reason: 'dev-pass expired - not in Phase 2',
       failure
     }

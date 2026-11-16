@@ -85,12 +85,12 @@
     },
     {
       "id": "INSIGHT-bottleneck-p6",
-      "targetPhase": 5,
+      "targetPhase": 6,
       "type": "bottleneck",
       "severity": "warning",
       "title": "Phase 6(云端部署)耗时超出阈值",
       "description": "云端部署阶段耗时偏长（等待构建/部署），影响整体交付效率",
-      "recommendation": "尽早触发构建，部署等待期间并行推进知识库更新，避免串行空等",
+      "recommendation": "部署是可选阶段，知识库更新与 Git 提交均应在部署前完成，不依赖部署等待窗口",
       "evidence": "2 个 Story: avg=91min, max=183min",
       "sourceProjects": [
         "CustomerServiceSystem"

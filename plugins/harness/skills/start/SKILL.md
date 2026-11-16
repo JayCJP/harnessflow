@@ -1,8 +1,8 @@
 ---
 name: start
 description: >
-  Start — Harness 工作流执行器（启动/推进 8 Phase 流水线：Bug 分析 → 需求分析 → 任务规划 →
-  代码开发 → 审查 → 测试 → 部署）。两条入口：新建工作流（识别 run / fixbugs 意图、
+  Start — Harness 工作流执行器（启动/推进 7 Phase 流水线：需求分析 → 任务规划 → 代码开发 →
+  代码审查 → 知识库更新 → Git 提交 + MR（主流程终点）→ 云端部署（可选））。两条入口：新建工作流（识别 run / fixbugs 意图、
   写 story-input.json、启动）与继续编排（已有工作流中途恢复）。
   用户说「做个需求 / 开发功能 / 实现某页面」「修 bug / 处理 TAPD 缺陷 / 某功能报错」
   「继续 / 恢复某个 Story」，或直接调用 /start 时使用本 skill。
@@ -13,7 +13,7 @@ description: >
 
 > **渐进式披露**：本文档只保留两件必用内容 —— **入口判模**与**三步循环骨架**。
 > 条件性内容已外移到 `references/`：新建工作流与 story-input schema（`启动入口.md`）、
-> 8 Phase 逐相门控（`phases/phase-N.md`）、脚本 API（`api/*.md`）、错误恢复、代码检索、
+> 7 Phase 逐相门控（`phases/phase-N.md`）、脚本 API（`api/*.md`）、错误恢复、代码检索、
 > 工作流生命周期、Prompt 单一信源。用到时按文末索引表 `read_file`，避免常驻 context 浪费。
 
 ## 入口：先选一条
@@ -28,7 +28,7 @@ description: >
 > ⚠️ 判这张表之前**先确认 storyId**：用户已经给了 id 且目录存在 → 直接进入口 B，
 > 不要因为「想重新开始」就新建一个。重复建 Story 是最常见的失控来源，见 A2。
 
-两套流程（run / fixbugs）走**同一条** 8 Phase 流水线。它们的全部差异都由脚本按
+两套流程（run / fixbugs）走**同一条** 7 Phase 流水线。它们的全部差异都由脚本按
 `story-input.json` 自动处理（`getStoryMode` / `isPrototypeRequired` / `detectFigmaSource` /
 `prompt-builder` 的 mode 分支），**你不需要为两种模式做任何额外动作** —— 只要 mode 和 sources 写对。
 
@@ -208,7 +208,7 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 
 运行时的权威来源是 `scripts/lib/state.js` 的 `PHASE_AGENTS`，由 `dispatch.js` 查表后以
 `nextAgent` 字段输出。**主 Agent 用 `nextAgent`，不查任何表。**
-需要人读的 8 Phase 总表（名称 / 注册名 / 产出物 / 门控实现）见 `references/phases/README.md`。
+需要人读的 7 Phase 总表（名称 / 注册名 / 产出物 / 门控实现）见 `references/phases/README.md`。
 
 两条必守：
 
@@ -238,7 +238,7 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 **职责不越界**（分析必须在子 Agent 上下文内完成）:
 
 - 🚫 主 Agent 不加载 `tapd-bug-analyzer`、不调任何 TAPD MCP 工具 —— 中间推理会在跨 Agent 传递中
-  丢失，且上下文被原始数据撑满，后续 8 个 Phase 全程带着无关内容
+  丢失，且上下文被原始数据撑满，后续 7 个 Phase 全程带着无关内容
 - 🚫 主 Agent 不分析 Bug / 不判断改哪些文件 —— 那是 Phase 0 与 Phase 2 的职责
 - 🚫 主 Agent 不自行拼 Phase 0 prompt —— `agentPrompt` 是唯一出口，自行拼装会导致注入内容逐轮不一致
 
@@ -264,11 +264,11 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 | 激活/查看/归档/复档工作流 | `references/工作流生命周期.md` |
 | 理解为何不能加工 prompt | `references/Agent-Prompt-单一信源.md` |
 
-### 8 Phase 详情
+### 7 Phase 详情
 
 | 场景 | 读取文件 |
 |------|---------|
-| `advance-phase.js` 在 Phase N→N+1 报门控失败 | `references/phases/phase-N.md`（N=0~7，只读当前那一个） |
+| `advance-phase.js` 在 Phase N→N+1 报门控失败 | `references/phases/phase-N.md`（N=0~6，只读当前那一个） |
 | 需要核对某 Phase 该产出什么 / Story 目录结构 / 通用门控 | `references/phases/README.md` |
 
 `phase-N.md` 统一 5 段：职责与 Agent 注册名 → 产出物清单 → 出门门控（级别 + failureType）

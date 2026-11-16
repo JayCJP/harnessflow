@@ -63,7 +63,10 @@ const SCHEMA_MAP = {
   'bug-list.schema.json': 'bug-list.json',
   // story-info.json 是 Story 身份卡，建流时写入、归档时保留，不是 Phase 产出物，
   // 注册它只为让模块写入后的结构可被校验，不改变任何门控行为。
-  'story-info.schema.json': 'story-info.json'
+  'story-info.schema.json': 'story-info.json',
+  // git-submit.json 是「Git 提交」阶段的契约：commitHash / branch / mrUrl / targetBranch。
+  // 归档门槛与「MR 已创建」的事实依据都读它，注册后走统一 schema 校验。
+  'git-submit.schema.json': 'git-submit.json'
 }
 
 /** 缓存已编译的 schema 校验器 */
@@ -259,9 +262,9 @@ function getPhaseArtifacts (phaseNum) {
     1: ['task-dag.json'],
     2: [],
     3: ['code-review.json'],
-    4: [],
-    5: [],
-    6: []
+    4: [],               // 知识库更新：产出是文档与 meta.yaml hash，无 story 级 JSON 契约
+    5: ['git-submit.json'], // Git 提交 + 建 MR：契约是可验证事实
+    6: []                // 云端部署（可选）：部署 URL + 构建号由汇报承担
   }
   return phaseArtifacts[phaseNum] || []
 }

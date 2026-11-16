@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * fix-loop.js — --fix-loop: Phase 3/4 失败后的修复回路
+ * fix-loop.js — --fix-loop: Phase 3（代码审查）失败后的修复回路
  *
  * 职责:
  *   1. 从失败 Phase 的产出物提取待修复问题（code-review.json 的 open BLOCKER 为唯一
@@ -16,7 +16,7 @@
  *   emit(r.output); process.exit(r.exitCode)
  *
  * 使用场景:
- *   - Phase 3 代码审查报出 BLOCKER / Phase 4 验收未通过 → 回退 Phase 2 重修
+ *   - Phase 3 代码审查报出 BLOCKER → 回退 Phase 2 重修
  *
  * 说明:
  *   - 本模块只做「计算 + 落盘」，不 emit、不 process.exit：输出由主文件统一出口，

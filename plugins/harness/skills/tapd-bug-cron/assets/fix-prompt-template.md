@@ -130,7 +130,7 @@ get_bug(workspace_id={{WORKSPACE_ID}}, options={
 
 dispatch 返回 terminal 时，**不要自动重开工作流**，输出待办并结束：
 
-  本 Story 已完成（Phase 7）。本轮检测到 N 个新缺陷：<id> <标题>...
+  本 Story 主流程已完成（至 Git 提交 + MR）。本轮检测到 N 个新缺陷：<id> <标题>...
   建议执行 /harness archive 归档后重新发起。
 
 不做 --rollback：定时任务无权决定「何时开启新一轮开发」。

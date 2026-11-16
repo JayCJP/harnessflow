@@ -303,11 +303,11 @@ ok('blockers 无 unknown 类型（P2-2）', !typesA.includes('unknown'), JSON.st
 
 // ════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════
-section('6. P3-2: 检索失败上报约束注入')
+section('6. AGENT_CONSTRAINTS 精简口径（以代码为准 = 2 条）')
 
-ok('AGENT_CONSTRAINTS 含「检索失败必须上报」', promptBuilder.AGENT_CONSTRAINTS.some(c => /检索失败必须停下上报/.test(c)),
+ok('AGENT_CONSTRAINTS 为 2 条', promptBuilder.AGENT_CONSTRAINTS.length === 2,
   JSON.stringify(promptBuilder.AGENT_CONSTRAINTS))
-ok('agentPrompt 约束段含检索失败上报', /检索失败必须停下上报主 Agent/.test(p0pb.agentPrompt))
+ok('agentPrompt 不再注入「检索失败上报」约束', !/检索失败必须停下上报主 Agent/.test(p0pb.agentPrompt))
 
 // ════════════════════════════════════════════════════════════
 section('7. P2-1: dispatch 预检落盘 → advance 对账补记 preGateBlocked（端到端）')

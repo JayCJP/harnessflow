@@ -37,12 +37,13 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> archive [
 |------|------|
 | `--dry-run` | 预览归档文件清单，不实际移动 |
 | `--round <N>` | 指定轮次编号（缺省自动检测：扫描 `archive/round-*` 取最大+1） |
-| `--force` | 非终态（phase < 8）强制归档 |
+| `--force` | 主流程未走完（未到 Git 提交阶段）时强制归档 |
 
 **执行流程**：
 1. 读取 `e2e-state.json` 获取当前状态
 2. 防重复归档：root 目录无文件时拒绝
-3. 终态检查（phase < 8 需 `--force`）
+3. 终态检查（主流程未走完需 `--force`）：主流程 = 审查 → 知识库更新 → Git 提交 + 建 MR，
+   到达 Git 提交阶段即可直接归档；云端部署是可选阶段，未做也不阻塞归档（输出 `optionalNote` 提示）
 4. 扫描 root 目录**所有文件**（排除 `archive/` 子目录）
 5. 更新 `e2e-state.json` 状态为 `archived`，追加 trace
 6. 将文件移入 `archive/round-{N}/`（含 e2e-state.json / trace.jsonl / repos.json），
@@ -161,7 +162,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/commands/archive-story.js <storyId> status
 ## 安全约束
 
 1. **防重复归档** — root 除 `story-info.json` / `debug.jsonl` 外无文件时拒绝再次归档
-2. **非终态保护** — `phase < 8` 时警告，需 `--force` 强制归档
+2. **主流程保护** — 未走完 Git 提交阶段时警告，需 `--force` 强制归档
 3. **复档冲突保护** — root 存在同名文件时拒绝覆盖（需 `--force`）
 4. **dry-run 优先** — 建议先预览确认无误后正式执行
 5. **全量归档** — 除身份卡与运行时日志外全部进 archive，归档即完整备份

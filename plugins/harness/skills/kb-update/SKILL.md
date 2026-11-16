@@ -5,7 +5,7 @@ description: "任务完成后自动增量更新知识库。接收 git commit has
 
 # kb-update — 任务完成后自动更新知识库（全局 Skill）
 
-在 Git 提交后自动将本次开发内容同步到知识库。
+在代码审查通过后、Git 提交前自动将本次开发内容同步到知识库。
 
 > 本 Skill 自包含：脚本 `./kb-update.cjs` → 数据驱动域匹配（基于 meta.yaml），不硬编码任何路径规则。
 > "AI 负责认知，脚本负责执行" — git diff + 域匹配由脚本完成，文档更新由 AI 完成。

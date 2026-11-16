@@ -21,13 +21,13 @@ Agent 注册名 **`frontend-developer`**（前端开发工程师）。按 `task-
 ```
 Phase 1→2: 脚本自动签发
 Phase 2→3: 脚本自动撤销（主撤销点）
-Phase 3→4: 脚本自动兜底撤销（防 fix-loop 残留，幂等）
+Phase 3→4: 脚本自动兜底撤销（防 fix-loop 残留，幂等）—— 进入知识库更新即关窗口
 ```
 
 | 操作 | 命令 | 场景 |
 |------|------|------|
 | 手动续签 | `node $HARNESS/advance-phase.js <storyId> 2 --renew-pass` | 开发超过 2h，dev-pass 过期 |
-| fix-loop 重签 | 自动（`--fix-loop` 内部处理） | 审查/测试失败回退开发 |
+| fix-loop 重签 | 自动（`--fix-loop` 内部处理） | Phase 3 代码审查失败回退开发 |
 
 ## 改动范围怎么管（事后审计，不是事前拦截）
 
@@ -94,5 +94,6 @@ HARNESS_RUN_BUILD=1 node $HARNESS/advance-phase.js <storyId> 3
   照常改并在 Phase 3 审查里说清必要性即可。详见 `../api/hooks.md`。
 - **lint error 卡住但问题在存量代码**：门控只 lint 变更文件；若确实是变更文件的存量问题，
   先 `--lint-fix`，剩余的手工修 —— 不要绕过门控。
-- **fix-loop 反复回到本 Phase**：默认每个失败源各 2 轮预算（review / test 独立计数），
+- **fix-loop 反复回到本 Phase**：默认 2 轮预算（仅 Phase 3 代码审查一个失败源，
+  `state.maxReviewFixRounds`；原 Phase 4 功能测试的 test 预算已随该阶段一并删除），
   用尽后 `dispatch.js` 输出 `status: blocked` 且 `recovery.command` 为 null → 转人工。

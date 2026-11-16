@@ -22,7 +22,7 @@
  *     Skill 与 MCP 资源使用），并合并洞察到全局经验库
  *
  * 使用场景:
- *   - 自动触发: 推进到终态 Phase 7（Phase 6 云端部署完成）时由 commands/advance-phase.js 通过 execSync 调用，
+ *   - 自动触发: 主流程走完（Git 提交 + 建 MR 完成）时由 commands/advance-phase.js 通过 execSync 调用，
  *     把本 Story 的洞察合并进全局经验库（超时或失败均非阻塞）
  *   - 自动消费: hooks/session-start.js 与 services/prompt-builder.js 通过
  *     experience.getMetricsInsights(phase) 读取全局洞察，按 targetPhase 注入 Agent prompt
@@ -152,8 +152,10 @@ function aggregateMetrics () {
     // 到达过 Phase 3 代码审查的 Story（fix-loop 触发率分母，Story 级口径）
     if ((state.phase || 0) >= 3) storiesReachedReview++
 
-    // Story 完成状态
-    if (state.status === 'completed' || (state.phase >= 6 && state.phases && state.phases['6_deployment'] && state.phases['6_deployment'].status === 'completed')) {
+    // Story 完成状态：只认 status === 'completed'（由 advance-phase 在主流程走完时写入）
+    // 不再看 `phase >= 6 && phases['6_deployment']` —— 那条分支把「到达部署阶段」当成「已完成」，
+    // 与 isWorkflowTerminal 是第二个终态口径；部署已是可选阶段，做没做都不影响完成率。
+    if (state.status === 'completed') {
       completedStories++
     }
 
@@ -397,16 +399,16 @@ function generateInsights (metrics) {
  * @returns {string} 建议文本
  */
 function getRecommendationForPhase (phase) {
-  // Phase 编号对齐 lib/phases.js（0 需求 / 1 规划 / 2 开发 / 3 审查 / 4 Git提交 /
-  // 5 知识库 / 6 部署 / 7 终态）。原 Phase 4「功能测试」移除后，4-7 的建议整体前移一位。
+  // Phase 编号对齐 lib/phases.js（0 需求 / 1 规划 / 2 开发 / 3 审查 / 4 知识库更新 /
+  // 5 Git提交 / 6 部署（可选） / 7 终态）。2.3.1 起知识库更新与 Git 提交换序。
   const recommendations = {
     0: '需求分析阶段确保 AC 覆盖完整、格式正确，open-questions 全部 resolved 后再推进',
     1: '任务规划时将大 task 拆为 Fork-Join 并行，单 task 控制在 15min 内，为每个 task 声明完整 files',
     2: '开发阶段加强自测，ESLint 0 error 后再提交审查，参考知识库 pitfalls.md 避免已知坑点',
     3: '代码审查师在 FIX_DATA 块中给出代码级建议（含行号和替换方案），并逐条核对 AC',
-    4: 'Git 提交确保 commit 格式规范，禁止 --no-verify，只 stage 本 Story 相关文件',
-    5: '知识库更新时保留手工批注，调用 kb-update 增量同步',
-    6: '云端部署前确认 dev 分支 MR 已合并、构建产物完整',
+    4: '知识库更新时保留手工批注，调用 kb-update 增量同步',
+    5: 'Git 提交确保 commit 格式规范，禁止 --no-verify，只 stage 本 Story 相关文件，并产出 git-submit.json',
+    6: '云端部署（可选阶段）前确认 dev 分支 MR 已合并、构建产物完整',
     7: '工作流终态，无需优化建议'
   }
   return recommendations[phase] || '优化该 Phase 的执行效率'

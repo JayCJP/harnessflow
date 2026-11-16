@@ -21,15 +21,15 @@
  *     查看当前归档状态
  *   --dry-run       预览将要归档的文件清单，不实际移动
  *   --round <N>     archive 缺省自动取最大轮次 +1，restore 缺省自动取最新轮次
- *   --force         archive: 未达终态 (phase < 8) 时强制归档；restore: 覆盖 root 同名文件
+ *   --force         archive: 主流程未走完（未到 Git 提交阶段）时强制归档；restore: 覆盖 root 同名文件
  *   --keep-archive  restore 时保留归档副本（默认移动，归档目录会被清空）
  *
  * 使用场景:
- *   - 工作流走完 Phase 7、dispatch.js 输出 status=terminal 后，主 Agent 执行 archive 收尾，
+ *   - 主流程走完（Git 提交 + 建 MR，dispatch.js 输出 status=terminal）后，主 Agent 执行 archive 收尾，
  *     把 Story 目录清空以免污染下一次开发
  *   - advance-phase.js 以"Story 已归档"拒绝 --rollback / --fix-loop 时，先执行 restore 复档
  *     恢复操作能力，再继续推进
- *   - 归档前用 --dry-run 核对将要移走的文件清单；中途放弃的 Story (phase < 8) 用 --force 强制归档
+ *   - 归档前用 --dry-run 核对将要移走的文件清单；中途放弃的 Story（主流程未走完）用 --force 强制归档
  *   - 用 list / status 排查"这个 Story 归档了没、归档在第几轮"，尤其 root 已被清空、
  *     e2e-state.json 不可见时
  *
@@ -41,7 +41,7 @@
  *   - Story 身份卡 story-info.json 不参与归档：它是归档后查询 storyId / TAPD 需求与工作区 /
  *     仓库的唯一入口，搬进 round 目录等于让它失效。archive / restore 会就地更新它的
  *     归档时间线与状态。
- *   - 终态检查：phase < 8 时默认拒绝归档，需 --force；归档会写入 state.status='archived'
+ *   - 终态检查：isWorkflowTerminal 为假时默认拒绝归档，需 --force；归档会写入 state.status='archived'
  *     以及 archivedAt / archiveRound / archiveDir。
  *   - restore 默认移动（归档目录随之清空），--keep-archive 改为复制以保留归档副本；
  *     root 存在同名文件时需 --force 覆盖，否则先报冲突清单。
@@ -56,11 +56,14 @@ const path = require('path')
 const {
   getStoryDir,
   readStateFile,
-  writeStateFile
+  writeStateFile,
+  isWorkflowTerminal,
+  getPhaseName
 } = require('../lib/state')
 const trace = require('../lib/trace')
 const debugLog = require('../lib/debug-log')
 const { ARTIFACT } = require('../lib/artifacts')
+const { MAX_PHASE } = require('../lib/phases')
 const { markArchived, markRestored, readStoryInfo } = require('../lib/story-info')
 
 /**
@@ -248,10 +251,12 @@ function cmdArchive (storyId, opts) {
     return 1
   }
 
-  // 3. 终态检查（phase < 8 需 --force）
-  if (state.phase < 8 && !opts.force) {
+  // 3. 终态检查（主流程未走完需 --force）
+  // 终态判定走 isWorkflowTerminal（唯一信源）：主流程 = 审查 → 知识库更新 → Git 提交 + 建 MR，
+  // 到达 git_submit 即算走完；云端部署是可选阶段，不参与判定。
+  if (!isWorkflowTerminal(state) && !opts.force) {
     emit(storyId, {
-      error: `Story 未达终态 (当前 Phase ${state.phase})，建议达到 Phase 8 后再归档`,
+      error: `Story 主流程未走完 (当前 Phase ${state.phase} ${getPhaseName(state.phase)})，建议走完 Git 提交（已 push 且 MR 已创建）后再归档`,
       hint: '如需强制归档，添加 --force'
     })
     return 1
@@ -349,6 +354,12 @@ function cmdArchive (storyId, opts) {
     phaseReached: state.phase
   })
 
+  // 可选阶段未做时的显式提示（不是拦截）：归档后 e2e-state.json 进入 archive/，
+  // 之后无法再推进 Phase，要补做部署必须先 restore。
+  const optionalNote = Number(state.phase) < MAX_PHASE && !(state.phases?.['6_deployment']?.status === 'completed')
+    ? '本 Story 主流程已完成，但云端部署（可选阶段）未执行；归档后不可再推进，如需补做部署请先执行 restore'
+    : null
+
   emit(storyId, {
     success: true,
     action: 'archive',
@@ -361,6 +372,7 @@ function cmdArchive (storyId, opts) {
     archivedFiles: movedCount,
     deletedFiles,
     storyInfoUpdated,
+    ...(optionalNote ? { optionalNote } : {}),
     hint: 'root 仅保留 story-info.json（身份卡），其余文件（含 e2e-state.json / trace.jsonl / repos.json）均归档到 archive/round-' + round + '/'
   }, { round })
   return 0
@@ -687,7 +699,7 @@ function main (argv) {
       '    归档: 将 root 目录全部文件移入 archive/round-{N}/（含 e2e-state / trace / repos）',
       '    --dry-run    预览归档清单，不实际移动',
       '    --round <N>  指定轮次编号（缺省自动检测）',
-      '    --force      非终态 (phase<8) 强制归档',
+      '    --force      主流程未走完时强制归档',
       '',
       '  node archive-story.js <storyId> restore [--round <N>] [--force] [--keep-archive]',
       '    复档: 将 archive/round-{N}/ 全部文件恢复到 root（完全复原）',

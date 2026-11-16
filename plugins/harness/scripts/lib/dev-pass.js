@@ -10,7 +10,7 @@
  *   const { issueDevPass, revokeDevPass, getMaxFixRounds } = require('./dev-pass')
  *
  * 使用场景:
- *   - Phase 1→2 签发、Phase 2→3 撤销、Phase 4→5 兜底撤销（commands/advance-phase.js）
+ *   - Phase 1→2 签发、Phase 2→3 撤销、Phase 3→4 兜底撤销（commands/advance-phase.js）
  *   - hooks/enforce-dev-pass.js 读 dev-pass 判断 src/ 编辑是否放行
  *   - Phase 2 开发超时后用 `--renew-pass` 续签，不必回退重来
  *

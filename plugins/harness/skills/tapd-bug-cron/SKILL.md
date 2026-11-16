@@ -120,7 +120,7 @@ TAPD 只说「它现在是 reopened」，不说「这个 reopened 是不是我�
 `dispatch` 返回 `terminal` 时，定时任务**不自动重开**，只输出待办：
 
 ```
-本 Story 已完成（Phase 7）。本轮检测到 N 个新缺陷：...
+本 Story 主流程已完成（至 Git 提交 + MR）。本轮检测到 N 个新缺陷：...
 建议 /harness archive 归档后重新发起。
 ```
 

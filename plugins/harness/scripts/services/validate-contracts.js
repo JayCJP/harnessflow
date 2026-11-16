@@ -4,7 +4,7 @@
  *
  * 职责:
  *   - 按目标 Phase 逐级校验契约文件：Phase 0→1 验收标准与待确认项、Phase 1→2 任务契约与
- *     AC↔Task 交叉引用、Phase 4→5 验收对账
+ *     AC↔Task 交叉引用（校验止于 Phase 1→2，更高阶段的契约由生效门控 policy.js 负责）
  *   - 汇总 blockers / warnings / details，输出 JSON 结果并以退出码表达成败
  *
  * 用法:

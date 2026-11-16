@@ -30,7 +30,7 @@ const fs = require('fs')
 const path = require('path')
 const { PLANS_DIR, getStoryDir, ensureStoryDir, listStoryDirs } = require('./paths')
 const { ARTIFACT } = require('./artifacts')
-const { PHASE_SLUGS, MAX_PHASE } = require('./phases')
+const { PHASE_SLUGS, MAIN_FLOW_END_PHASE } = require('./phases')
 const debugLog = require('./debug-log')
 
 /**
@@ -128,21 +128,24 @@ function isPhaseCompleted (state, phaseNum) {
 }
 
 /**
- * 判断工作流是否已走到最后一步（终态）
+ * 判断工作流是否已结束（终态）
  *
- * 「最后一步」的唯一信源 = MAX_PHASE（由 PHASE_SLUGS 推导），Phase 表增删时自动适配，
- * 调用方禁止自行硬编码 Phase 编号 —— session-stop.js 曾硬编码 `phase >= 8`，
- * 而终态实为 7，导致自动 end 永不触发。
+ * 「结束」的唯一信源 = MAIN_FLOW_END_PHASE（由 PHASE_SLUGS 推导，指向 Git 提交阶段），
+ * Phase 表增删时自动适配，调用方禁止自行硬编码 Phase 编号 —— session-stop.js 曾硬编码
+ * `phase >= 8`，而终态实为 7，导致自动 end 永不触发。
  *
- * status === 'completed' 一并视为终态：advance-phase 推进到 MAX_PHASE 时会写下它，
+ * 阈值取 Git 提交阶段而非 MAX_PHASE：主流程「评审 → 知识库 → 提交+建 MR」走完即算结束，
+ * 其后的云端部署是可选阶段，phase 停在 deployment 时同样视为已结束，不阻塞自动 end 与归档。
+ *
+ * status === 'completed' 一并视为终态：advance-phase 在 Git 提交阶段完成时会写下它，
  * 直接改状态文件的场景（复档 / 人工收尾）也靠这一支判定。
  *
  * @param {Object} state - e2e-state.json 状态对象
- * @returns {boolean} 已到终态为 true
+ * @returns {boolean} 已结束为 true
  */
 function isWorkflowTerminal (state) {
   if (!state) return false
-  return Number(state.phase) >= MAX_PHASE || state.status === 'completed'
+  return Number(state.phase) >= MAIN_FLOW_END_PHASE || state.status === 'completed'
 }
 
 /**
