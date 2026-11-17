@@ -879,6 +879,9 @@ function buildAgentPrompt (opts) {
     (storyMode === 'fixbugs' && targetPhase === 2)
       ? '## Bug 修复说明\nBug 事实（问题复述 / 复现步骤 / 代码定位 / 根因）已在 Phase 0 分析完毕、并在 Phase 1 消化进 `task-dag.json` 与 `acceptance-criteria.json`。\n**以契约文件为准动手**: `task-dag.json` 的 `files[]` 就是改动范围，`acceptanceCriteria` 关联的 AC 描述里带 Bug 编号。\n修复怎么改由你设计: 先用 kb-query ∥ graphify 双源交叉验证确认真实改动点，再给出实现。\n'
       : '',
+    (storyMode === 'fixbugs' && targetPhase === 3)
+      ? `## Bug 回写说明（fixbugs）\n验收通过后需回写 TAPD。读取缺陷清单 \`${toPosix(path.join(PLANS_DIR, storyId, ARTIFACT.BUG_LIST))}\` 确定要回写的 Bug。\n**只关注 \`category=frontend\` 的条目** —— backend / collab 已在 Phase 0 写过评论转交，此处不重复。\n对每个 frontend 条目按验收结果回写（评论正文由 tapd-writeback.js 生成，勿自行措辞）：验收通过写 fixed 评论并置 \`in_progress\`，fix-loop 用尽转人工写 manual 评论且不改状态。\n`
+      : '',
     repoSearchEntries.length > 0 ? repoSearchEntries.join('\n') : '',
     '## 约束',
     ...AGENT_CONSTRAINTS.map(c => `- ${c}`),

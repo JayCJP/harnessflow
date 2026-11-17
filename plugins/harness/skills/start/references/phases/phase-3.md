@@ -35,6 +35,8 @@ Agent 注册名 **`code-reviewer`**（代码审查师）。审查本 Story 的�
 
 Phase 3→4 门控通过（无 open BLOCKER）即视为「前端缺陷已修复」，此时才写回 TAPD ——
 Phase 0 故意不写，就是为了避免「先宣布修复、又被 fix-loop 打回」。
+**由 Phase 3 的代码审查师在给出审查结论后直接执行**（TAPD MCP 只在其 Agent 会话内可用），
+主 Agent 不介入。
 
 ```bash
 # 计划：按分类与验收结果算该给谁写什么（脚本统一判定，不要自己在 prompt 里按分类分支）
@@ -51,7 +53,7 @@ node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind 
 
 - 状态 key 固定 `in_progress`（中文「接受/处理」）。写成 `resolved` 会直接关单，属事故
   —— 状态映射校验不通过时，本轮跳过所有改状态动作并在报告里告警
-- 评论正文由 `tapd-writeback.buildComment` 生成：只写「现象 + 结论」，不贴代码 / diff / 文件路径
+- 评论正文由 `tapd-writeback.buildComment` 生成：写协议契约（服务 / 接口 / 字段 / 预期值），不贴代码片段 / diff / 源码路径 / 函数名，目标 500 字内说清楚
 
 ## 修复回路（fix-loop）
 

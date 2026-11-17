@@ -250,6 +250,12 @@ ok('P2 含「Bug 修复说明」', p2.agentPrompt.includes('Bug 修复说明'))
 ok('P2 含 kb-query ∥ graphify 双源', /kb-query[\s\S]{0,80}graphify|graphify[\s\S]{0,80}kb-query/.test(p2.agentPrompt))
 ok('P2 修复说明指向契约文件而非原始报告', /task-dag\.json/.test(p2.agentPrompt))
 
+const p3 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 3 })
+ok('P3 含「Bug 回写说明」', p3.agentPrompt.includes('Bug 回写说明'))
+ok('P3 给出 bug-list.json 路径（不内联原文）', /bug-list\.json/.test(p3.agentPrompt) && /读取/.test(p3.agentPrompt))
+ok('P3 指引只关注 category=frontend', /category=frontend/.test(p3.agentPrompt) && /backend \/ collab/.test(p3.agentPrompt))
+ok('P3 不内联 bug 清单内容（不出现具体 bugId）', !/"bugId"/.test(p3.agentPrompt))
+
 // v3 精简后 AGENT_CONSTRAINTS 固定为 2 条（以代码为准），删掉的旧约束不应再出现
 ok('约束段为 2 条（v3 精简后的最终口径）', p2.agentConstraints.length === 2, JSON.stringify(p2.agentConstraints))
 ok('不再重复 agent .md 已有的 advance-phase 约束', !/- 🚫 由主 Agent 调用 advance-phase/.test(p2.agentPrompt))
@@ -268,6 +274,8 @@ const rp0 = buildAgentPrompt({ storyId: 'RUN-1', targetPhase: 0 })
 ok('run P0 不含 tapd-bug-analyzer', !rp0.agentPrompt.includes('tapd-bug-analyzer'))
 const rp2 = buildAgentPrompt({ storyId: 'RUN-1', targetPhase: 2 })
 ok('run P2 不含 Bug 修复说明', !rp2.agentPrompt.includes('Bug 修复说明'))
+const rp3 = buildAgentPrompt({ storyId: 'RUN-1', targetPhase: 3 })
+ok('run P3 不含 Bug 回写说明', !rp3.agentPrompt.includes('Bug 回写说明'))
 ok('run 门控无 Bug 报告检查', !/bug分析报告/i.test(JSON.stringify(gate('RUN-1', 0))))
 
 // ════════════════════════════════════════════════════════════

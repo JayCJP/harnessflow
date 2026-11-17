@@ -10,7 +10,7 @@ PRD / bug 分析报告 / 用户补充说明），产出需求分析文档、可�
 Agent 内部需调用 `use_skill("kb-query")` 检索项目知识库。
 
 `mode=fixbugs` 时该 Agent 自行 `use_skill("tapd-bug-analyzer")` 拉取并分析 TAPD 缺陷 ——
-主 Agent 不做这件事，也不调任何 TAPD MCP 工具。
+主 Agent 不在分析阶段做这件事、不调 TAPD MCP 拉详情/评论（Phase 0 回写也由该 Agent 在自身会话内完成）。
 
 ## 产出物
 
@@ -117,7 +117,7 @@ node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind 
 ```
 
 - `frontend` 缺陷**此时不写评论** —— 等 Phase 3 验收通过后统一写，避免先写「已修复」又被打回
-- 评论只写「现象 + 结论 + 需要谁做什么」，不贴代码 / diff / 文件路径 / 函数名，总长 ≤ 120 字
+- 评论写协议契约（后端服务 / 接口 / 字段 / 预期值），不贴代码片段 / diff / 源码路径 / 函数名；目标 500 字内说清楚
 - `backend` / `collab` **不改 TAPD 状态**，流转权归对方
 
 ## 常见失败与对策

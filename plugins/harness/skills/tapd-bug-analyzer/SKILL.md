@@ -349,20 +349,31 @@ ${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>/bug-list.json               
 评论正文由脚本生成，**不要自己组织措辞**：
 
 ```bash
+# 1. 首次校验状态映射（本轮只需一次）
 node ${HARNESS}/../services/tapd-writeback.js <storyId> --check-status-map '<get_workflows_status_map 的返回 JSON>'
-```
 
-拿到脚本的 `buildComment` 编号后按模板填三个字段（现象 / 前端已排除 / 需要后端），
-再用 `create_comments` 发出，最后登记凭证：
+# 2. 生成评论正文 —— to_backend 要写清后端服务/接口/字段/预期行为（协议契约）
+node ${HARNESS}/../services/tapd-writeback.js <storyId> --compose to_backend \
+  --symptom '工单列表不显示草稿状态' \
+  --frontend-checked '前端已正确透传 orderId 并按返回字段渲染' \
+  --backend-service '工单服务' \
+  --api-endpoint 'GET /api/tickets' \
+  --fields '缺少 draftFlag 字段' \
+  --expected-behavior '列表接口返回 draftFlag 标识草稿状态'
+# to_collab 用 --compose to_collab --symptom ... --pending-items ... [--api-endpoint ... --fields ...]
+# 接口/字段为可选段，信息不全时不填，模板自动用「未提供」占位
 
-```bash
+# 3. 把上一步输出 JSON 的 text 原样作为 create_comments 的 description 发出
+
+# 4. 登记回写凭证（跨轮去重依据）
 node ${HARNESS}/../services/tapd-writeback.js <storyId> --record <bugId> --kind to_backend
 ```
 
 评论硬约束（脚本注释里也有）：
 
-- **不贴代码、不贴 diff、不列文件路径、不写函数名** —— 后端要的是「现象 + 需要改什么」
-- 每段一句话，总长 ≤ 120 字
+- **写协议契约，不写实现**：后端服务名、接口路径、字段名、预期值要写清；但不贴代码片段、
+  不贴 diff、不列源码文件路径、不写函数名 —— 后者对后端定位问题没有价值
+- **目标 500 字内说清楚**（软目标，不设硬上限），按结构分段承载信息
 - 同一 bug 同一结论只写一次；`--record` 落的 `writeback.commentedAt` 就是去重凭证
 
 ---

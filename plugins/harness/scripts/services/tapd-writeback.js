@@ -15,20 +15,22 @@
  *   作为 CLI（校验状态映射）:
  *     node tapd-writeback.js <storyId> --check-status-map '<get_workflows_status_map 返回的 JSON>'
  *   作为 CLI（生成评论正文，输出 JSON 的 text 字段直接给 create_comments）:
- *     node tapd-writeback.js <storyId> --compose to_backend --symptom "..." --frontend-checked "..." --need-backend "..."
+ *     node tapd-writeback.js <storyId> --compose to_backend --symptom "..." --frontend-checked "..." \
+ *       --backend-service "..." --api-endpoint "..." --fields "..." --expected-behavior "..."
  *   作为 CLI（登记回写凭证，写盘前做 schema 校验）:
  *     node tapd-writeback.js <storyId> --record <bugId> --kind fixed [--status-changed]
  *
  * 使用场景:
  *   - Phase 0 分类为 backend / collab 后，需求分析师调 buildComment 拿正文，写评论后 --record 落凭证
- *   - Phase 3 验收通过（无 BLOCKER）后，代码审查师/主 Agent 用 fixed 模板写评论，再落凭证 + 改状态
+ *   - Phase 3 验收通过（无 BLOCKER）后，代码审查师用 fixed 模板写评论，再落凭证 + 改状态
  *
  * 说明:
  *   - **本模块不直接调 TAPD MCP**。MCP 工具只存在于 Agent 会话里，脚本拿不到；
  *     脚本负责「说什么」和「记什么」，Agent 负责「发出去」。这样评论模板与去重逻辑集中在
  *     单处，改了模板两处调用点同时生效。
- *   - 评论模板硬约束: 不出现代码块、git diff、文件路径列表、函数名。前端实现细节对后端
- *     没有价值，只写「现象 + 结论 + 需要谁做什么」。目标长度 ≤ 120 字。
+ *   - 评论模板硬约束: 写协议契约（后端服务 / 接口 / 字段 / 预期值），不写实现（代码块、
+ *     git diff、源码路径、函数名）—— 后者对后端定位问题没有价值。目标是 500 字内说清楚，
+ *     不设硬上限，以结构分段承载信息。
  *   - 目标状态固定 in_progress（中文「接受/处理」）。写成 resolved 会直接关单，属事故。
  *   - 只有「category=frontend 且验收通过」才改状态；backend / collab 只评论不流转 ——
  *     抢后端的状态流转权会导致后端无法按自己的节奏接单。
@@ -56,17 +58,20 @@ const COMMENT_KINDS = ['fixed', 'to_backend', 'to_collab', 'manual']
 /**
  * 生成 TAPD 评论正文
  *
- * 只输出「现象 / 结论 / 需要谁做什么」，不贴代码细节。调用方拿到字符串后
- * 直接传给 create_comments 的 description 字段。
+ * 输出协议契约（现象 / 结论 / 后端服务 / 接口 / 字段 / 预期行为），不贴代码实现细节。
+ * 调用方拿到字符串后直接传给 create_comments 的 description 字段。目标 500 字内说清楚。
  *
  * @param {'fixed'|'to_backend'|'to_collab'|'manual'} kind - 评论类型
- * @param {Object} detail - 填充模板的字段
- * @param {string} [detail.symptom] - 现象（用户视角一句话）
- * @param {string} [detail.frontendChecked] - 前端已排除的部分（一句话）
- * @param {string} [detail.needBackend] - 需要后端做什么（一句话，具体到接口或字段）
- * @param {string} [detail.pendingItems] - 待确认项（一句话）
- * @param {string} [detail.fixSummary] - 改动摘要（一句话）
- * @param {string} [detail.reason] - 转人工原因（一句话）
+ * @param {Object} detail - 填充模板的字段（缺失字段用「未提供」占位）
+ * @param {string} [detail.symptom] - 现象（用户视角）
+ * @param {string} [detail.frontendChecked] - 前端已排除的部分（前端侧排查结论）
+ * @param {string} [detail.backendService] - 后端服务名（协议契约）
+ * @param {string} [detail.apiEndpoint] - 相关接口路径，如 GET /api/tickets（协议契约）
+ * @param {string} [detail.fields] - 涉及字段及预期值，如 draftFlag 应为 true（协议契约）
+ * @param {string} [detail.expectedBehavior] - 后端应返回/修正的预期行为
+ * @param {string} [detail.pendingItems] - 待确认项（联调场景）
+ * @param {string} [detail.fixSummary] - 改动摘要（前端已修复场景）
+ * @param {string} [detail.reason] - 转人工原因
  * @returns {string} 评论正文；kind 非法时抛错
  * @throws {Error} kind 不在 COMMENT_KINDS 内
  */
@@ -84,7 +89,10 @@ function buildComment (kind, detail = {}) {
         '',
         `现象：${v(detail.symptom)}`,
         `前端已排除：${v(detail.frontendChecked)}`,
-        `需要后端：${v(detail.needBackend)}`
+        `后端服务：${v(detail.backendService)}`,
+        `相关接口：${v(detail.apiEndpoint)}`,
+        `涉及字段：${v(detail.fields)}`,
+        `预期行为：${v(detail.expectedBehavior)}`
       ].join('\n')
 
     case 'to_collab':
@@ -92,7 +100,9 @@ function buildComment (kind, detail = {}) {
         '【前端排查结论】需前后端确认',
         '',
         `问题：${v(detail.symptom)}`,
-        `待确认：${v(detail.pendingItems)}`
+        `待确认：${v(detail.pendingItems)}`,
+        `相关接口（已知）：${v(detail.apiEndpoint)}`,
+        `涉及字段（已知）：${v(detail.fields)}`
       ].join('\n')
 
     case 'fixed':
@@ -251,7 +261,7 @@ if (require.main === module) {
 
   if (!storyId) {
     console.error(JSON.stringify({
-      error: '用法: node tapd-writeback.js <storyId> [--check-status-map <JSON>] | [--compose <kind> --symptom ... ] | [--record <bugId> --kind <kind> [--status-changed]]',
+      error: '用法: node tapd-writeback.js <storyId> [--check-status-map <JSON>] | [--compose <kind> --symptom ... --backend-service ... --api-endpoint ... --fields ... --expected-behavior ...] | [--record <bugId> --kind <kind> [--status-changed]]',
       kinds: COMMENT_KINDS
     }, null, 2))
     process.exit(1)
@@ -294,7 +304,10 @@ if (require.main === module) {
         text = buildComment(composeKind, {
           symptom: takeValue('--symptom'),
           frontendChecked: takeValue('--frontend-checked'),
-          needBackend: takeValue('--need-backend'),
+          backendService: takeValue('--backend-service'),
+          apiEndpoint: takeValue('--api-endpoint'),
+          fields: takeValue('--fields'),
+          expectedBehavior: takeValue('--expected-behavior'),
           pendingItems: takeValue('--pending-items'),
           fixSummary: takeValue('--fix-summary'),
           reason: takeValue('--reason')

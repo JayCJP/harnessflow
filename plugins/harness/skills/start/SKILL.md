@@ -237,8 +237,9 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 
 **职责不越界**（分析必须在子 Agent 上下文内完成）:
 
-- 🚫 主 Agent 不加载 `tapd-bug-analyzer`、不调任何 TAPD MCP 工具 —— 中间推理会在跨 Agent 传递中
-  丢失，且上下文被原始数据撑满，后续 7 个 Phase 全程带着无关内容
+- 🚫 主 Agent 不在分析阶段加载 `tapd-bug-analyzer`、不调 TAPD MCP 拉详情/评论 —— 中间推理
+  会在跨 Agent 传递中丢失，且上下文被原始数据撑满，后续 7 个 Phase 全程带着无关内容。
+  TAPD 交互在各自 Agent 会话内完成：Phase 0 分析由需求分析师、Phase 3 回写由代码审查师，主 Agent 不介入
 - 🚫 主 Agent 不分析 Bug / 不判断改哪些文件 —— 那是 Phase 0 与 Phase 2 的职责
 - 🚫 主 Agent 不自行拼 Phase 0 prompt —— `agentPrompt` 是唯一出口，自行拼装会导致注入内容逐轮不一致
 

@@ -33,27 +33,36 @@ section('1. 评论模板')
 const backend = wb.buildComment('to_backend', {
   symptom: '工单列表不显示草稿状态',
   frontendChecked: '已确认前端正确透传 orderId，页面按返回字段渲染',
-  needBackend: '查询工单列表接口增加 draftFlag 字段'
+  backendService: '工单服务',
+  apiEndpoint: 'GET /api/tickets',
+  fields: 'draftFlag 字段缺失',
+  expectedBehavior: '列表接口返回 draftFlag 标识草稿状态'
 })
 ok('to_backend 含「需后端处理」', backend.includes('需后端处理'))
-ok('to_backend 含三段（现象/已排除/需要后端）',
-  /现象：/.test(backend) && /前端已排除：/.test(backend) && /需要后端：/.test(backend))
-ok('to_backend 总长 ≤ 120 字', backend.length <= 120, String(backend.length))
+ok('to_backend 含六个结构段（现象/已排除/服务/接口/字段/预期）',
+  /现象：/.test(backend) && /前端已排除：/.test(backend) && /后端服务：/.test(backend) &&
+  /相关接口：/.test(backend) && /涉及字段：/.test(backend) && /预期行为：/.test(backend))
+ok('to_backend 写入后端契约值（服务/接口/字段/预期）',
+  backend.includes('工单服务') && backend.includes('GET /api/tickets') &&
+  backend.includes('draftFlag 字段缺失') && backend.includes('列表接口返回 draftFlag'))
 ok('to_backend 无代码块', !backend.includes('\u0060\u0060\u0060') && !backend.includes('diff --git'))
-ok('to_backend 无不贴文件路径要求（无常见源码后缀）', !/\.(vue|js|ts|scss):\d+/.test(backend))
+ok('to_backend 无不贴源码路径要求（无常见源码后缀）', !/\.(vue|js|ts|scss):\d+/.test(backend))
 
 const collab = wb.buildComment('to_collab', {
   symptom: '草稿标识在多人接待模式下消失',
-  pendingItems: '接口 A 在多人模式下是否返回 draftFlag'
+  pendingItems: '接口 A 在多人模式下是否返回 draftFlag',
+  apiEndpoint: 'GET /api/tickets',
+  fields: 'draftFlag'
 })
 ok('to_collab 含「需前后端确认」', collab.includes('需前后端确认'))
-ok('to_collab 含待确认项', /待确认：/.test(collab))
-ok('to_collab 总长 ≤ 120 字', collab.length <= 120, String(collab.length))
+ok('to_collab 含待确认项与可选接口/字段段',
+  /待确认：/.test(collab) && /相关接口（已知）：/.test(collab) && /涉及字段（已知）：/.test(collab))
+ok('to_collab 写入已知接口/字段值',
+  collab.includes('GET /api/tickets') && collab.includes('draftFlag'))
 
 const fixed = wb.buildComment('fixed', { fixSummary: '补齐草稿标识渲染' })
 ok('fixed 含「前端已修复」与「待测试验证」',
   fixed.includes('前端已修复') && fixed.includes('待测试验证'))
-ok('fixed 总长 ≤ 120 字', fixed.length <= 120, String(fixed.length))
 
 const manual = wb.buildComment('manual', { reason: '改动涉及公共协议层，影响面超出本缺陷' })
 ok('manual 含「未自动修复」与「转人工」',
@@ -61,6 +70,8 @@ ok('manual 含「未自动修复」与「转人工」',
 
 ok('缺失字段用「未提供」占位，不生成残句',
   wb.buildComment('to_backend', {}).includes('未提供'))
+ok('to_collab 可选段缺失时用「未提供」占位',
+  (wb.buildComment('to_collab', { symptom: 'x', pendingItems: 'y' }).match(/未提供/g) || []).length === 2)
 
 let threw = false
 try { wb.buildComment('unknown_kind', {}) } catch (e) { threw = true }
