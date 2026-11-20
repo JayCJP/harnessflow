@@ -6,7 +6,10 @@
   "scripts": {
     "test": "node scripts/__tests__/run-all.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "version:bump": "node ../../scripts/bump-version.js",
+    "version:check": "node ../../scripts/bump-version.js --check",
+    "version:sync": "node ../../scripts/bump-version.js --sync"
   },
   "keywords": [],
   "author": "",

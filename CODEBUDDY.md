@@ -78,6 +78,24 @@ node scripts/audit/harness-audit.js --json               # 自进化体检
 
 调试：宿主启动时加 `--debug`；`scripts/audit/debug-replay.js` 可回放 trace。
 
+## 版本更新（统一入口，禁止手改多处）
+
+插件版本散落在 **8 处**（4 份 plugin.json + 2 份市场清单 + README badge + 本地 `.plugins-cache.json`），
+**只能通过 `scripts/bump-version.js` 更新**，不要逐文件手改 —— 2026-11-20 曾因只改顶层 plugin.json
+和市场清单、漏了 `.codebuddy-plugin/plugin.json`（安装器实际读这份）导致 `/plugin list` 一直显示旧版本。
+
+```bash
+# 在 plugins/harness/ 下执行（npm script 已封装路径）
+npm run version:bump -- 2.3.3   # 升版本，8 处一次性全员对齐
+npm run version:check           # 只校验一致性，不一致退出码 1（可进 CI / pre-commit）
+npm run version:sync            # 不升版本，以主清单为准修复遗漏点（如 README / 缓存落后）
+```
+
+脚本特性：结构感知定位（不误改市场清单自身的 `1.0.1`）、替换前后 JSON 校验、
+刷新 `.plugins-cache.json` 的 `manifestMtime`（破除安装器"manifest 未变化不再解析"的缓存）、
+只改「当前版本声明」不碰 CODEBUDDY.md / phases.js 里「2.3.1 起 Phase 重排」这类**历史版本标记**。
+新增版本声明位置时，只改脚本顶部的 `DECLARATIONS` 数组一处。
+
 ## 状态文件纪律（铁律）
 
 - 🚫 **不手改** `.codebuddy/plans/<storyId>/e2e-state.json` / `dev-pass.json` —— 全部由脚本签发/推进，`enforce-state-file.js` hook 会拦截并记录违规
@@ -106,8 +124,8 @@ node scripts/audit/harness-audit.js --json               # 自进化体检
 
 ## 分支与交付
 
-- 主干 `master`；当前工作分支 `kb-opt`
+- 主干 `master`；当前工作分支 `feat/dynamic-flow`（以 `git branch --show-current` 为准）
 - 另有 `for-claude-code` / `for-codex` 适配分支
 - 远程有两个 origin（`origin` / `origin2`）
-- 插件版本号在两处声明且需同步：`plugins/harness/plugin.json` 与市场清单里的 `version`
+- 插件版本号**不要手改**：统一走 `npm run version:bump -- <版本>`（见「版本更新」小节），它负责同步全部 8 处声明
 - 提交时不要跳过 pre-commit 钩子
