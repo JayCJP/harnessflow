@@ -2,7 +2,7 @@
 
 > **端到端 AI 开发自动化工作流插件市场。** 一条命令，让 AI 编程助手跑完「需求 → 规划 → 开发 → 审查 → 沉淀 → 提交 → 部署」的完整研发链路。
 
-[![version](https://img.shields.io/badge/version-2.3.1-blue.svg)](./plugins/harness/plugin.json)
+[![version](https://img.shields.io/badge/version-2.3.2-blue.svg)](./plugins/harness/plugin.json)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 [![platform](https://img.shields.io/badge/platform-Claude%20Code%20%7C%20CodeBuddy%20Code-purple.svg)](#安装)
 
