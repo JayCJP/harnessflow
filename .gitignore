@@ -10,3 +10,5 @@ graphify-out/
 .claude
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+# 流程图本地渲染环境（venv 约 100MB + 浏览器资源），不入库
+.docs/render/.venv/

@@ -57,8 +57,13 @@
 > **MR 建完即写 `status: completed`**，自动 end 与归档随之解锁。
 > 云端部署（Phase 6）是可选阶段 —— 做与不做都算结束，`dispatch` 在终态下给出 `optionalNext` 提示。
 
+![Harness 7 Phase 端到端开发流水线](.docs/diagrams/harness-flow.png)
+
+> 上图按「主流程 → 契约产出 → 控制流」三层展开，含真实契约文件名与 `dispatch` 四态机制。
+> 可编辑源文件：[harness-flow.excalidraw](.docs/diagrams/harness-flow.excalidraw)。
+
 <details>
-<summary>7 Phase 横向流转图（点击展开）</summary>
+<summary>文本版：7 Phase 横向流转图（Mermaid，可缩放）</summary>
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': {'fontFamily':'system-ui, sans-serif','fontSize':'14px','lineColor':'#94a3b8'}, 'flowchart': {'curve':'linear'}}}%%
@@ -110,7 +115,7 @@ flowchart LR
 </details>
 
 <details>
-<summary>主控循环（dispatch.js 四态调度）</summary>
+<summary>文本版：主控循环（dispatch.js 四态调度，Mermaid）</summary>
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': {'fontFamily':'system-ui, sans-serif','fontSize':'14px','lineColor':'#94a3b8'}, 'flowchart': {'curve':'linear'}}}%%
