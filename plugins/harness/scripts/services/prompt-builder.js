@@ -868,12 +868,18 @@ function buildAgentPrompt (opts) {
       ? '## ⚠️ open-questions.json 判定口径\n' +
         '- 每条 question 必须给出**建议稿**：`resolution`（非空结论）+ `resolutionSource`\n' +
         '  （requirement-doc / prototype / code-evidence / inference）。\n' +
+        '- **问题措辞铁律**：把 `question` 写成「是否采纳 <建议稿要点>？」这类形式，让用户答「采纳/yes」\n' +
+        '  就直接等价于采纳本条的 `resolution` —— 避免中性提问导致用户答复语义分歧（「要」/「好的」/「按你说的」）。\n' +
+        '- **依赖显式化**：若 Q2 的建议取决于 Q1 如何拍板，须在 Q2 的 `resolution` 写明\n' +
+        '  「若 Q1 选 <A>，则本项建议 <B>」，让用户回答时前后不矛盾；不得把相互依赖的项写成彼此独立。\n' +
+        '- **只问真正需要用户拍板的事**：能从 story-input / TAPD / 原型 / 知识库查到的事实，\n' +
+        '  绝不能当成待确认项抛给用户 —— 先自己查（必要时用 kb-query / graphify），查不到或涉及取舍才列。\n' +
         '- 建议稿**不构成放行依据** —— 全部待确认项（无论是否 blocking）都必须经用户逐条确认，\n' +
         '  由主 Agent 拿到用户答复后通过 resolve-question.js 写入 `confirmation` 字段，门控才放行。\n' +
         '- ⛔ **`confirmation` 字段是用户确认专用，你（以及任何 Agent）不得自行填写** ——\n' +
         '  它代表用户本人的拍板，擅自填写等于伪造用户意志，是最高优先级的禁止事项。\n' +
         '  即使你认为答案显而易见，也只能写 `resolution` 建议稿，把 `confirmation` 留给用户确认环节。\n' +
-        '- 不要填 `resolved` 字段（已废弃）；`blocking` 仅用于提示用户"这项建议优先看"。\n' +
+        '- 不要填 `resolved` 字段（已废弃）；`blocking` 仅用于提示用户"这项建议优先看"，不影响放行。\n' +
         '- 找不到依据时不要猜、不要留空，写明 inference 并说明不确定点 —— 用户确认环节就是为此设计的。\n'
       : '',
     (storyMode === 'fixbugs' && targetPhase === 2)

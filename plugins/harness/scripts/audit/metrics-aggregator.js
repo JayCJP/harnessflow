@@ -4,7 +4,7 @@
  *
  * 职责:
  *   1. 读取当前项目所有 Story 的 trace.jsonl + e2e-state.json
- *   2. 计算 7 项核心指标（Phase 耗时、门控通过率、Fix-loop 触发率等）
+ *   2. 计算核心指标（Phase 耗时、门控通过率、Fix-loop 触发/成功率、完成率、资源使用等）
  *   3. 生成跨项目通用的流程级洞察（非项目特定逻辑）
  *   4. 合并到全局经验库 ~/.codebuddy/experience/metrics-insights.json
  *   5. 供 advance-phase.js 和 session-start.js 注入到 Agent prompt
@@ -30,8 +30,8 @@
  *     （哪个 Phase 最慢、门控是否一次通过、fix-loop 是否反复触发）时手动跑
  *
  * 说明:
- *   - 7 项核心指标: phaseDurations、gateFirstTryRate、fixLoopTriggerRate、fixLoopSuccessRate、
- *     blockerCount、storyCompletionRate、resourceUsage
+ *   - 核心指标: phaseDurations、gateFirstTryRate、fixLoopTriggerRate、fixLoopSuccessRate、
+ *     fixLoopEventCount、blockerCount、storyCompletionRate、resourceUsage（口径见下方计算处）
  *   - 洞察按 targetPhase 定向注入，触发规则见 THRESHOLDS（如 Phase 平均耗时 > 20min、
  *     门控一次通过率 < 80%、Fix-loop 触发率 > 40%）
  *   - Fix-loop 触发率会扣除「全部 issue 均为 skipped 误报、fix-verification.json 中无任何
@@ -133,9 +133,8 @@ function aggregateMetrics () {
   let totalBlockers = 0
   let completedStories = 0
   let totalStories = 0
-  // Story 级 fix-loop 口径：到达审查的 Story 数 / 触发过有效 fix-loop 的 Story 数。
-  // 原 totalPhase3_4Advances（推进到 Phase 4/5 的次数）随 Phase 4 功能测试移除后语义已偏，
-  // 改为 Story 级，触发率/成功率分母口径一致。
+  // Story 级 fix-loop 口径：到达审查的 Story 数 / 触发过有效 fix-loop 的 Story 数，
+  // 使触发率与成功率分母一致。
   let storiesReachedReview = 0
   let storiesWithFixLoop = 0
   // 资源使用统计（S3：skill / 知识库 / MCP 消费情况）
@@ -268,8 +267,7 @@ function aggregateMetrics () {
     phaseDurations: phaseDurationStats,
     gateFirstTryRate: totalAdvances > 0 ? gateFirstTryPasses / totalAdvances : 1,
     // fix-loop 触发率/成功率统一用 Story 级口径：到达审查的 Story 中触发 fix-loop 的比例、
-    // 触发 fix-loop 的 Story 中首轮修复成功的比例。原事件级/推进级分母口径不一致，且随
-    // Phase 4 功能测试移除后 targetPhase 4/5 语义已偏，故改为 Story 级。
+    // 触发 fix-loop 的 Story 中首轮修复成功的比例。
     fixLoopTriggerRate: storiesReachedReview > 0 ? storiesWithFixLoop / storiesReachedReview : 0,
     fixLoopSuccessRate: storiesWithFixLoop > 0 ? fixLoopSucceeded / storiesWithFixLoop : 1,
     fixLoopEventCount: fixLoopCount,

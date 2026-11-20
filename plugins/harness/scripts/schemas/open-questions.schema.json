@@ -12,7 +12,11 @@
         "required": ["id", "question"],
         "properties": {
           "id": { "type": "string", "pattern": "^Q-\\d+$" },
-          "question": { "type": "string", "minLength": 1 },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "description": "问题措辞须让用户答「采纳/yes」直接等价于采纳本条的 resolution 建议稿 —— 写成「是否采纳 <建议稿要点>？」而非中性提问；相互依赖的项在 resolution 中标注「若 Q1 选 A，则本项建议 B」。"
+          },
           "resolved": { "type": "boolean" },
           "owner": { "type": "string" },
           "blocking": { "type": "boolean" },

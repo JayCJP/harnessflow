@@ -85,6 +85,8 @@ function describeLevel (label, node) {
  * 口径段的禁令自相矛盾（open-questions 的 confirmation 就是最脆的部位）。
  * key: 契约文件名 → 字段名 → 注解文本
  */
+// 注: question 字段的「yes=采纳」措辞纪律不进骨架（会顶破单 Phase 2KB 成本护栏），
+// 改由 prompt-builder 的 Phase 0 口径段 + dispatch 展示文案 + 需求分析师.md 三处承载。
 const FIELD_NOTES = {
   'open-questions.json': {
     confirmation: '仅 resolve-question.js 在用户确认后写入，Agent 严禁填写（填写等于伪造用户意志）',

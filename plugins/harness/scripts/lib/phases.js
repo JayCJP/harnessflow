@@ -22,7 +22,7 @@
  *     `label` 仅供人类阅读（日志/文档），禁止用于 Spawn。
  *   - `optional: true` 的产出物按条件产出（原型 / Figma），门控不因其缺失而失败；
  *     若同时声明 `requiredWhen: 'hasFigmaDesign'` 且条件成立则升级为必需。
- *   - Phase 8 是工作流终态，无产出物、无 Agent。
+ *   - Phase 7（completed）是工作流终态，无产出物、无 Agent；Phase 6 部署为可选阶段。
  *   - 本模块只依赖零依赖的 artifacts.js（文件名常量表），可安全被任意层引用。
  */
 

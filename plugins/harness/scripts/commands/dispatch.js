@@ -322,8 +322,8 @@ function dispatch (storyId) {
       const oq = checkOpenQuestions(storyId)
       const sorted = [...oq.pendingConfirmation].sort((a, b) => (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0))
       const items = sorted.map(q =>
-        `  ${q.id}${q.blocking ? ' [建议优先]' : ''} ${q.question}\n` +
-        `    建议稿: ${(q.resolution || '').trim()}（依据: ${q.resolutionSource || '未标注'}）`
+        `  ❓ ${q.id}${q.blocking ? ' [建议优先]' : ''} ${q.question}\n` +
+        `    ➡️ 建议稿: ${(q.resolution || '').trim()}（依据: ${q.resolutionSource || '未标注'}）`
       )
       // 缺建议稿的项一并提示，避免用户确认完再 dispatch 才发现还有 noProposal，多一次往返
       const noProposalNote = oq.noProposal.length > 0
@@ -334,10 +334,11 @@ function dispatch (storyId) {
         type: 'user_confirmation_required',
         command: null,
         description: '以下待确认项必须经用户确认（AI 建议稿不构成放行依据）:\n' + items.join('\n') +
+          '\n回复方式: 按编号答复，如「Q-1 采纳，Q-2 改为 <你的答案>」；答「采纳」即采纳该条建议稿（➡️ 行）。\n' +
           `\n详情: read_file .codebuddy/plans/${storyId}/open-questions.json` +
           '\n操作: 把以上清单一次性列给用户，拿到答复后逐条执行 ' +
           commandPath('resolve-question.js') + ` ${storyId} --qid <Q-N> --answer "<用户原话>"` +
-          '（用户明确说"全部采纳"时用 --accept-all），然后重新执行 dispatch.js' +
+          '；用户答"采纳"改用 --accept（采纳该条建议稿），明确说"全部采纳"用 --accept-all，然后重新执行 dispatch.js' +
           noProposalNote
       }
       return result
