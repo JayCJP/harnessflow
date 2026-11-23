@@ -45,6 +45,16 @@ function writeBugList (id, obj) {
   fs.mkdirSync(storyDir(id), { recursive: true })
   fs.writeFileSync(path.join(storyDir(id), 'bug-list.json'), JSON.stringify(obj, null, 2))
 }
+
+/**
+ * 写 story-info.json（Story 身份卡）
+ * @param {string} id - Story ID
+ * @param {Object} obj - 身份卡对象
+ */
+function writeStoryInfo (id, obj) {
+  fs.mkdirSync(storyDir(id), { recursive: true })
+  fs.writeFileSync(path.join(storyDir(id), 'story-info.json'), JSON.stringify(obj, null, 2))
+}
 /**
  * 写一个 Phase 0 的 e2e-state.json（run 模式反例用）
  * @param {string} id - Story ID
@@ -231,6 +241,54 @@ ok('P0 产出要求文字含 bug分析报告', p0.agentPrompt.includes('bug分�
 // bug-list.json 是 fixbugs 专属必需产出物，必须进 expectedOutputs（主 Agent 靠它校验汇报）
 ok('P0 expectedOutputs 含 bug-list.json', p0.expectedOutputs.includes('bug-list.json'))
 ok('P0 产出要求文字含 bug-list.json', p0.agentPrompt.includes('bug-list.json'))
+// 归属边界不在 Phase 0 prompt 重复，只指向 analyzer skill（单一信源）
+ok('P0 归属口径只指向 analyzer skill，不内联规则',
+  /tapd-bug-analyzer/.test(p0.agentPrompt) && /归属/.test(p0.agentPrompt) &&
+  !/禁止降级到 workspace/.test(p0.agentPrompt) && !/get_related_bugs/.test(p0.agentPrompt))
+
+// ── 缺参回退：story-input 缺 tapd 三要素，从 story-info.json 补全（只补缺、不覆盖）──
+section('3b. fixbugs tapd 参数缺参回退身份卡')
+writeInput('FIX-FALLBACK', {
+  mode: 'fixbugs',
+  storyId: 'FIX-FALLBACK',
+  title: '复用归档 Story',
+  sources: { owner: '蔡杰鹏', statusFilter: '待解决,重新打开' }
+})
+writeStoryInfo('FIX-FALLBACK', {
+  version: 1,
+  storyId: 'FIX-FALLBACK',
+  mode: 'run',
+  sources: {
+    tapdUrl: 'https://www.tapd.cn/tapd_fe/38260062/story/detail/1138260062001031776',
+    workspaceId: '38260062',
+    storyIdInTapd: '1138260062001031776'
+  }
+})
+const pFallback = buildAgentPrompt({ storyId: 'FIX-FALLBACK', targetPhase: 0 })
+ok('缺 tapd 三要素 -> prompt 含身份卡回退说明', /缺参回退/.test(pFallback.agentPrompt) && /story-info\.json/.test(pFallback.agentPrompt))
+ok('缺参回退列出具体缺失字段', /tapdUrl/.test(pFallback.agentPrompt) && /workspaceId/.test(pFallback.agentPrompt) && /storyIdInTapd/.test(pFallback.agentPrompt))
+ok('缺参回退不内联 tapd 原文（不出现具体需求 id）', !/1138260062001031776/.test(pFallback.agentPrompt))
+
+// 反例：story-input 显式给了 tapd 三要素 -> 不应触发回退（用户显式值优先，不被身份卡覆盖）
+writeInput('FIX-EXPLICIT', {
+  mode: 'fixbugs',
+  storyId: 'FIX-EXPLICIT',
+  title: '显式给 tapd',
+  sources: {
+    tapdUrl: 'https://www.tapd.cn/tapd_fe/10109441/story/detail/1010944001',
+    workspaceId: '10109441',
+    storyIdInTapd: '1010944001',
+    owner: '小明'
+  }
+})
+writeStoryInfo('FIX-EXPLICIT', {
+  version: 1,
+  storyId: 'FIX-EXPLICIT',
+  mode: 'run',
+  sources: { tapdUrl: 'https://www.tapd.cn/tapd_fe/99999999/story/detail/999', workspaceId: '99999999', storyIdInTapd: '999' }
+})
+const pExplicit = buildAgentPrompt({ storyId: 'FIX-EXPLICIT', targetPhase: 0 })
+ok('显式给全 tapd -> 不触发回退说明', !/缺参回退/.test(pExplicit.agentPrompt))
 
 const p1 = buildAgentPrompt({ storyId: 'FIX-1', targetPhase: 1 })
 ok('P1 不重复注入 story-input 原文', !p1.agentPrompt.includes('"tapdUrl"'))

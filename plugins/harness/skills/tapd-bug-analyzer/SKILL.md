@@ -65,7 +65,9 @@ Phase 0（需求分析师，单一上下文内完成两件事）
 - 用户提到"分析 TAPD bugs"、"拉取 TAPD 缺陷"、"生成 Bug 报告"
 
 > **所有参数（workspace_id、处理人、storyId 等）必须动态提取，禁止硬编码。**
-> 参数优先从 `.codebuddy/plans/<storyId>/story-input.json` 的 `sources` 读取；该文件不存在时回退到当前用户消息。
+> 参数来源优先级：`.codebuddy/plans/<storyId>/story-input.json` 的 `sources` →
+> 缺失时回退同目录 `story-info.json`（Story 身份卡）的 `sources`（复用归档 Story 跑 fixbugs 时，
+> 身份卡保存着原需求的 tapd 三要素）→ 都没有才回退到当前用户消息。只补缺、不覆盖。
 
 ## 核心约束
 
@@ -86,14 +88,18 @@ Phase 0（需求分析师，单一上下文内完成两件事）
 ```bash
 STORY_DIR=${CODEBUDDY_PROJECT_DIR}/.codebuddy/plans/<storyId>
 cat ${STORY_DIR}/story-input.json
+# story-input.json 缺 tapd 参数时回读身份卡：
+cat ${STORY_DIR}/story-info.json
 ```
+
+**参数来源优先级**：先读 `story-input.json` 的 `sources`；缺字段时从 `story-info.json` 的 `sources` 补缺（只补缺、不覆盖，用户显式给的值优先）；两处都没有才回退到下方「回退提取方式」。
 
 | 参数 | 必填 | story-input.json 字段 | 回退提取方式（无该文件时） |
 |------|------|----------------------|--------------------------|
 | `workspace_id` | ✅ | `sources.workspaceId` | 正则 `tapd_fe/(\d+)/` 从 TAPD 链接提取 |
 | 处理人 | ✅ | `sources.owner` | "处理人: XXX"、"负责人: XXX"、"指派给 XXX" |
 | `storyId` | ✅ | 顶层 `storyId` | `/start fixbugs <storyId>` 或用户消息中指定 |
-| `story_id` | 选填 | `sources.storyIdInTapd` | `/story/detail/{story_id}` 从 TAPD 链接提取 |
+| `story_id` | ✅（fixbugs） | `sources.storyIdInTapd` | `/story/detail/{story_id}` 从 TAPD 链接提取。**关联查询的唯一依据，缺失即无法判归属** |
 | 状态筛选 | 选填 | `sources.statusFilter` | 默认 "待解决"，可指定 "重新打开" 等 |
 | 终端类型 | 选填 | `sources.terminal` | "H5"、"PC"、"移动端"、"小程序" |
 
@@ -101,35 +107,45 @@ cat ${STORY_DIR}/story-input.json
 
 ### Step 2：采集需求关联的 Bugs
 
-#### 主流程：需求 → 关联 Bugs → 按处理人过滤
+#### 唯一合法路径：需求 → 关联 Bugs → 按处理人过滤
 
-这是最常用的路径（`/start fixbugs` 走此路径）：
+**归属边界只用 `get_related_bugs`。** 查询口径的完整权威出处是
+`skills/tapd-bug-cron/references/query-rules.md`（2026-11 实测：TAPD MCP 字段坑、状态 key、
+批量过滤姿势都已固化）——**先读它，不要另造等价规则**（单一信源）。
 
 ```
 1. get_stories_or_tasks(workspace_id, story_id)
    → 获取需求标题（用于命名报告文件）
 
 2. get_related_bugs(workspace_id, story_id)
-   → 获取需求关联的 bug_id 列表
+   → 获取需求关联的 bug_id 列表（这是归属的唯一依据）
 
-3. 遍历 bug_id 列表，逐个 get_bug(id)
-   → 按 current_owner 过滤：仅保留处理人匹配的 bugs
-   → 按状态筛选（如有指定）
+3. 一次批量 get_bug(id=<N 个 bug_id 逗号拼接>, current_owner=<处理人>, status=new|reopened, limit>=N, fields=...)
+   → 在【已关联集合内】按 current_owner + 状态二次过滤
+   → 逐个 get_comments（reopened 无条件读，见 Step 3）
 
 4. 对保留的 bugs 执行 Step 3→4→5
 ```
 
-#### 备选路径
+`owner` / `statusFilter` **只用于在已关联集合内做二次过滤，不能反过来作为扩大查询范围的依据**。
 
-**有缺陷链接 → 查单个 bug**：
+#### 硬约束（违反即会把其他需求的 bug 混入本轮，属于流程错误）
+
+- ❌ 禁止 `get_bug(status="new|reopened")` 不带 `id` 的 workspace 级全量拉取
+  —— 本次踩坑根因：关联查询失败后降级按 owner 全局查，把工作区里该处理人名下所有 bug 都拉进来
+- ❌ 禁止按标题关键词判定相关性或兜底检索
+- ❌ 禁止 `get_bug({story_id})`（该字段恒为空，过滤永远 0 条）
+- ❌ `stories/view` 返回 403 或 `get_related_bugs` 返回空数组 = **本轮 0 条**，
+  写 `bugs: []`，不得改走任何搜索/降级路径
+- ✅ 归属只认「需求关联 + 处理人 + 状态」
+
+#### 有缺陷链接（仅单 bug 分析场景）
+
 ```
 get_bug → id=提取的 bug_id
 ```
 
-**仅有处理人 → workspace 级别查询**：
-```
-get_bug_count → get_bug(current_owner + 状态筛选，分页拉取)
-```
+> `/start fixbugs` 流程**不走**此路径 —— 它不是需求级关联查询，无法证明 bug 属于当前需求。
 
 ### Step 3：读取 Bug 详情
 

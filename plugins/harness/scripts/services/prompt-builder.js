@@ -64,6 +64,7 @@ const {
   loadRepos
 } = require('../lib/state')
 const { ARTIFACT } = require('../lib/artifacts')
+const { readStoryInfo } = require('../lib/story-info')
 
 const contextRefresh = require('./context-refresh')
 const experience = require('./experience')
@@ -263,6 +264,10 @@ function buildFigmaAlignInstruction (storyId, targetPhase) {
  * 只在 Phase 0 注入完整内容 —— 后续 Phase 需要的是分析结论（bug 分析报告 /
  * requirement-analysis.md），不是原始链接，注入全文只会挤占上下文。
  *
+ * fixbugs 缺参回退：story-input.json 缺 tapd 三要素时，从身份卡 story-info.json 只补缺、
+ * 不覆盖（用户显式值优先）；只做来源拼装，不内联原文。归属查询口径不在此重复，
+ * 唯一信源是 tapd-bug-analyzer skill。
+ *
  * @param {string} storyId - Story ID
  * @param {number} targetPhase - 目标 Phase
  * @returns {string} markdown 片段，无内容时返回空串
@@ -278,6 +283,23 @@ function buildStoryInputSection (storyId, targetPhase) {
   }
 
   const mode = input.mode === 'fixbugs' ? 'fixbugs' : 'run'
+  const inputSources = input.sources || {}
+
+  // fixbugs 缺参回退：story-input.json 缺 tapd 三要素时，从身份卡 sources 只补缺、不覆盖。
+  // 只统计「哪些字段来自身份卡」，不内联具体值（避免 prompt 膨胀）。
+  const tapdKeys = ['tapdUrl', 'workspaceId', 'storyIdInTapd']
+  let fallbackKeys = []
+  if (mode === 'fixbugs') {
+    const info = readStoryInfo(storyId)
+    if (info && !info._parseError && info.sources) {
+      fallbackKeys = tapdKeys.filter(k => {
+        const v = inputSources[k]
+        return (v === undefined || v === null || v === '') && info.sources[k]
+      })
+    }
+  }
+
+  const storyInfoRelPath = toPosix(path.join(PLANS_DIR, storyId, 'story-info.json'))
   const lines = [
     '## 本 Story 原始输入',
     `请读取 ${toPosix(path.join(PLANS_DIR, storyId, STORY_INPUT_FILE))} 获取完整参数（含 TAPD/原型/Figma 链接等）——此处不内联全文，避免占上下文。`,
@@ -285,15 +307,23 @@ function buildStoryInputSection (storyId, targetPhase) {
   ]
 
   if (mode === 'fixbugs') {
+    if (fallbackKeys.length > 0) {
+      lines.push(
+        `- **tapd 参数缺参回退**: story-input.json 中 ${fallbackKeys.join(' / ')} 为空，已从 Story 身份卡 ${storyInfoRelPath} 的 sources 补全（只补缺、不覆盖）。`,
+        '  两处 sources 以 story-input.json 为准，身份卡仅作缺参回退；补全值同样请读文件获取，此处不内联。',
+        ''
+      )
+    }
     lines.push(
       '**模式: fixbugs（Bug 修复）**',
       '',
       '- 上述参数由主 Agent 原样搬运，**未经任何分析** —— Bug 分析是你的职责，不是主 Agent 的。',
-      '- 你需要自行 `use_skill("tapd-bug-analyzer")`，用 sources 里的 tapdUrl / workspaceId / owner / statusFilter 拉取并分析缺陷。',
+      '- 你需要自行 `use_skill("tapd-bug-analyzer")`，用 sources 里的 tapdUrl / workspaceId / storyIdInTapd / owner / statusFilter 拉取并分析缺陷。',
+      '- **Bug 归属判定与查询口径**以 `tapd-bug-analyzer` skill 为准（本 prompt 不重复规则），`use_skill` 后严格按其约束执行。',
       '- Bug 分析报告**只记录事实**: 问题复述、复现步骤、代码定位、根因、责任方分类。',
       '  **不要写修复方案**（不写"应该怎么改"、不给伪代码/diff）—— 修复设计属于开发工程师。',
       '- 产出 `{标题}_bug分析报告.md` 后，再写 `requirement-analysis.md`：只引用 Bug 编号，不复制 Bug 正文。',
-      '- **若 TAPD 查询 0 条命中**（按 owner / statusFilter 过滤后无缺陷）: 仍然写 `bug-list.json`，但 `bugs` 写空数组 `[]`',
+      '- **若 TAPD 查询 0 条命中**（关联集合为空，或在关联集合内按 owner / statusFilter 过滤后无缺陷）: 仍然写 `bug-list.json`，但 `bugs` 写空数组 `[]`',
       '  并在报告里写明「本轮无符合条件缺陷」+ 查询条件与命中数。**不要编造缺陷、不要放宽容忍条件去凑数**。',
       '  此时不产出 AC / open-questions，主 Agent 会直接结束工作流 —— 空清单是这次查询的事实记录，不是失败。',
       ''
