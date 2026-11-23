@@ -56,7 +56,7 @@ run 模式看 `sources.prototypeUrls` + `sources.figmaUrls` 是否非空。
 |------|------|-------------|
 | `criteria` 为空 / 缺 id / 缺 description / id 重复 | BLOCKER (2) | `ac_empty_criteria` `ac_missing_id` `ac_missing_description` `ac_duplicate_id` |
 | `acceptance-criteria.json` JSON 解析失败 | BLOCKER (2) | `ac_format_error` |
-| `open-questions.json` 有项未被用户确认（无 `confirmation`，含 AI 已给建议稿） | BLOCKER (4) | `user_confirmation_required` |
+| `open-questions.json` 有项未被用户确认（无 `confirmation`，含 AI 已给建议稿；含已判定终局待落账的项） | BLOCKER (4) | `user_confirmation_required` |
 | `open-questions.json` 有项缺建议稿（`resolution` 为空） | BLOCKER (4) | `open_questions_unresolved` |
 | `confirmation` 缺 `confirmedVia`/`confirmedAt`（疑似未经 resolve-question.js 写入） | WARNING | — |
 | **run 模式** `acceptance-criteria.json` 缺 `featurePoints` | BLOCKER (2) | `prd_coverage_missing` |
@@ -103,6 +103,15 @@ Figma frame-inventory **不在本门控校验** —— 由 Phase 1 任务规划�
 `open-questions.json`（schema: `scripts/schemas/open-questions.schema.json`）：
 `resolved` 字段已废弃（门控不读）；每条 question 须含建议稿 `resolution` + `resolutionSource`；
 **确认的唯一载体是 `confirmation` 字段**，约定由 `resolve-question.js` 在用户答复后写入，AI 不得自行填写。
+
+**答复语义判定（2026-11-23 v2 追问口径）**：用户答复后、落账前，主 Agent 先 spawn 需求分析师
+做语义判定——为每条被答复的 Q 写 `assessment`（`verdict: final|not_answered` + `rawAnswer`
+用户原话逐字摘录 + `decisionExtract` + `newQuestionIds`），答复带出的新疑问/新指令/需求变更
+逐条追加为**新 Q（扁平递增，id = 现有最大编号+1，含建议稿）**。`resolve-question.js` 落账前置校验：
+无 `assessment.verdict=final` 拒绝；`--answer` 与 `assessment.rawAnswer` 逐字不一致拒绝
+（用户原话保真）。闭环判定 = 所有 Q 都有 `confirmation`（新 Q 走同一"建议稿→确认→落账"循环），
+多轮追问直到无未决项才放行 —— 这是 grill-me「frontier empty 才行动」的结构化落地，
+防"答复带新分支被当终局裁决直接消费"（2026-11 两个真实 Story 的复盘病根）。
 
 ## 分类后立即回写 TAPD（fixbugs 模式）
 

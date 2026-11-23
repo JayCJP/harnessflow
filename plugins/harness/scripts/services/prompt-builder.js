@@ -842,10 +842,14 @@ function buildAgentPrompt (opts) {
 
   // open-questions 场景例外（2026-10-20 裁定）: 「已达成共识」对建议稿不成立 ——
   // 建议稿未经用户确认前只是参考，若已有 confirmation（用户已拍板），以 confirmation 为准修正。
+  // v2 追问口径（2026-11-23 裁定）: rework 时 assessment 可按新一轮用户答复更新判定，
+  // confirmation 仍不得改动；无终局判定的 pending 项可改写 question/resolution。
   const oqReworkNote = (isRework && targetPhase === 0 && producedBefore.includes('open-questions.json'))
     ? '> ⚠️ 本 Phase 已产出: open-questions.json\n' +
       '> 其中的条目若已有 `confirmation`，以 `confirmation.answer` 为准修正建议稿引用处；\n' +
-      '> `confirmation` 字段本身不得改动（用户确认记录）。\n'
+      '> `confirmation` 字段本身不得改动（用户确认记录）。\n' +
+      '> 若本次 spawn 携带了新的用户答复，为被答复的 Q 写/更新 `assessment`（verdict/rawAnswer 逐字/decisionExtract/newQuestionIds），\n' +
+      '> 并为答复带出的新分支追加新 Q（id = 现有最大编号+1，含建议稿）；无终局判定的 pending 项可改写 question/resolution。\n'
     : ''
 
   const reworkSection = isRework
@@ -890,7 +894,7 @@ function buildAgentPrompt (opts) {
     // 紧随产出清单：先说产出什么，再说按什么格式产出（骨架由 schema-injector 生成）
     schemaSection,
     '',
-    // Phase 0 专属: open-questions 的 v4 判定口径（2026-10-20 用户裁定）。
+    // Phase 0 专属: open-questions 的 v4 判定口径（2026-10-20 用户裁定）+ v2 追问口径（2026-11-23 裁定）。
     // schema-injector 只渲染白名单/必填/additionalProperties，跨字段规则无法自动进 prompt；
     // 不写明的话 Agent 会把 resolved 置 true 就交付，要等被门控拦下一次才知道规则。
     // 本段是软约束的主阵地：confirmation 无 hook 硬拦截，靠这里每次 spawn 注入的纪律约束。
@@ -898,8 +902,8 @@ function buildAgentPrompt (opts) {
       ? '## ⚠️ open-questions.json 判定口径\n' +
         '- 每条 question 必须给出**建议稿**：`resolution`（非空结论）+ `resolutionSource`\n' +
         '  （requirement-doc / prototype / code-evidence / inference）。\n' +
-        '- **问题措辞铁律**：把 `question` 写成「是否采纳 <建议稿要点>？」这类形式，让用户答「采纳/yes」\n' +
-        '  就直接等价于采纳本条的 `resolution` —— 避免中性提问导致用户答复语义分歧（「要」/「好的」/「按你说的」）。\n' +
+        '- **问题须清晰陈述需用户拍板的事**并给出建议稿；用户答复的语义（终局/带新分支）由你在答复后的\n' +
+        '  判定环节解读，不要求是/否式提问。\n' +
         '- **依赖显式化**：若 Q2 的建议取决于 Q1 如何拍板，须在 Q2 的 `resolution` 写明\n' +
         '  「若 Q1 选 <A>，则本项建议 <B>」，让用户回答时前后不矛盾；不得把相互依赖的项写成彼此独立。\n' +
         '- **只问真正需要用户拍板的事**：能从 story-input / TAPD / 原型 / 知识库查到的事实，\n' +
@@ -909,6 +913,12 @@ function buildAgentPrompt (opts) {
         '- ⛔ **`confirmation` 字段是用户确认专用，你（以及任何 Agent）不得自行填写** ——\n' +
         '  它代表用户本人的拍板，擅自填写等于伪造用户意志，是最高优先级的禁止事项。\n' +
         '  即使你认为答案显而易见，也只能写 `resolution` 建议稿，把 `confirmation` 留给用户确认环节。\n' +
+        '- **答复语义判定（你被 spawn 判定时的职责）**：用户答复到达后，主 Agent 会携带答复原话 spawn 你。\n' +
+        '  为每条被答复的 Q 写 `assessment`：`verdict: "final"`（终局裁决，可同时带出新分支）/ "not_answered"（答非所问，\n' +
+        '  下轮重问）；`rawAnswer` 逐字摘录用户原话（**禁止改写** —— 落账时 resolve-question 会逐字校验）；\n' +
+        '  `decisionExtract` 裁决要点；`newQuestionIds` 关联新追加的 Q。答复带出的新疑问/新指令/需求变更\n' +
+        '  逐条追加为新 Q（id = 现有最大编号+1，question 引用用户原话改写为可确认的问题，附建议稿）——\n' +
+        '  **不得把带新分支的答复当成已完结**（这是历史上新指令被当终局裁决直接消费的病根）。\n' +
         '- 不要填 `resolved` 字段（已废弃）；`blocking` 仅用于提示用户"这项建议优先看"，不影响放行。\n' +
         '- 找不到依据时不要猜、不要留空，写明 inference 并说明不确定点 —— 用户确认环节就是为此设计的。\n'
       : '',

@@ -323,7 +323,7 @@ function generateInsights (metrics) {
       severity: 'warning',
       title: `门控一次通过率 ${Math.round(metrics.gateFirstTryRate * 100)}%`,
       description: `${Math.round((1 - metrics.gateFirstTryRate) * 100)}% 的 Phase 推进需要多次门控尝试`,
-      recommendation: '需求分析阶段确保 AC 格式正确（id/description/criteria 非空）、open-questions 全部 resolved、task-dag 使用 title 而非 name',
+      recommendation: '需求分析阶段确保 AC 格式正确（id/description/criteria 非空）、open-questions 全部经用户确认（confirmation 齐全）、task-dag 使用 title 而非 name',
       evidence: `通过率 ${Math.round(metrics.gateFirstTryRate * 100)}% (基于 ${metrics.storyCount} 个 Story)`
     })
   }
@@ -368,7 +368,7 @@ function generateInsights (metrics) {
       severity: 'warning',
       title: `Story 完成率 ${Math.round(metrics.storyCompletionRate * 100)}%`,
       description: '部分 Story 未完成，可能存在需求不清晰或阻塞未解决',
-      recommendation: '需求分析阶段确保 open-questions 全部 resolved，需求边界明确后再进入开发',
+      recommendation: '需求分析阶段确保 open-questions 全部经用户确认（confirmation 齐全），需求边界明确后再进入开发',
       evidence: `${metrics.completedStories}/${metrics.storyCount} 完成`
     })
   }
@@ -400,7 +400,7 @@ function getRecommendationForPhase (phase) {
   // Phase 编号对齐 lib/phases.js（0 需求 / 1 规划 / 2 开发 / 3 审查 / 4 知识库更新 /
   // 5 Git提交 / 6 部署（可选） / 7 终态）。2.3.1 起知识库更新与 Git 提交换序。
   const recommendations = {
-    0: '需求分析阶段确保 AC 覆盖完整、格式正确，open-questions 全部 resolved 后再推进',
+    0: '需求分析阶段确保 AC 覆盖完整、格式正确，open-questions 全部经用户确认（confirmation 齐全）后再推进',
     1: '任务规划时将大 task 拆为 Fork-Join 并行，单 task 控制在 15min 内，为每个 task 声明完整 files',
     2: '开发阶段加强自测，ESLint 0 error 后再提交审查，参考知识库 pitfalls.md 避免已知坑点',
     3: '代码审查师在 FIX_DATA 块中给出代码级建议（含行号和替换方案），并逐条核对 AC',

@@ -477,14 +477,24 @@ function checkPhase0Gate (storyId, state, result) {
 
   // 第 2 类: 有建议稿但未确认 → 转用户确认（与「缺建议稿」分开：这不是分析员没干完，
   // 重新 Spawn 分析员只会让它再自答一遍 —— 正是要根治的病）
-  const pending = oqCheck.exists ? oqCheck.pendingConfirmation : []
+  // v2 追问口径: assessed_final（已判定终局、待落账）无 confirmation，同样不放行，
+  // 与 pending_confirmation 并入同一 blocker —— dispatch 在 A0 内按桶细分指令
+  const pending = oqCheck.exists
+    ? [...oqCheck.pendingConfirmation, ...(oqCheck.assessedFinal || [])]
+    : []
   if (pending.length > 0) {
     const ids = pending.map(q => q.id || '?').slice(0, 5).join(', ')
+    const pendingCount = oqCheck.pendingConfirmation.length
+    const assessedCount = (oqCheck.assessedFinal || []).length
+    // message 区分两类（dispatch A0 据桶细分指令: 待问用户 / 已判定待落账勿重问）
+    const breakdown = assessedCount > 0
+      ? `${pendingCount} 项待确认（建议稿已就位）+ ${assessedCount} 项已判定终局待落账`
+      : `${pending.length} 项待确认问题必须经用户确认（建议稿已就位）`
     result.blockers.push(structuredError(
       'user_confirmation_required',
-      `open-questions: ${pending.length} 项待确认问题必须经用户确认（建议稿已就位）: ${ids}`,
+      `open-questions: ${breakdown}: ${ids}`,
       4,
-      '把待确认项一次性列给用户（问题 + 建议稿 + 依据来源，blocking 项排前），拿到答复后用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿 / 全部采纳用 --accept-all）'
+      '把待确认项一次性列给用户（问题 + 建议稿 + 依据来源，blocking 项排前），用户答复先经需求分析师语义判定（assessment），再按判定结论用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿 / 全部采纳用 --accept-all）'
     ))
     result.passed = false
   }

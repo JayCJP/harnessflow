@@ -128,7 +128,14 @@ function openQuestionWarnings (storyId) {
     const ids = check.pendingConfirmation.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
     warnings.push(
       `⛔ open-questions.json 有 ${check.pendingConfirmation.length} 项待确认项必须经用户确认（含 AI 已给建议稿的项）: ${ids} —— ` +
-      'Phase 0→1 门控会拦截。用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿）'
+      'Phase 0→1 门控会拦截。用户答复先经需求分析师语义判定（assessment），再用 resolve-question.js 写入 confirmation（--answer 用户原话 / --accept 采纳建议稿）'
+    )
+  }
+  if (check.assessedFinal.length > 0) {
+    const ids = check.assessedFinal.map(q => q.id || q.question || '?').slice(0, 5).join(', ')
+    warnings.push(
+      `🔵 open-questions.json 有 ${check.assessedFinal.length} 项答复已判定为终局、待落账: ${ids} —— ` +
+      '逐条执行 resolve-question.js --qid <Q-N> --answer "<该条 assessment.rawAnswer 逐字复制>"'
     )
   }
   if (check.noProposal.length > 0) {
@@ -325,6 +332,22 @@ function dispatch (storyId) {
         `  ❓ ${q.id}${q.blocking ? ' [建议优先]' : ''} ${q.question}\n` +
         `    ➡️ 建议稿: ${(q.resolution || '').trim()}（依据: ${q.resolutionSource || '未标注'}）`
       )
+      // v2 追问口径: 已判定终局的项单独分组 —— 指令是「落账」而非「再问用户」，
+      // 避免同一问题被重复抛给用户（判定已确认它是终局裁决）
+      const assessed = oq.assessedFinal || []
+      const assessedItems = assessed.map(q =>
+        `  🔵 ${q.id} 判定结论: ${q.assessment.decisionExtract || '(见 assessment)'}\n` +
+        `    原话: ${q.assessment.rawAnswer}`
+      )
+      const assessedNote = assessed.length > 0
+        ? '\n\n以下项答复已经需求分析师判定为终局（assessment.verdict=final），**勿再向用户重复提问**，直接落账:\n' +
+          assessedItems.join('\n') +
+          '\n操作: 逐条执行 ' + commandPath('resolve-question.js') + ` ${storyId} --qid <Q-N> --answer "<该条 assessment.rawAnswer 逐字复制>"`
+        : ''
+      // 空 items 边界: 只剩待落账项时不输出「必须经用户确认」引导头（避免语义断裂）
+      const pendingHead = sorted.length > 0
+        ? '以下待确认项必须经用户确认（AI 建议稿不构成放行依据）:\n' + items.join('\n')
+        : ''
       // 缺建议稿的项一并提示，避免用户确认完再 dispatch 才发现还有 noProposal，多一次往返
       const noProposalNote = oq.noProposal.length > 0
         ? `\n另有 ${oq.noProposal.length} 项缺建议稿（${oq.noProposal.map(q => q.id).join(', ')}），需需求分析师先补稿`
@@ -333,12 +356,20 @@ function dispatch (storyId) {
       result.recovery = {
         type: 'user_confirmation_required',
         command: null,
-        description: '以下待确认项必须经用户确认（AI 建议稿不构成放行依据）:\n' + items.join('\n') +
+        description: pendingHead +
+          assessedNote +
           '\n回复方式: 按编号答复，如「Q-1 采纳，Q-2 改为 <你的答案>」；答「采纳」即采纳该条建议稿（➡️ 行）。\n' +
-          `\n详情: read_file .codebuddy/plans/${storyId}/open-questions.json` +
-          '\n操作: 把以上清单一次性列给用户，拿到答复后逐条执行 ' +
+          '判定环节（用户答复后、落账前必须执行，防止答复带出的新疑问/新指令被当终局裁决消费）: Spawn 需求分析师做答复语义判定 —— ' +
+          '读取 open-questions.json 的全部未确认项与用户答复原话，为每条被答复的 Q 写 assessment ' +
+          '{ verdict: "final"（终局裁决，可含同时带出的新分支）| "not_answered"（答非所问，下轮重问）, ' +
+          'rawAnswer: <用户原话逐字摘录，禁止改写>, decisionExtract: <裁决要点摘录>, newQuestionIds: [] }；' +
+          '答复带出的新疑问/新指令/需求变更逐条追加为新 Q（id = 现有最大编号+1，question 引用用户原话改写为可确认的问题，附 resolution 建议稿与 resolutionSource）；' +
+          '未落账的 pending 项（含 not_answered）可按新判定改写 question/resolution。判定完成后回 Step 1 重新 dispatch，按其分组指令落账或继续问用户。\n' +
+          'Spawn 时把以下占位符逐字替换为用户答复原文（其余任务描述原样保留，不加工）:\n<USER_REPLIES>\n' +
+          `详情: read_file .codebuddy/plans/${storyId}/open-questions.json` +
+          '\n操作: 按判定结论逐条执行 ' +
           commandPath('resolve-question.js') + ` ${storyId} --qid <Q-N> --answer "<用户原话>"` +
-          '；用户答"采纳"改用 --accept（采纳该条建议稿），明确说"全部采纳"用 --accept-all，然后重新执行 dispatch.js' +
+          '（校验: 无 assessment.verdict=final 或 --answer 与 rawAnswer 不一致会被拒绝）；用户答"采纳"改用 --accept，明确说"全部采纳"用 --accept-all，然后重新执行 dispatch.js' +
           noProposalNote
       }
       return result

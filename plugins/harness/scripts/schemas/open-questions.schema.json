@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Open Questions Schema",
-  "description": "待确认项契约校验规则。放行判定只读 confirmation 字段（约定由 resolve-question.js 在用户确认后写入，AI 不得自行填写）；resolution/resolutionSource 是给用户的建议稿；resolved 字段已废弃（存量兼容保留，门控不读）。",
+  "description": "待确认项契约校验规则。放行判定只读 confirmation 字段（约定由 resolve-question.js 在用户确认后写入，AI 不得自行填写）；落账前置条件是 assessment.verdict=final（答复语义判定，由需求分析师在用户答复后写入）；resolution/resolutionSource 是给用户的建议稿；resolved 字段已废弃（存量兼容保留，门控不读）。",
   "type": "object",
   "required": ["questions"],
   "properties": {
@@ -15,7 +15,7 @@
           "question": {
             "type": "string",
             "minLength": 1,
-            "description": "问题措辞须让用户答「采纳/yes」直接等价于采纳本条的 resolution 建议稿 —— 写成「是否采纳 <建议稿要点>？」而非中性提问；相互依赖的项在 resolution 中标注「若 Q1 选 A，则本项建议 B」。"
+            "description": "问题须清晰陈述需用户拍板的事并给出建议稿；用户答复的语义（终局/带新分支）由需求分析师在答复后判定，不要求是/否式提问。相互依赖的项在 resolution 中标注「若 Q1 选 A，则本项建议 B」。"
           },
           "resolved": { "type": "boolean" },
           "owner": { "type": "string" },
@@ -25,6 +25,29 @@
           "resolutionSource": {
             "type": "string",
             "enum": ["requirement-doc", "prototype", "code-evidence", "inference"]
+          },
+          "assessment": {
+            "type": "object",
+            "description": "答复语义判定结论（需求分析师在用户答复后写入；resolve-question.js 落账前校验 verdict=final 且 --answer 与 rawAnswer 逐字一致）。",
+            "required": ["verdict", "rawAnswer"],
+            "properties": {
+              "verdict": { "type": "string", "enum": ["final", "not_answered"] },
+              "rawAnswer": {
+                "type": "string",
+                "minLength": 1,
+                "description": "用户答复原话逐字摘录（禁止改写）——落账与审计的原话保真锚点。"
+              },
+              "decisionExtract": {
+                "type": "string",
+                "description": "裁决要点摘录（人读，供审计回放比对）。"
+              },
+              "newQuestionIds": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "本答复带出的新问题（已按扁平规则追加为顶层 Q-编号+1 项）的 id 列表。"
+              }
+            },
+            "additionalProperties": false
           },
           "confirmation": {
             "type": "object",

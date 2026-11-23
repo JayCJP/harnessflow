@@ -141,16 +141,19 @@ function checkAcceptanceCriteria (storyId) {
  * 拍板，约定由 resolve-question.js 在用户答复后写入。`resolved` / `resolution` / `blocking`
  * 全部退出放行判定：AI 自己写任何结论都不构成放行依据（此前的"自己填就能过"正是要修的病）。
  *
- * 四态:
+ * 四态 + v2 追问口径第五态:
  *   - confirmed:             confirmation 齐全（answer 非空 + confirmedVia + confirmedAt）
  *   - confirmed_informal:    answer 非空但缺 confirmedVia/confirmedAt —— 脚本写入必然字段齐全，
  *                            缺斤短两大概率是手写痕迹；放行但由门控记 warning（v4 软约束）
+ *   - assessed_final:        无 confirmation 但 assessment.verdict=final —— 答复已经需求分析师
+ *                            判定为终局、待 resolve-question 落账（v2 追问口径，2026-11-23 裁定）。
+ *                            仍无 confirmation，仍计入 unresolved，放行语义不变
  *   - pending_confirmation:  有建议稿（resolution 非空）但无 confirmation —— 必须转用户确认
  *   - no_proposal:           连建议稿都没有 —— 分析员本职工作没做完，先补稿再谈确认
  *
  * @param {Object} q - open-questions.json 的 questions[] 元素
- * @returns {{ state: 'confirmed'|'confirmed_informal'|'pending_confirmation'|'no_proposal', reason: string }}
- *   state 为四态分类；reason 为人读说明（门控/摘要/审计共用）
+ * @returns {{ state: 'confirmed'|'confirmed_informal'|'assessed_final'|'pending_confirmation'|'no_proposal', reason: string }}
+ *   state 为五态分类；reason 为人读说明（门控/摘要/审计共用）
  */
 function evaluateOpenQuestion (q) {
   if (!q || typeof q !== 'object') {
@@ -167,6 +170,11 @@ function evaluateOpenQuestion (q) {
       ? { state: 'confirmed_informal', reason: 'confirmation 缺 confirmedVia/confirmedAt 或 confirmedVia 非法，疑似未经 resolve-question.js 写入' }
       : { state: 'confirmed', reason: '用户已确认' }
   }
+  // v2 追问口径: 无 confirmation 但已有终局判定 → 待落账（dispatch 据此区分「待问用户」与
+  // 「待落账」两种指令）。not_answered 判定不改变状态（答非所问 → 仍归 pending，等下一轮重问）
+  if (q.assessment && q.assessment.verdict === 'final') {
+    return { state: 'assessed_final', reason: '答复已判定为终局，待 resolve-question 落账' }
+  }
   const hasProposal = typeof q.resolution === 'string' && q.resolution.trim().length > 0
   return hasProposal
     ? { state: 'pending_confirmation', reason: '建议稿已就位，待用户确认' }
@@ -176,14 +184,14 @@ function evaluateOpenQuestion (q) {
 /**
  * 检查待确认项契约 (open-questions.json) 的确认状态
  *
- * 未解决判定 = 无有效 confirmation（pending_confirmation + no_proposal 并集）。
+ * 未解决判定 = 无有效 confirmation（pending_confirmation + assessed_final + no_proposal 并集）。
  * `resolved` 字段已废弃（存量兼容保留在 schema），本函数不读它的值。
  *
  * @param {string} storyId - Story ID
  * @returns {{ exists: boolean, allResolved: boolean, unresolved: Array, confirmed: Array,
- *   confirmedInformal: Array, pendingConfirmation: Array, noProposal: Array, errors: string[] }}
+ *   confirmedInformal: Array, pendingConfirmation: Array, assessedFinal: Array, noProposal: Array, errors: string[] }}
  *   unresolved 保持向后兼容（= 未确认项）；confirmed/confirmedInformal/pendingConfirmation/
- *   noProposal 为 v4 新增的四态分类数组
+ *   assessedFinal/noProposal 为 v4 四态 + v2 追问态的分类数组
  */
 function checkOpenQuestions (storyId) {
   const result = {
@@ -193,6 +201,7 @@ function checkOpenQuestions (storyId) {
     confirmed: [],
     confirmedInformal: [],
     pendingConfirmation: [],
+    assessedFinal: [],
     noProposal: [],
     errors: []
   }
@@ -214,21 +223,24 @@ function checkOpenQuestions (storyId) {
     return result
   }
 
-  // 逐条评估并归入四态桶；「已解决」= 有有效 confirmation（含格式不规范的 1b 类，
-  // 它放行但由门控单独记 warning，不计入 unresolved）
+  // 逐条评估并归入五态桶；「已解决」= 有有效 confirmation（含格式不规范的 1b 类，
+  // 它放行但由门控单独记 warning，不计入 unresolved；assessed_final 已判定终局但尚未
+  // 落账，无 confirmation 仍属未解决 —— 门控不放行，dispatch 指示落账）
   for (const q of data.questions) {
     const { state } = evaluateOpenQuestion(q)
     if (state === 'confirmed') result.confirmed.push(q)
     else if (state === 'confirmed_informal') result.confirmedInformal.push(q)
+    else if (state === 'assessed_final') result.assessedFinal.push(q)
     else if (state === 'pending_confirmation') result.pendingConfirmation.push(q)
     else result.noProposal.push(q)
   }
-  result.unresolved = [...result.pendingConfirmation, ...result.noProposal]
+  result.unresolved = [...result.pendingConfirmation, ...result.assessedFinal, ...result.noProposal]
   result.allResolved = result.unresolved.length === 0
 
   if (!result.allResolved) {
     const parts = []
     if (result.pendingConfirmation.length > 0) parts.push(`${result.pendingConfirmation.length} 项待用户确认`)
+    if (result.assessedFinal.length > 0) parts.push(`${result.assessedFinal.length} 项已判定终局待落账`)
     if (result.noProposal.length > 0) parts.push(`${result.noProposal.length} 项缺建议稿`)
     result.errors.push(`${result.unresolved.length} 项待确认问题未完成确认（${parts.join('，')}）`)
   }

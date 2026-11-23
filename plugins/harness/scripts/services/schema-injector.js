@@ -87,10 +87,10 @@ function describeLevel (label, node) {
  */
 // 注: question 字段的「yes=采纳」措辞纪律不进骨架（会顶破单 Phase 2KB 成本护栏），
 // 改由 prompt-builder 的 Phase 0 口径段 + dispatch 展示文案 + 需求分析师.md 三处承载。
+// resolved 的「已废弃勿填」同样只在口径段承载（骨架预算紧张，且 confirmation 注解优先级更高）。
 const FIELD_NOTES = {
   'open-questions.json': {
-    confirmation: '仅 resolve-question.js 在用户确认后写入，Agent 严禁填写（填写等于伪造用户意志）',
-    resolved: '已废弃字段，门控不读，不要填写'
+    confirmation: '仅 resolve-question.js 在用户答复后写入，严禁填写'
   }
 }
 

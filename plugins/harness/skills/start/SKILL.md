@@ -147,12 +147,18 @@ Step 2: 按 status 分支（四态互斥且穷尽，无「其他情况自行处�
   │             否则: Spawn nextAgent，prompt = agentPrompt（原样注入，不加工）
   ├ fix_loop  → 执行 recovery.command
   ├ blocked   → 按 recovery.description 处理
-  │             ├ type=user_confirmation_required: 把待确认项**一次性**列给用户
-  │             │  （格式：Q-N 问题 / 建议稿 / 依据来源，blocking 项排前），
-  │             │  用户逐条答复或明确说"全部采纳"
-  │             │  → 逐条执行 resolve-question.js（--answer 用户原话 / --accept 采纳建议稿），
-  │             │    用户明确表达"全部采纳"时用 --accept-all 一次落账
-  │             │  → 回 Step 1（不要自行给 open-questions.json 加 confirmation）
+  │             ├ type=user_confirmation_required: 按恢复说明分两组机械执行 ——
+  │             │  ① 待问项: 把清单**一次性**列给用户（Q-N 问题 / 建议稿 / 依据来源，
+  │             │    blocking 项排前），用户逐条答复或明确说"全部采纳"
+  │             │  ② 已判定终局项（🔵）: 不再问用户，直接按说明落账
+  │             │  用户答复后**先 spawn 需求分析师做答复语义判定**（判定任务模板在
+  │             │  recovery.description 里，把其中 <USER_REPLIES> 占位符逐字替换为
+  │             │  用户答复原文，其余原样保留，不加工）—— 判定产出
+  │             │  assessment + 可能追加的新 Q
+  │             │  → 按判定结论逐条执行 resolve-question.js（--answer 必须逐字复制该条
+  │             │    assessment.rawAnswer / --accept 采纳建议稿；用户明确表达"全部采纳"
+  │             │    时用 --accept-all 一次落账；无终局判定会被拒绝）
+  │             │  → 回 Step 1（不要自行给 open-questions.json 加 confirmation 或 assessment）
   │             └ 其他 type: 按 recovery.description 处理，无 command 则转人工
   └ terminal  → 流程结束（未创建／已完成／已归档），按 recovery 提示收尾
 
@@ -225,6 +231,10 @@ HARNESS=${CLAUDE_PLUGIN_ROOT}/scripts/commands
 - 🚫 不替用户确认 open-questions：建议稿只写 `resolution`；**`confirmation` 字段只经
   `resolve-question.js` 在用户答复后写入**（--answer 用户原话 / --accept 采纳建议稿 / --accept-all
   全部采纳），任何 Agent 不得手写该字段（手写的 confirmation 会触发门控格式 warning 并被人工复核）
+- 🚫 用户答复 open-questions 后**不得跳过语义判定直接落账** —— 先 spawn 需求分析师判定
+  （产出 assessment，答复带出的新分支追加为新 Q），再按判定落账；resolve-question 对无
+  `assessment.verdict=final` 或 `--answer` 与 `assessment.rawAnswer` 不一致的落账会直接拒绝
+  （2026-11-23 v2 追问口径：防"答复带新疑问/新指令被当终局裁决消费"）
 - 🚫 主 Agent 不直接写 / 改 Phase 契约产出物（`acceptance-criteria.json` / `task-dag.json` /
   `*-verification.json` 等）—— 门控校验的就是这些文件，主 Agent 手改等于自己放行；要改就派对应
   子 Agent 增量更新（P3-1，2026-09 实跑诊断：主 Agent 曾手改 AC/task-dag/自写 fix-verification）
