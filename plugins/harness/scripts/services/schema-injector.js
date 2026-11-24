@@ -160,4 +160,89 @@ function buildContractSchemaSection (targetPhase) {
   ].join('\n')
 }
 
-module.exports = { buildContractSchemaSection, buildSchemaSkeleton }
+/**
+ * 生成 task-01 的「最小可照抄样例」，从 task-dag.schema.json 动态取必填字段与取值约束。
+ *
+ * 为什么独立成函数、不塞进 buildContractSchemaSection：
+ *   - 骨架段有「单 Phase ≤ 2KB」成本护栏（optimization-regression.test.js），
+ *     塞进来会撑爆 Phase 1 并让骨架变杂；
+ *   - 骨架回答「哪些键合法」，样例回答「值长什么样」—— 两者互补，分开注入。
+ *
+ * 为什么是「照抄样例」而不是只给 key+type：
+ *   实测 Agent 拿到白名单仍会猜 description 写法 / files 写文件还是目录 / id 正则，
+ *   给一个能直接复制改值的样例，比抽象约束更能保证一次写对。
+ *
+ * 样例唯一信源 = schema：必填字段从 schema.required 取，id/AC 正则从 pattern 取，
+ * enum 从 schema 取 —— schema 改了样例自动跟着变，不另立硬编码副本。
+ *
+ * @returns {string} markdown 片段；schema 缺失或解析失败时返回空串
+ */
+function buildTaskTemplate () {
+  const schemaPath = path.join(SCHEMA_DIR, 'task-dag.schema.json')
+  if (!fs.existsSync(schemaPath)) return ''
+
+  let schema
+  try {
+    schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'))
+  } catch (e) {
+    return ''
+  }
+
+  const taskNode = schema.properties && schema.properties.tasks && schema.properties.tasks.items
+  if (!taskNode || !taskNode.properties) return ''
+
+  const props = taskNode.properties
+  const required = Array.isArray(taskNode.required) ? taskNode.required : []
+
+  // 样例值：必填字段给「满足 schema 约束的合法占位」，可选字段只在注解里列名字，不塞进样例（保持最小）。
+  // 字段名来自 schema.required（改了必填项，样例自动跟着变）；占位值的形态按 schema.pattern
+  // 给出合法示例（id → task-01、AC → AC-01），schema 只给正则不给 example，故具体值是占位、
+  // 真正的约束以 pattern 注解为准 —— 不在这里重复定义第二份规则。
+  const sampleValues = {
+    id: 'task-01',
+    title: '填写任务标题（用 title，不是 name）',
+    files: ['src/path/to/module/**'],
+    acceptanceCriteria: ['AC-01'],
+    parallelizable: true
+  }
+
+  const lines = ['## task-01 标准样例（先照抄再改值，逐字段对齐门控）', '']
+  lines.push('```json')
+  lines.push('{')
+  lines.push('  "tasks": [')
+  lines.push('    {')
+
+  // 必填字段：按 schema.required 顺序输出，值取 sampleValues
+  const requiredLines = required.map((k, i) => {
+    const comma = i < required.length - 1 ? ',' : ''
+    return `      "${k}": ${JSON.stringify(sampleValues[k] !== undefined ? sampleValues[k] : '')}${comma}`
+  })
+  lines.push(...requiredLines)
+
+  lines.push('    }')
+  lines.push('  ]')
+  lines.push('}')
+  lines.push('```')
+  lines.push('')
+
+  // 关键约束注解：只列「光看样例看不出来、但门控会拦」的点
+  lines.push('- `id`：必须匹配 `^task-\\d+$`（如 `task-01`），同一 DAG 内唯一。')
+  lines.push('- `title`：必填非空，**用 `title` 不是 `name`**。')
+  lines.push('- `files`：必填非空，写允许改动的**文件/目录区域**（支持 `src/views/**` 这类 glob） —— Phase 2→3 范围审计按它比对，列得越准被打回越少。')
+  lines.push('- `acceptanceCriteria`：必填非空，每项匹配 `^AC-\\d+$`，且至少 1 条，引用的 AC 必须在 `acceptance-criteria.json` 里存在。')
+  lines.push('- `parallelizable`：必填 boolean；文件范围重叠的任务必须串行（设 `false`）。')
+
+  // 可选字段：从 schema 白名单里剔除必填后列出，避免样例膨胀但让 Agent 知道「还有这些可用」
+  const optionalKeys = Object.keys(props).filter(k => !required.includes(k))
+  if (optionalKeys.length > 0) {
+    lines.push(`- 可选字段（按需加，**schema 里没有的键一律不能加**）: ${optionalKeys.map(k => `\`${k}\``).join(', ')}`)
+  }
+  lines.push('- ⚠️ `additionalProperties: false` —— 样例与骨架之外的键**一个都不能自造**，出现即门控返工。')
+
+  // 跨项目 / 条件必填：schema 的 required 是静态的，这两条是门控的运行时追加约束
+  lines.push('- 跨项目 task（改主仓以外的仓库）：必须成对写 `project` + `repoPath`，且 `description` 必填并含行号引用（如 `L460-L470`）。')
+
+  return lines.join('\n')
+}
+
+module.exports = { buildContractSchemaSection, buildSchemaSkeleton, buildTaskTemplate }

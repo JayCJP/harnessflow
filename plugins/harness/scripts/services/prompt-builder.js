@@ -802,6 +802,10 @@ function buildAgentPrompt (opts) {
   // ③ 方案 B: 契约产出物的 schema 骨架（门控按此校验，让子 Agent 生成前就对齐字段白名单与类型）
   // 无契约产出物的 Phase（如 Phase 2 只产出 git diff）自动返回空串，无需在此判断
   const schemaSection = schemaInjector.buildContractSchemaSection(targetPhase)
+  // Phase 1 专属：可照抄的 task-01 标准样例。骨架回答「哪些键合法」，样例回答「值长什么样」——
+  // 两者互补。实测 Agent 拿到白名单仍会猜 description/files/id 正则，给样例保证一次写对。
+  // 不塞进 buildContractSchemaSection 是为了守住骨架的单 Phase ≤ 2KB 成本护栏。
+  const taskTemplateSection = targetPhase === 1 ? schemaInjector.buildTaskTemplate() : ''
 
   // P1-3: 跨仓检索入口（repos.json 有非 primary 条目时逐仓下发，修复 D2 三重失效）
   const repoSearchEntries = buildRepoSearchEntries(storyId, targetPhase)
@@ -893,6 +897,9 @@ function buildAgentPrompt (opts) {
     '',
     // 紧随产出清单：先说产出什么，再说按什么格式产出（骨架由 schema-injector 生成）
     schemaSection,
+    '',
+    // 样例紧随骨架：先给可照抄的 task-01 样例，再让 Agent 按骨架核对白名单
+    taskTemplateSection,
     '',
     // Phase 0 专属: open-questions 的 v4 判定口径（2026-10-20 用户裁定）+ v2 追问口径（2026-11-23 裁定）。
     // schema-injector 只渲染白名单/必填/additionalProperties，跨字段规则无法自动进 prompt；
