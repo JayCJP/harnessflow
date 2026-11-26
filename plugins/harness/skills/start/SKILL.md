@@ -143,7 +143,9 @@ Step 1: 执行 node ${HARNESS}/dispatch.js <storyId>
 
 Step 2: 按 status 分支（四态互斥且穷尽，无「其他情况自行处理」）
 
-  ┌ ready     → 若 readyToAdvance=true: 先执行 advanceCommand，再回 Step 1
+  ┌ ready     → 若 preAdvanceAgent 非空: Spawn 该 Agent，prompt = preAdvancePrompt（原样注入，不加工）；
+  │              回报完成后执行 advanceCommand，再回 Step 1
+  │             否则若 readyToAdvance=true: 先执行 advanceCommand，再回 Step 1
   │             否则: Spawn nextAgent，prompt = agentPrompt（原样注入，不加工）
   ├ fix_loop  → 执行 recovery.command
   ├ blocked   → 按 recovery.description 处理

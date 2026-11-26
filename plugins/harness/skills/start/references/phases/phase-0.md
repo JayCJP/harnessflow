@@ -113,6 +113,25 @@ Figma frame-inventory **不在本门控校验** —— 由 Phase 1 任务规划�
 多轮追问直到无未决项才放行 —— 这是 grill-me「frontier empty 才行动」的结构化落地，
 防"答复带新分支被当终局裁决直接消费"（2026-11 两个真实 Story 的复盘病根）。
 
+**裁决回写（全部确认后、Phase 0→1 推进前）**：所有 Q 都有 `confirmation` 后，`dispatch.js` 的
+「就绪可推进」分支会给出 `preAdvanceAgent: "requirement-analyst"` + `preAdvancePrompt`，
+主 Agent 按 [SKILL.md](../../SKILL.md) 的 ready 分支先 Spawn 该 Agent 做裁决回写，回报完成后才推进 ——
+把用户裁决融入 `requirement-analysis.md` 正文与 `acceptance-criteria.json`（冲突处以裁决为准；
+AC 保持 schema 合规，run 模式同步 `featurePoints.acIds` 引用）。
+`instruction` 字段只是人读说明，主 Agent 不消费它；动作只走顶层字段。
+
+为什么必须做：`resolve-question.js` 只写 `confirmation`，`syncDecisionsToRequirementDoc` 只把裁决投影成
+文档里的镜像块，**AC 不在任何自动投影范围内**。AC 是 Phase 2 自测与 Phase 3 审查的唯一验收基准，
+不回写则裁决停留在 `open-questions.json`，下游照旧按旧口径 AC 开发，越修越偏（§8 断层）。
+
+- 回写幂等：文档与 AC 已与裁决一致时不写入；重复触发无副作用。
+- 不改 `open-questions.json` — `confirmation` 是已落账事实。
+- 推进时 `advance-phase.js` 仍会生成「用户已确认裁决」镜像块（`confirmation` 的机械投影，零语义）。
+  镜像块由脚本维护、分析员只改正文，不要手改镜像块。
+- AC 改坏格式会在 Phase 0→1 门控被现有检查拦下（`ac_format_error` / `ac_duplicate_id` /
+  run 模式 `prd_coverage_missing`），进重做循环；语义是否写对无门控，由 Phase 3 审查兜底。
+
+
 ## 分类后立即回写 TAPD（fixbugs 模式）
 
 分类为 `backend` / `collab` 的缺陷，**分析完就写评论告知相关方**，不要等修复流程走完：

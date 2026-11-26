@@ -100,6 +100,10 @@ function baseResult (storyId, state) {
     agentLabel: null,
     agentPrompt: null,
     advanceCommand: null,
+    // 推进前置动作（仅 Phase 0 裁决回写时给出）：主 Agent 必须先 Spawn preAdvanceAgent 并注入
+    // preAdvancePrompt，完成后才执行 advanceCommand。instruction 只是人读说明，不是机器消费字段。
+    preAdvanceAgent: null,
+    preAdvancePrompt: null,
     warnings: [],
     recovery: null,
     // 可选阶段提示（仅终态下可能出现）：{ phase, phaseName, optional, command, description }
@@ -486,12 +490,50 @@ function dispatch (storyId) {
   result.status = 'ready'
   result.advanceCommand = `${ADVANCE_CMD} ${storyId} ${nextPhase}`
   result.readyToAdvance = true
+
+  // Phase 0 且已确认过待确认项 → 推进前先由需求分析师做「裁决回写」。
+  // 触发点必须在本分支：A0（user_confirmation_required）只在「还有待确认项」时输出，
+  // 最后一条落账后主 Agent 回到 dispatch 看到的正是这里，挂在 A0 的指令不会再被看到。
+  // 必须通过 preAdvanceAgent / preAdvancePrompt 顶层字段驱动：SKILL.md 的 ready 分支只读字段，
+  // 不读 instruction —— 写在 instruction 里的动作等于死指令（2026-11 review 实证）。
+  // 判定只读字段事实（全部已确认 + 已确认项数 > 0），不判语义；幂等由分析员自行核对。
+  if (phase === 0 && hasConfirmedDecisions(storyId)) {
+    result.preAdvanceAgent = 'requirement-analyst'
+    result.preAdvancePrompt =
+      '你是需求分析师。执行「裁决回写」：全部待确认项已由用户确认，需在推进到 Phase 1 前把裁决落到需求文档与 AC。\n' +
+      '否则裁决只留在 open-questions.json，下游开发/审查只认未同步过的 AC，用户裁决被架空。\n' +
+      `步骤:\n  1. 读 .codebuddy/plans/${storyId}/open-questions.json 全部 confirmation 与 assessment.decisionExtract;\n` +
+      '  2. 读 requirement-analysis.md 与 acceptance-criteria.json，逐条核对用户裁决与现有 AC / 文档描述;\n' +
+      '  3. 裁决与 AC 冲突或 AC 缺失 → 直接更新 acceptance-criteria.json（保持 schema 合规；\n' +
+      '     run 模式同步 featurePoints 的 acIds 引用，避免引用不存在的 AC）;\n' +
+      '  4. 同步更新 requirement-analysis.md 正文的范围 / 设计描述（「用户已确认裁决」镜像块由脚本维护，不要手改）;\n' +
+      '  5. 不改 open-questions.json（confirmation 是已落账事实）；文档与 AC 已与裁决一致时跳过写入。\n' +
+      '完成后回报改动文件清单。不要执行推进命令 —— 推进由主 Agent 在收到回报后执行 advanceCommand。'
+  }
+
   result.instruction = nextPhase > MAIN_FLOW_END_PHASE
     ? `执行 advanceCommand 推进到 Phase ${nextPhase}（${getPhaseName(nextPhase)}）；主流程在此结束，` +
       '之后云端部署为可选阶段，dispatch 会以 optionalNext 给出提示'
     : `先执行 advanceCommand 推进到 Phase ${nextPhase}，完成后回 Step 1 重新执行 dispatch.js 取新 Phase 指令`
 
   return result
+}
+
+/**
+ * Phase 0 是否已确认过待确认项（决定推进前要不要做裁决回写）
+ * 只读 checkOpenQuestions 的字段事实：open-questions 存在、全部已确认、且确有确认记录。
+ * 无待确认项（questions 为空）时不需要回写，返回 false。
+ * @param {string} storyId - Story ID
+ * @returns {boolean} true = 需要执行裁决回写
+ */
+function hasConfirmedDecisions (storyId) {
+  try {
+    const oq = checkOpenQuestions(storyId)
+    return oq.exists && oq.allResolved && (oq.confirmed.length + oq.confirmedInformal.length) > 0
+  } catch (_) {
+    // 读取失败不改变推进路径（回写是软前置，不阻断推进）
+    return false
+  }
 }
 
 // ─── CLI ────────────────────────────────────────────────────

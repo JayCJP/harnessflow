@@ -584,4 +584,42 @@ section('14. v2 全链路：判定 final 落账 + 新分支扁平追加 + 全部
     doc.slice(doc.indexOf('## 用户已确认裁决'), doc.indexOf('## 用户已确认裁决') + 400))
 }
 
+// ────────────────────────────────────────────────────────────────
+section('15. Phase 0 推进前裁决回写指令（dispatch 分支 B）')
+{
+  const { dispatch } = require(path.join(SCRIPTS_DIR, 'commands/dispatch'))
+
+  // 15a. 全部确认 → 推进前要求先 spawn 需求分析师做裁决回写（否则 AC 仍是旧口径）
+  writePhase0Story('OQ-15A', [
+    { id: 'Q-1', question: '角标数据由谁下发？', resolution: '前端本地合成', confirmation: { answer: '后端下发，前端只渲染', confirmedVia: 'verbatim', confirmedAt: CONFIRMED_AT } }
+  ])
+  const d = dispatch('OQ-15A')
+  ok('门控通过 → 分支 B', d.readyToAdvance === true && d.status === 'ready',
+    JSON.stringify({ status: d.status, blockers: d.pendingBlockers }))
+  // 关键：动作必须由顶层字段驱动 —— SKILL.md 的 ready 分支只认 preAdvanceAgent，
+  // instruction 是人读说明、无机器消费方，光写在那里等于死指令
+  ok('给出 preAdvanceAgent（机器消费字段）', d.preAdvanceAgent === 'requirement-analyst', String(d.preAdvanceAgent))
+  ok('给出 preAdvancePrompt', typeof d.preAdvancePrompt === 'string' && d.preAdvancePrompt.length > 0)
+  ok('prompt 要求更新 AC', /acceptance-criteria\.json/.test(d.preAdvancePrompt || ''))
+  ok('prompt 要求更新需求文档', /requirement-analysis\.md/.test(d.preAdvancePrompt || ''))
+  ok('prompt 不改 open-questions.json', /不改 open-questions\.json/.test(d.preAdvancePrompt || ''))
+  ok('prompt 明确不自行推进', /不要执行推进命令/.test(d.preAdvancePrompt || ''))
+  ok('advanceCommand 仍在', /advance-phase\.js/.test(d.advanceCommand || ''), d.advanceCommand)
+
+  // 15b. 无待确认项（questions 为空）→ 不需要回写，走常规推进指令
+  writePhase0Story('OQ-15B', [])
+  const d2 = dispatch('OQ-15B')
+  ok('无待确认项时不给前置动作', d2.readyToAdvance === true && d2.preAdvanceAgent === null && d2.preAdvancePrompt === null,
+    JSON.stringify({ agent: d2.preAdvanceAgent, prompt: d2.preAdvancePrompt }))
+
+  // 15c. 仍有未确认项 → 走 A0 blocked，不出现回写指令
+  writePhase0Story('OQ-15C', [
+    { id: 'Q-1', question: '未确认项', resolution: '建议稿' }
+  ])
+  const d3 = dispatch('OQ-15C')
+  ok('未全部确认 → blocked', d3.status === 'blocked', d3.status)
+  ok('blocked 输出不含前置动作', d3.preAdvanceAgent === null && d3.preAdvancePrompt === null,
+    JSON.stringify({ agent: d3.preAdvanceAgent, prompt: d3.preAdvancePrompt }))
+}
+
 summarize(sandbox)
