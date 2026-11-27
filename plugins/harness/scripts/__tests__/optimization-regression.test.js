@@ -200,6 +200,46 @@ ok('fix-loop prompt 含 issue 清单', flp.includes('FIX-01') && flp.includes('s
 ok('fix-loop prompt 含窄范围约束', /仅修复以上列出的文件/.test(flp))
 ok('fix-loop prompt 的修复请求为绝对路径', /[A-Za-z]:[\\/].*fix-request\.json/.test(flp))
 
+// fix-request 下传 code-review 的 reason（根因分析），修复者不必回翻审查报告全文
+const { extractFixIssuesFromReview } = require(path.join(SCRIPTS_DIR, 'commands/phase-ops/fix-loop'))
+fs.writeFileSync(path.join(storyDir('OPT-INC'), 'code-review.json'), JSON.stringify({
+  storyId: 'OPT-INC',
+  summary: { blockerCount: 1, warningCount: 0, suggestionCount: 0 },
+  issues: [{
+    id: 'B1',
+    severity: 'BLOCKER',
+    file: 'src/a.vue',
+    line: 10,
+    title: '角标回退',
+    description: '累加后被写回 1',
+    suggestion: '改用自增',
+    reason: 'manualUnreadCounts 被覆盖为固定值 1',
+    status: 'open'
+  }]
+}))
+const extracted = extractFixIssuesFromReview(storyDir('OPT-INC'))
+ok('extractFixIssuesFromReview 下传 reason', extracted.length === 1 && extracted[0].reason === 'manualUnreadCounts 被覆盖为固定值 1',
+  JSON.stringify(extracted))
+
+const flpWithReason = promptBuilder.buildFixLoopSpawnPrompt({
+  storyId: 'OPT-INC',
+  round: 1,
+  maxRounds: 2,
+  sourcePhase: 3,
+  issues: extracted,
+  affectedFiles: ['src/a.vue']
+})
+ok('fix-loop prompt 展示根因行', flpWithReason.includes('- 根因: manualUnreadCounts 被覆盖为固定值 1'), flpWithReason.slice(0, 500))
+const flpNoReason = promptBuilder.buildFixLoopSpawnPrompt({
+  storyId: 'OPT-INC',
+  round: 1,
+  maxRounds: 2,
+  sourcePhase: 3,
+  issues: [{ id: 'FIX-02', severity: 'BLOCKER', file: 'src/b.vue', line: '1', description: '描述', suggestion: '建议' }],
+  affectedFiles: ['src/b.vue']
+})
+ok('reason 缺失时不输出根因行', !flpNoReason.includes('- 根因:'))
+
 // Figma designSpec 只在 Phase 2 注入（与 buildFigmaAlignInstruction 的 Phase 过滤对齐）。
 // 此前无该过滤，代码审查 / 功能测试 / 发布的 prompt 都带着色值间距圆角，纯噪音
 const incP3 = promptBuilder.buildAgentPrompt({ storyId: 'OPT-INC', targetPhase: 3, summaryPhase: 2 })
@@ -532,6 +572,54 @@ ok('裁决改写后不残留旧裁决', !dcRead().includes('需要，二级审�
 dcSet([{ id: 'Q-1', question: '是否需要审批流?', resolution: '建议需要' }])
 ok('裁决清空后移除章节', contextRefresh.syncDecisionsToRequirementDoc('OPT-DC') === true)
 ok('裁决清空后无残留', !dcRead().includes('harness:decisions:start'))
+
+// ════════════════════════════════════════════════════════════
+section('12. 摘要段：maxLines 空转移除 + 契约清单解耦 + 门控理由投影')
+{
+  // 12a. 契约清单只由 targetPhase 决定，不受 summaryPhase 污染（fix_loop off-by-one 修复）
+  // 场景: Phase 3 审查挂了回退 Phase 2 修复 —— dispatch 传 summaryPhase=3、targetPhase=2
+  fs.mkdirSync(storyDir('OPT-CT'), { recursive: true })
+  writeState('OPT-CT', 3)
+  writeAC('OPT-CT')
+  const fixPb = promptBuilder.buildAgentPrompt({ storyId: 'OPT-CT', targetPhase: 2, summaryPhase: 3, scope: 'incremental' })
+  const contracts = fixPb.contractFilesToLoad || []
+  ok('fix_loop 契约清单含 Phase 2 的 task-dag', contracts.some(c => c.includes('task-dag.json')),
+    JSON.stringify(contracts))
+  ok('fix_loop 契约清单含 AC', contracts.some(c => c.includes('acceptance-criteria.json')),
+    JSON.stringify(contracts))
+  ok('fix_loop 契约清单不含 Phase 4 的 code-review（off-by-one 回归）',
+    !contracts.some(c => c.includes('code-review.json')), JSON.stringify(contracts))
+
+  // 12b. 门控失败理由从 trace 的 block 记录投影（唯一信源：state 不收录失败门控）
+  // 生产形态：state 只有通过的门控；失败记录只在 trace（advance-phase 失败分支 exit 前写 trace）
+  const trace = require(path.join(SCRIPTS_DIR, 'lib/trace'))
+  fs.mkdirSync(storyDir('OPT-TR'), { recursive: true })
+  writeState('OPT-TR', 1)
+  trace.appendTrace('OPT-TR', {
+    type: 'gate_decision',
+    phase: '1',
+    result: 'block',
+    reason: 'AC 缺 featurePoints',
+    details: { blockerCount: 1, warningCount: 0 }
+  })
+  trace.appendTrace('OPT-TR', {
+    type: 'gate_decision',
+    phase: '1',
+    result: 'pass',
+    reason: 'all passed',
+    details: { blockerCount: 0, warningCount: 0 }
+  })
+  const summaryPath = contextRefresh.generatePhaseSummary('OPT-TR', 1)
+  const summary = fs.readFileSync(summaryPath, 'utf-8')
+  ok('摘要投影 trace 的失败理由', summary.includes('AC 缺 featurePoints'), summary.slice(0, 400))
+  ok('失败理由标注 Phase 与门控失败', /Phase 1 门控失败理由:/.test(summary), summary.slice(0, 400))
+  ok('通过态 reason 不重复输出（all passed 噪声）', !summary.includes('all passed'), summary.slice(0, 400))
+
+  // 12c. loadLatestSummary 不再有 maxLines 截断分支（死参数已移除）
+  const loaded = contextRefresh.loadLatestSummary('OPT-TR', 1)
+  ok('loadLatestSummary 返回摘要全文', loaded && loaded.content.includes('AC 缺 featurePoints'))
+  ok('全文无截断提示（maxLines 已删）', !loaded.content.includes('已截取前'))
+}
 
 // ════════════════════════════════════════════════════════════
 summarize(sandbox)

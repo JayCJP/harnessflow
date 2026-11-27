@@ -47,7 +47,7 @@ const promptBuilder = require('../../services/prompt-builder')
  * 修复点可能在别的仓库（如落地页），fix-loop 需据此把受影响文件定位到正确仓库。
  *
  * @param {string} storyDir - Story 目录路径
- * @returns {Array<{id: string, severity: string, file: string, line: string, description: string, suggestion: string, project: string|undefined, repoPath: string|undefined}>}
+ * @returns {Array<{id: string, severity: string, file: string, line: string, description: string, suggestion: string, reason: string|undefined, project: string|undefined, repoPath: string|undefined}>}
  *   提取失败或无 open BLOCKER 时返回空数组
  */
 function extractFixIssuesFromReview (storyDir) {
@@ -66,6 +66,8 @@ function extractFixIssuesFromReview (storyDir) {
       line: b.line ? String(b.line) : '',
       description: b.title ? `${b.title}: ${b.description || ''}` : (b.description || ''),
       suggestion: b.suggestion || '',
+      // 根因分析随请求下传 —— 修复者据此定位，不必回翻 code-review.json 原文
+      reason: b.reason || undefined,
       project: b.project || undefined,
       repoPath: b.repoPath || undefined
     }))

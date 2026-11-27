@@ -634,6 +634,7 @@ function buildFixLoopSpawnPrompt (opts) {
   const issueList = issues.map(i =>
     `\n**${i.id}** [${i.severity}]${i.file ? ` \`${i.file}${i.line ? ':' + i.line : ''}\`` : ''}\n` +
     `- 问题: ${i.description}\n` +
+    (i.reason ? `- 根因: ${i.reason}\n` : '') +
     `- 建议: ${i.suggestion || '请根据上下文分析并修复'}\n`
   ).join('\n')
 
@@ -759,8 +760,12 @@ function buildAgentPrompt (opts) {
     ? opts.summaryInfo
     : contextRefresh.loadLatestSummary(storyId, summaryPhase)
 
-  // 契约文件（下个 Phase 需要读的）
-  const contractFilesToLoad = contextRefresh.getContractFiles(storyId, summaryPhase) || []
+  // 契约文件（targetPhase 需要读的）—— 唯一决定因素是「要进入的 Phase」，与摘要取哪个
+  // summaryPhase 无关。getContractFiles 内部取 phase+1 查表，故传 targetPhase-1。
+  // 旧版误传 summaryPhase：正常路径恰好等于 targetPhase-1 没事，但 fix_loop 分支传的是
+  // 当前被回退的 Phase（如 3），导致查到 baseContracts[4]（code-review.json）而非 Phase 2
+  // 开发者需要的 task-dag + AC。解耦后 fix_loop 传什么 summaryPhase 都不影响契约清单。
+  const contractFilesToLoad = contextRefresh.getContractFiles(storyId, targetPhase - 1) || []
   const contractContents = readContractContents(storyId, contractFilesToLoad)
 
   // 历史教训 + 度量洞察

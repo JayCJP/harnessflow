@@ -24,6 +24,7 @@
           "line": { "type": ["integer", "string"] },
           "description": { "type": "string", "minLength": 1 },
           "suggestion": { "type": "string" },
+          "reason": { "type": "string", "description": "问题根因分析（自 code-review.json 下传，供修复者定位）" },
           "acId": { "type": "string" }
         },
         "additionalProperties": true

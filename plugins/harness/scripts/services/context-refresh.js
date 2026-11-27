@@ -14,8 +14,6 @@
  *
  * 使用场景:
  *   - commands/advance-phase.js Phase 推进成功后调用 generatePhaseSummary 落盘本 Phase 摘要
- *   - hooks/session-start.js 会话启动时用 loadLatestSummary 恢复上一 Phase 摘要，
- *     :175 用 getContractFiles 列出已完成 Phase 的契约文件注入上下文
  *   - services/prompt-builder.js 构造 Agent prompt 时加载摘要与契约清单作为下一轮输入
  *   - 本模块 injectMustCheck 依赖 services/experience.js 的 getLessonsAsChecklist 取已确认失败模式
  *
@@ -69,7 +67,12 @@ function generatePhaseSummary (storyId, phase) {
     summaryLines.push(...getRuntimeEvidence(storyId, phase))
   }
 
-  // 关键决策（从 e2e-state 中提取）
+  // 关键决策（门控结论 + 失败理由）
+  // 门控结论（pass/fail + warnings）来自 e2e-state.gateValidationResults —— 它只收录
+  // **通过**的门控（advance-phase.js 失败分支直接 exit，不写 state），故 blockers 恒空。
+  // 「为什么卡」的唯一信源是 trace.jsonl 的 gate_decision(result='block')：失败分支在 exit
+  // 前已写 trace。只取 block（通过态 reason 是 'all passed' 或 warnings，与上面的 state
+  // 结论重复），补的是历史失败原因（§7 问题），不新增状态。
   summaryLines.push('', '## 关键决策', '')
   if (state.gateChecks && state.gateChecks.gateValidationResults) {
     const recentGates = state.gateChecks.gateValidationResults.filter(g => g.targetPhase <= phase + 1)
@@ -80,6 +83,12 @@ function generatePhaseSummary (storyId, phase) {
         summaryLines.push(`  - Warnings: ${g.warnings.join('; ')}`)
       }
     }
+  }
+  const blockReasons = readTrace(storyId)
+    .filter(e => e && e.type === 'gate_decision' && e.result === 'block' && Number(e.phase) === phase && e.reason)
+    .slice(-8)
+  for (const e of blockReasons) {
+    summaryLines.push(`- Phase ${e.phase} 门控失败理由: ${e.reason}`)
   }
 
   // 待确认项状态 — 口径与门控一致（v4：checkOpenQuestions 四态分类，消除同物两信源；
@@ -570,10 +579,9 @@ function getContractFiles (storyId, phase) {
  * 只加载编号不超过 currentPhase 的 summary（避免显示后续 Phase 的摘要）
  * @param {string} storyId - Story ID
  * @param {number} [currentPhase=Infinity] - 当前 Phase 编号，只取不超过此编号的 summary
- * @param {number} [maxLines=200] - 最大行数限制，防止 summary 过大占用过多上下文
  * @returns {{ content: string, phase: number, path: string }|null} summary 信息，不存在时返回 null
  */
-function loadLatestSummary (storyId, currentPhase = Infinity, maxLines = 200) {
+function loadLatestSummary (storyId, currentPhase = Infinity) {
   const storyDir = getStoryDir(storyId)
   if (!fs.existsSync(storyDir)) return null
 
@@ -594,20 +602,11 @@ function loadLatestSummary (storyId, currentPhase = Infinity, maxLines = 200) {
 
   if (files.length === 0) return null
 
-  // 读取最新的 summary（截取防止过大）
+  // 读取最新的 summary 全文
   const latestFile = files[0]
   const phaseNum = parseInt(latestFile.match(summaryRegex)[1], 10)
   const filePath = path.join(storyDir, latestFile)
-  const rawContent = fs.readFileSync(filePath, 'utf-8')
-
-  // 行数截取：超过 maxLines 时截断并添加提示
-  const lines = rawContent.split('\n')
-  let content
-  if (lines.length > maxLines) {
-    content = lines.slice(0, maxLines).join('\n') + `\n\n> ⚠️ summary 已截取前 ${maxLines} 行，完整内容见 ${latestFile}`
-  } else {
-    content = rawContent
-  }
+  const content = fs.readFileSync(filePath, 'utf-8')
 
   return { content, phase: phaseNum, path: filePath }
 }

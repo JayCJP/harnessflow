@@ -3,7 +3,7 @@
  *
  * 职责:
  *   - ARTIFACT: story 目录内全部产出物的文件名常量表（契约 JSON / 文档 md / 日志 jsonl）
- *   - 动态命名的产出物由函数生成（phaseSummary / archiveRoundDir）
+ *   - 动态命名的产出物由函数生成（archiveRoundDir）
  *   - 统一读取: readJson / readText / readJsonl，容错口径一处定义
  *
  * 用法:
@@ -75,15 +75,6 @@ const HARNESS_ACTIVE_FLAG = path.join(PLANS_DIR, '.harness-active')
 const ARCHIVE_DIR = 'archive'
 
 /**
- * Phase 摘要文件名（动态编号）
- * @param {number} phase - Phase 序号
- * @returns {string} 形如 phase-2-summary.md
- */
-function phaseSummary (phase) {
-  return `phase-${phase}-summary.md`
-}
-
-/**
  * 归档轮次目录的绝对路径
  * @param {string} storyId - Story ID
  * @param {number} round - 归档轮次
@@ -96,7 +87,7 @@ function archiveRoundDir (storyId, round) {
 /**
  * 产出物绝对路径
  * @param {string} storyId - Story ID
- * @param {string} fileName - 文件名，取自 ARTIFACT 或 phaseSummary()
+ * @param {string} fileName - 文件名，取自 ARTIFACT
  * @param {number} [round] - 归档轮次；传入时指向归档副本而非当前文件
  * @returns {string} 绝对路径
  */
@@ -173,7 +164,6 @@ module.exports = {
   ARTIFACT,
   HARNESS_ACTIVE_FLAG,
   ARCHIVE_DIR,
-  phaseSummary,
   archiveRoundDir,
   artifactPath,
   readJson,
