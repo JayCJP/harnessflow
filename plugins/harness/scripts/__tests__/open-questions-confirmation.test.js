@@ -418,6 +418,10 @@ section('11. 摘要口径与 checkOpenQuestions 一致（消除同物两信源�
     summary.split('\n').filter(l => l.includes('确认')).join(' | '))
   ok('摘要「待用户确认」计数与 checkOpenQuestions 一致',
     summary.includes(`- 待用户确认: ${c.pendingConfirmation.length} 项`) && summary.includes('Q-2'))
+
+  // Phase 0 摘要的契约清单 = Phase 1 的输入（需求文档 + AC），不得列 Phase 1 的产出物 task-dag.json
+  ok('Phase 0 摘要契约清单含需求文档', summary.includes('requirement-analysis.md'))
+  ok('Phase 0 摘要契约清单不含尚未生成的 task-dag', !summary.includes('task-dag.json'), summary.slice(-300))
 }
 
 // ────────────────────────────────────────────────────────────────

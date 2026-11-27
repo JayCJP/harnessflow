@@ -535,7 +535,10 @@ function getContractFiles (storyId, phase) {
   const nextPhase = phase + 1
   const storyDir = getStoryDir(storyId)
   const baseContracts = {
-    1: ['.codebuddy/plans/' + storyId + '/acceptance-criteria.json', '.codebuddy/plans/' + storyId + '/task-dag.json'],
+    // Phase 1（任务规划）的输入 = Phase 0 的产出：需求文档 + AC。
+    // 不得列 task-dag.json —— 它是 Phase 1 自己的产出物，此刻尚未生成。
+    // 列它会让 Phase 0 摘要的「供下个 Agent 加载」清单出现一个不存在的文件。
+    1: ['.codebuddy/plans/' + storyId + '/requirement-analysis.md', '.codebuddy/plans/' + storyId + '/acceptance-criteria.json'],
     2: ['.codebuddy/plans/' + storyId + '/task-dag.json', '.codebuddy/plans/' + storyId + '/acceptance-criteria.json'],
     3: ['.codebuddy/plans/' + storyId + '/acceptance-criteria.json'],
     // Phase 4（Git 提交）读 code-review.json —— AC 核对结论已并入该产物，提交前据此确认审查通过
